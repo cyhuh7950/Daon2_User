@@ -1,0 +1,10 @@
+pluginManagement {
+    def mobilePlugin = file("../node_modules/@react-native/gradle-plugin")
+    includeBuild((mobilePlugin.exists() ? mobilePlugin : file("../../../node_modules/@react-native/gradle-plugin")).canonicalPath)
+}
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'Daon'
+include ':app'
+def mobilePlugin = file('../node_modules/@react-native/gradle-plugin')
+includeBuild((mobilePlugin.exists() ? mobilePlugin : file('../../../node_modules/@react-native/gradle-plugin')).canonicalPath)

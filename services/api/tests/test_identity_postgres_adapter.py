@@ -1,0 +1,152 @@
+from daon2_user_api.identity_postgres import (
+    PostgresIdentityRepository,
+    _CursorProxy,
+    _PostgresCompatConnection,
+)
+from daon2_user_api.postgres_adapters import PostgresCompatConnection, _compat_row
+import psycopg
+
+
+def test_sql_maps_identity_tables_and_placeholders() -> None:
+    statement = "INSERT OR IGNORE INTO users(user_id) VALUES (?)"
+    mapped = _PostgresCompatConnection._sql(statement)
+    assert "identity_users" in mapped
+    assert "%s" in mapped
+    assert "ON CONFLICT DO NOTHING" in mapped
+
+
+def test_sql_maps_bootstrap_marker_and_password_change_state() -> None:
+    marker = _PostgresCompatConnection._sql(
+        "SELECT marker_key FROM bootstrap_state WHERE marker_key=?"
+    )
+    forced_state = _PostgresCompatConnection._sql(
+        "UPDATE users SET password_change_required=FALSE WHERE user_id=?"
+    )
+
+    assert marker == (
+        "SELECT marker_key FROM identity_bootstrap_state WHERE marker_key=%s"
+    )
+    assert forced_state == (
+        "UPDATE identity_users SET password_change_required=FALSE WHERE user_id=%s"
+    )
+
+
+def test_sql_rewrites_reserved_authorization_alias_for_postgres() -> None:
+    mapped = _PostgresCompatConnection._sql(
+        "SELECT authorization.authorization_digest "
+        "FROM step_up_authorizations AS authorization "
+        "WHERE authorization.step_up_id=?"
+    )
+
+    assert "AS authorization_row" in mapped
+    assert "authorization_row.authorization_digest" in mapped
+    assert "authorization_row.step_up_id=%s" in mapped
+    assert " AS authorization " not in mapped
+
+
+def test_postgres_identity_state_maps_public_suspended_to_existing_disabled_value() -> None:
+    repository = PostgresIdentityRepository.__new__(PostgresIdentityRepository)
+
+    assert repository.user_state_for_storage("suspended") == "disabled"
+    assert repository.user_state_for_api("disabled") == "suspended"
+    assert repository.user_state_for_storage("active") == "active"
+
+
+def test_sql_maps_begin_immediate() -> None:
+    assert _PostgresCompatConnection._sql("BEGIN IMMEDIATE") == "BEGIN"
+
+
+def test_identity_connection_exposes_sqlite_transaction_state() -> None:
+    connection = _PostgresCompatConnection.__new__(_PostgresCompatConnection)
+
+    class Info:
+        transaction_status = psycopg.pq.TransactionStatus.IDLE
+
+    class FakeConnection:
+        info = Info()
+
+    connection._connection = FakeConnection()
+    assert connection.in_transaction is False
+
+
+def test_postgres_rows_support_mapping_and_positional_access() -> None:
+    class Cursor:
+        def fetchone(self):
+            return {"tenant_id": "tenant-1", "state": "active"}
+
+        def fetchall(self):
+            return [{"tenant_id": "tenant-1"}]
+
+        def __iter__(self):
+            return iter(self.fetchall())
+
+    cursor = _CursorProxy(Cursor())
+    row = cursor.fetchone()
+    assert row["tenant_id"] == "tenant-1"
+    assert row[0] == "tenant-1"
+    assert cursor.fetchall()[0][0] == "tenant-1"
+
+
+def test_authorization_sql_uses_isolated_tables() -> None:
+    connection = PostgresCompatConnection.__new__(PostgresCompatConnection)
+    connection._prefixes = ("auth_",)
+    mapped = connection._sql("SELECT * FROM auth_workspaces WHERE workspace_id=?")
+    assert "identity_auth_workspaces" in mapped
+    assert "%s" in mapped
+
+
+def test_organization_sql_uses_isolated_tables() -> None:
+    connection = PostgresCompatConnection.__new__(PostgresCompatConnection)
+    connection._prefixes = ("organization_",)
+    mapped = connection._sql("INSERT INTO organization_idempotency(operation) VALUES (?)")
+    assert "identity_org_idempotency" in mapped
+    assert "%s" in mapped
+
+
+def test_organization_history_uses_exact_existing_physical_table() -> None:
+    connection = PostgresCompatConnection.__new__(PostgresCompatConnection)
+    connection._prefixes = ("organization_",)
+    assert connection._sql(
+        "INSERT INTO tenant_membership_role_history VALUES (?,?,?,?,?,?,?,?,?,?)"
+    ) == "INSERT INTO identity_org_role_history VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    assert connection._sql(
+        "SELECT h.* FROM tenant_membership_role_history h "
+        "JOIN tenant_memberships m ON h.tenant_id=m.tenant_id WHERE h.user_id=?"
+    ) == (
+        "SELECT h.* FROM identity_org_role_history h "
+        "JOIN identity_org_tenant_memberships m ON h.tenant_id=m.tenant_id WHERE h.user_id=%s"
+    )
+    for logical, physical in (
+        ("organization_creation_requests", "identity_org_creation_requests"),
+        ("invitation_codes", "identity_org_invitation_codes"),
+        ("organization_join_requests", "identity_org_join_requests"),
+        ("tenant_memberships", "identity_org_tenant_memberships"),
+        ("organization_idempotency", "identity_org_idempotency"),
+    ):
+        assert connection._sql(f"SELECT * FROM {logical} WHERE tenant_id=?") == (
+            f"SELECT * FROM {physical} WHERE tenant_id=%s"
+        )
+
+
+def test_c9_auth_mapping_is_unchanged_by_organization_history_mapping() -> None:
+    connection = PostgresCompatConnection.__new__(PostgresCompatConnection)
+    connection._prefixes = ("auth_",)
+    assert connection._sql(
+        "SELECT m.role,w.acl_version FROM auth_memberships m "
+        "JOIN auth_workspaces w ON m.workspace_id=w.workspace_id WHERE m.tenant_id=?"
+    ) == (
+        "SELECT m.role,w.acl_version FROM identity_auth_memberships m "
+        "JOIN identity_auth_workspaces w ON m.workspace_id=w.workspace_id WHERE m.tenant_id=%s"
+    )
+    assert connection._sql(
+        "INSERT OR IGNORE INTO auth_admin_role_audit_outbox(event_id) VALUES (?)"
+    ) == "INSERT INTO identity_auth_admin_role_audit_outbox(event_id) VALUES (%s) ON CONFLICT DO NOTHING"
+    assert connection._sql("SELECT * FROM tenant_membership_role_history WHERE tenant_id=?") == (
+        "SELECT * FROM tenant_membership_role_history WHERE tenant_id=%s"
+    )
+
+
+def test_shared_postgres_rows_support_positional_access() -> None:
+    row = _compat_row({"workspace_id": "workspace-1", "state": "active"})
+    assert row["workspace_id"] == "workspace-1"
+    assert row[0] == "workspace-1"

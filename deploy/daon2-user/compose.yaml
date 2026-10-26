@@ -1,0 +1,219 @@
+name: ${COMPOSE_PROJECT_NAME:?isolated project name required}
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    environment:
+      DAON_RUNTIME_PROFILE: ${DAON_RUNTIME_PROFILE-production}
+      DAON_API_BIND_HOST: 0.0.0.0
+      DAON_API_PORT: 8000
+      DAON_API_DATABASE_PATH: /var/lib/daon2-user/runtime.sqlite3
+      DAON_CLOUD_DATABASE_DSN: ${DAON_CLOUD_DATABASE_DSN:?cloud database DSN reference required}
+      DAON_DEV_AUTH_BYPASS: ${DAON_DEV_AUTH_BYPASS-false}
+      DAON_ORGANIZATION_ADMIN_V2_ENABLED: ${DAON_ORGANIZATION_ADMIN_V2_ENABLED-false}
+      DAON_NOTIFICATION_INBOX_ENABLED: ${DAON_NOTIFICATION_INBOX_ENABLED-false}
+      DAON_STUDIO_V2_ENABLED: ${DAON_STUDIO_V2_ENABLED-false}
+      DAON_KNOWLEDGE_CONNECTORS_ENABLED: ${DAON_KNOWLEDGE_CONNECTORS_ENABLED-false}
+      DAON_MCP_ALLOW_PRIVATE_ENDPOINTS: ${DAON_MCP_ALLOW_PRIVATE_ENDPOINTS-false}
+      DAON_DOCUMENT_WORKER_ID: ${COMPOSE_PROJECT_NAME}-document-worker
+      DAON_ANDROID_AUTH_CLIENTS_JSON:
+      DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID: ${DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID-}
+      DAON_SYSTEM_ADMIN_USER_IDS: ${DAON_SYSTEM_ADMIN_USER_IDS-admin}
+      DAON_PUBLIC_GATEWAY_URL: ${DAON_PUBLIC_GATEWAY_URL:?public HTTPS gateway required}
+      DAON_TRUSTED_PROXY_IPS: ${DAON_TRUSTED_PROXY_IPS:?trusted proxy IPs required}
+      DAON_OBJECT_STORAGE_ENDPOINT: ${DAON_OBJECT_STORAGE_ENDPOINT:?object storage endpoint required}
+      DAON_OBJECT_STORAGE_BUCKET: ${DAON_OBJECT_STORAGE_BUCKET:?object storage bucket required}
+      DAON_OBJECT_STORAGE_SECURE: ${DAON_OBJECT_STORAGE_SECURE-true}
+      DAON_OBJECT_STORAGE_PROVISION_BUCKET: true
+      DAON_SMTP_HOST: ${DAON_SMTP_HOST-}
+      DAON_SMTP_PORT: ${DAON_SMTP_PORT-587}
+      DAON_SMTP_USERNAME: ${DAON_SMTP_USERNAME-}
+      DAON_SMTP_PASSWORD: ${DAON_SMTP_PASSWORD-}
+      DAON_SMTP_SECURE: ${DAON_SMTP_SECURE-true}
+      DAON_EMAIL_FROM: ${DAON_EMAIL_FROM-}
+      LLM_DATA_REGION: ${LLM_DATA_REGION-}
+      LLM_EXTERNAL_EGRESS_APPROVED: ${LLM_EXTERNAL_EGRESS_APPROVED-false}
+      DAON_OBJECT_ACCESS_KEY_FILE: /run/secrets/object_access_key
+      DAON_OBJECT_SECRET_KEY_FILE: /run/secrets/object_secret_key
+      DAON_RECOVERY_MANIFEST_KEY_FILE: /run/secrets/recovery_manifest_key
+      DAON_STEP_UP_TOKEN_KEY_FILE: /run/secrets/step_up_token_key
+      DAON_PROVIDER_CREDENTIAL_KEY_FILE: /run/secrets/provider_credential_key
+      DAON_TTS_CONFIG_FILE: /run/secrets/tts_engines
+    secrets:
+      - object_access_key
+      - object_secret_key
+      - recovery_manifest_key
+      - step_up_token_key
+      - provider_credential_key
+      - tts_engines
+    volumes:
+      - daon2_user_api_runtime:/var/lib/daon2-user
+    networks:
+      - daon2_user
+      - proxy-network
+    depends_on:
+      object-storage:
+        condition: service_healthy
+    restart: unless-stopped
+
+  object-storage:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command:
+      - server
+      - /data
+      - --console-address
+      - ":9001"
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/object_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/object_secret_key
+    secrets:
+      - object_access_key
+      - object_secret_key
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:9000/minio/health/live || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - daon2_user_object_storage:/data
+    networks:
+      - daon2_user
+    restart: unless-stopped
+
+  document-worker:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    command: ["python", "-m", "daon2_user_api.document_processing_worker"]
+    environment:
+      DAON_CLOUD_DATABASE_DSN: ${DAON_CLOUD_DATABASE_DSN:?cloud database DSN reference required}
+      DAON_OBJECT_STORAGE_ENDPOINT: ${DAON_OBJECT_STORAGE_ENDPOINT:?object storage endpoint required}
+      DAON_OBJECT_STORAGE_BUCKET: ${DAON_OBJECT_STORAGE_BUCKET:?object storage bucket required}
+      DAON_OBJECT_STORAGE_SECURE: ${DAON_OBJECT_STORAGE_SECURE-true}
+      DAON_OBJECT_ACCESS_KEY_FILE: /run/secrets/object_access_key
+      DAON_OBJECT_SECRET_KEY_FILE: /run/secrets/object_secret_key
+      DAON_PROVIDER_CREDENTIAL_KEY_FILE: /run/secrets/provider_credential_key
+      DAON_DOCUMENT_WORKER_ID: ${COMPOSE_PROJECT_NAME}-document-worker
+      DAON_NOTIFICATION_INBOX_ENABLED: ${DAON_NOTIFICATION_INBOX_ENABLED-false}
+      DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID: ${DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID-}
+      DAON_DOCUMENT_WORKER_LEASE_SECONDS: ${DAON_DOCUMENT_WORKER_LEASE_SECONDS-600}
+      DAON_DOCUMENT_WORKER_POLL_SECONDS: ${DAON_DOCUMENT_WORKER_POLL_SECONDS-0.5}
+      LLM_DATA_REGION: ${LLM_DATA_REGION-}
+      LLM_EXTERNAL_EGRESS_APPROVED: ${LLM_EXTERNAL_EGRESS_APPROVED-false}
+    secrets:
+      - object_access_key
+      - object_secret_key
+      - provider_credential_key
+    networks:
+      - daon2_user
+      - proxy-network
+    depends_on:
+      object-storage:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  studio-worker:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    command: ["python", "-m", "daon2_user_api.studio_generation_worker"]
+    environment:
+      DAON_CLOUD_DATABASE_DSN: ${DAON_CLOUD_DATABASE_DSN:?cloud database DSN reference required}
+      DAON_STUDIO_WORKER_ID: studio-worker-1
+      DAON_NOTIFICATION_INBOX_ENABLED: ${DAON_NOTIFICATION_INBOX_ENABLED-false}
+      DAON_STUDIO_WORKER_LEASE_SECONDS: ${DAON_STUDIO_WORKER_LEASE_SECONDS-600}
+      DAON_STUDIO_WORKER_POLL_SECONDS: ${DAON_STUDIO_WORKER_POLL_SECONDS-0.5}
+    networks:
+      - daon2_user
+      - proxy-network
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  studio-v2-worker:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    command: ["python", "-m", "daon2_user_api.studio_v2_worker"]
+    environment:
+      DAON_CLOUD_DATABASE_DSN: ${DAON_CLOUD_DATABASE_DSN:?cloud database DSN reference required}
+      DAON_STUDIO_V2_ENABLED: ${DAON_STUDIO_V2_ENABLED-false}
+      DAON_KNOWLEDGE_CONNECTORS_ENABLED: ${DAON_KNOWLEDGE_CONNECTORS_ENABLED-false}
+      DAON_MCP_ALLOW_PRIVATE_ENDPOINTS: ${DAON_MCP_ALLOW_PRIVATE_ENDPOINTS-false}
+      DAON_STUDIO_V2_WORKER_ID: ${COMPOSE_PROJECT_NAME}-studio-v2-worker-1
+      DAON_STUDIO_V2_LEASE_SECONDS: ${DAON_STUDIO_V2_LEASE_SECONDS-900}
+      DAON_STUDIO_V2_POLL_SECONDS: ${DAON_STUDIO_V2_POLL_SECONDS-0.5}
+      DAON_STUDIO_V2_USER_CONCURRENCY: ${DAON_STUDIO_V2_USER_CONCURRENCY-2}
+      DAON_STUDIO_V2_GLOBAL_CONCURRENCY: ${DAON_STUDIO_V2_GLOBAL_CONCURRENCY-4}
+      DAON_PROVIDER_CREDENTIAL_KEY_FILE: /run/secrets/provider_credential_key
+      DAON_TTS_CONFIG_FILE: /run/secrets/tts_engines
+      DAON_STUDIO_V2_CONTEXT_CHARS: ${DAON_STUDIO_V2_CONTEXT_CHARS-16000}
+    mem_limit: 768m
+    cpus: 1.0
+    secrets:
+      - provider_credential_key
+      - tts_engines
+    networks:
+      - daon2_user
+      - proxy-network
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3330
+      DAON_RUNTIME_PROFILE: production
+      DAON_BFF_PROFILE: ${DAON_BFF_PROFILE-production}
+      DAON_API_INTERNAL_URL: ${DAON_API_INTERNAL_URL:?server-side BFF API URL required}
+      DAON_QA_ASR_BASE_URL: ${DAON_QA_ASR_BASE_URL-http://asr-base:8080}
+      DAON_PUBLIC_GATEWAY_URL: ${DAON_WEB_PUBLIC_GATEWAY_URL:?web public gateway required}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${DAON_WEB_HOST_PORT:?web host port required}:3330"
+    networks:
+      daon2_user: {}
+      proxy-network:
+        aliases:
+          - daon2-user-web
+    restart: unless-stopped
+
+networks:
+  daon2_user:
+    name: ${COMPOSE_PROJECT_NAME}_network
+  proxy-network:
+    external: true
+    name: proxy-network
+
+volumes:
+  daon2_user_api_runtime:
+    name: ${COMPOSE_PROJECT_NAME}_api_runtime
+  daon2_user_object_storage:
+    name: ${COMPOSE_PROJECT_NAME}_object_storage
+
+secrets:
+  object_access_key:
+    file: ${DAON_OBJECT_ACCESS_KEY_FILE:?object access key reference required}
+  object_secret_key:
+    file: ${DAON_OBJECT_SECRET_KEY_FILE:?object secret key reference required}
+  recovery_manifest_key:
+    file: ${DAON_RECOVERY_MANIFEST_KEY_FILE:?recovery manifest key reference required}
+  step_up_token_key:
+    file: ${DAON_STEP_UP_TOKEN_KEY_FILE:?step-up token key reference required}
+  provider_credential_key:
+    file: ${DAON_PROVIDER_CREDENTIAL_KEY_FILE:?provider credential key reference required}
+  # 선택 가능한 TTS 엔진 설정(WO-F7). 기본은 비활성(엔진 없음) 파일이며, 켜려면 키가 든 JSON 파일 경로를 지정한다.
+  tts_engines:
+    file: ${DAON_TTS_ENGINES_FILE:-./tts-engines.disabled.json}

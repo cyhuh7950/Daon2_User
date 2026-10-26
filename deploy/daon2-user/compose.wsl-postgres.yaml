@@ -1,0 +1,29 @@
+services:
+  api:
+    # WSL 호스트의 로컬 Gateway를 컨테이너에서도 안정적인 이름으로 접근한다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # WSL 통합 QA는 사설 IP의 HTTP로 접근한다. 운영 Compose는 HTTPS 강제를 유지한다.
+      DAON_ALLOW_PRIVATE_HTTP_GATEWAY: "true"
+      # 개발·WSL QA에서는 인수테스트 전까지 라이선스 없이 모든 기능을 검증한다.
+      DAON_DEVELOPMENT_STAGE: "true"
+    networks:
+      - postgres_env_default
+  document-worker:
+    networks:
+      - postgres_env_default
+  studio-worker:
+    networks:
+      - postgres_env_default
+
+  web:
+    environment:
+      # WSL 통합 QA는 사설 IP의 HTTP Origin을 사용한다.
+      DAON_RUNTIME_PROFILE: wsl_http_qa
+      DAON_BFF_PROFILE: wsl_http_qa
+
+networks:
+  postgres_env_default:
+    external: true
+    name: postgres_env_default

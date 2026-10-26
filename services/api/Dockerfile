@@ -1,0 +1,25 @@
+FROM python:3.14-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+COPY services/api/src ./src
+COPY scripts/import-provider-credentials.py ./scripts/import-provider-credentials.py
+RUN pip install --no-cache-dir \
+    alembic==1.18.5 \
+    cryptography==50.0.0 \
+    fastapi==0.139.2 \
+    httpx==0.28.1 \
+    imageio-ffmpeg==0.6.0 \
+    lameenc==1.9.0 \
+    minio==7.2.20 \
+    pillow==12.3.0 \
+    'psycopg[binary,pool]==3.3.4' \
+    reportlab==4.4.9 \
+    uvicorn==0.51.0
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+ENV DAON_API_BIND_HOST=0.0.0.0
+ENV DAON_API_PORT=8000
+EXPOSE 8000
+HEALTHCHECK --interval=10s --timeout=3s --retries=6 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)"
+CMD ["python", "-m", "daon2_user_api"]

@@ -1,0 +1,23 @@
+docs/manual/**/*.md text eol=lf
+docs/manual/**/*.json text eol=lf
+apps/web/public/manual/*.md text eol=lf
+apps/web/public/manual/*.json text eol=lf
+vendor/braces/** text eol=lf
+scripts/tests/postcss-successor-package*.json text eol=lf
+
+# Deployment and DB-pinned sources must stay LF on every platform
+# (migration SQL bodies are hash-pinned; CR bytes change the function hashes).
+*.py text eol=lf
+*.sql text eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.toml text eol=lf
+*.rs text eol=lf
+Dockerfile text eol=lf

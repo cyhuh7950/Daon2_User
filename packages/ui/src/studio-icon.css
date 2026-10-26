@@ -1,0 +1,57 @@
+/* Studio 아이콘 색 토큰과 기본 스타일.
+   강조색은 다크/라이트 배경에서 모두 WCAG 비텍스트 대비 3:1 이상이 되도록 정했다(자동 검증은 studio-icon.test.mjs). */
+:root {
+  --studio-accent-audio: #2f6fdd;
+  --studio-accent-slides: #d9406b;
+  --studio-accent-video: #138a5c;
+  --studio-accent-mindmap: #7a4fe0;
+  --studio-accent-report: #b83bd6;
+  --studio-accent-flashcards: #a87a00;
+  --studio-accent-quiz: #0a86a8;
+  --studio-accent-infographic: #c76a00;
+  --studio-accent-table: #3b66d8;
+  --studio-accent-memo: #55607a;
+}
+
+:root[data-theme="dark"] {
+  --studio-accent-audio: #7aa7ff;
+  --studio-accent-slides: #ff7a9c;
+  --studio-accent-video: #4be3a0;
+  --studio-accent-mindmap: #b794ff;
+  --studio-accent-report: #e48aff;
+  --studio-accent-flashcards: #ffd45e;
+  --studio-accent-quiz: #4fd2f0;
+  --studio-accent-infographic: #ffb347;
+  --studio-accent-table: #7b9dff;
+  --studio-accent-memo: #c3cadb;
+}
+
+.studio-icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+  color: inherit;
+}
+
+.studio-icon--accent-audio { color: var(--studio-accent-audio); }
+.studio-icon--accent-slides { color: var(--studio-accent-slides); }
+.studio-icon--accent-video { color: var(--studio-accent-video); }
+.studio-icon--accent-mindmap { color: var(--studio-accent-mindmap); }
+.studio-icon--accent-report { color: var(--studio-accent-report); }
+.studio-icon--accent-flashcards { color: var(--studio-accent-flashcards); }
+.studio-icon--accent-quiz { color: var(--studio-accent-quiz); }
+.studio-icon--accent-infographic { color: var(--studio-accent-infographic); }
+.studio-icon--accent-table { color: var(--studio-accent-table); }
+.studio-icon--accent-memo { color: var(--studio-accent-memo); }
+
+.studio-icon--spinner {
+  animation: studio-icon-spin 0.9s linear infinite;
+}
+
+@keyframes studio-icon-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-icon--spinner { animation: none; }
+}

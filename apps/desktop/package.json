@@ -1,0 +1,23 @@
+{
+  "name": "@daon2-user/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "sidecar:build": "node ../../scripts/build-local-service-sidecar.mjs",
+    "tauri": "tauri",
+    "tauri:build": "npm run sidecar:build && tauri build --bundles nsis"
+  },
+  "dependencies": {
+    "@daon2-user/contracts": "0.0.0",
+    "@daon2-user/design-tokens": "0.0.0",
+    "@daon2-user/ui": "0.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "vite": "8.2.2"
+  }
+}

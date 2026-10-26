@@ -1,0 +1,1 @@
+{"name":"@daon2-user/web","version":"0.0.0","private":true,"type":"module","scripts":{"dev":"next dev","build":"next build && node ../../scripts/verify-product-ui-boundary.mjs --target web","start":"next start"},"dependencies":{"@daon2-user/contracts":"0.0.0","@daon2-user/design-tokens":"0.0.0","@daon2-user/ui":"0.0.0","next":"16.4.3","react":"19.2.8","react-dom":"19.2.8"}}

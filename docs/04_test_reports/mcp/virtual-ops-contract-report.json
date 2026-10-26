@@ -1,0 +1,63 @@
+{
+  "url": "http://172.29.0.10:8642/mcp",
+  "kind": "ops",
+  "passed": true,
+  "required_passed": 9,
+  "required_total": 9,
+  "results": [
+    {
+      "name": "discover/initialize",
+      "category": "discovery",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "계약 도구가 모두 있다",
+      "category": "discovery",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "모든 도구에 입출력 스키마가 있다",
+      "category": "schema",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "출력이 스키마를 따른다",
+      "category": "schema",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "인증 없이는 거부된다",
+      "category": "auth",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "잘못된 토큰은 거부된다",
+      "category": "auth",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "허용되지 않은 scope는 거부된다",
+      "category": "scope",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "같은 질의는 같은 결과(결정성)",
+      "category": "evidence",
+      "level": "required",
+      "passed": true
+    },
+    {
+      "name": "알 수 없는 도구는 오류",
+      "category": "errors",
+      "level": "required",
+      "passed": true
+    }
+  ]
+}

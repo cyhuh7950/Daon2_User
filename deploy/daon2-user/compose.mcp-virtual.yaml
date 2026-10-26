@@ -1,0 +1,48 @@
+# 가상 MCP 서버 2종(개발·시험 전용). daon2_user 스택과 같은 네트워크에 붙인다. 포트는 공개하지 않는다.
+#   docker compose -p daon2_user_mcp --env-file .env -f deploy/daon2-user/compose.mcp-virtual.yaml up -d --build
+services:
+  knowledge-rag-virtual:
+    build:
+      context: ../../services/mcp-virtual
+    environment:
+      MCP_VIRTUAL_KIND: rag
+      MCP_VIRTUAL_PORT: "8641"
+      MCP_VIRTUAL_PROTOCOL: ${MCP_VIRTUAL_RAG_PROTOCOL-2026-07-28}
+      MCP_VIRTUAL_FAULTS: ${MCP_VIRTUAL_FAULTS-false}
+      MCP_VIRTUAL_JWT_KEY_FILE: /run/secrets/mcp_virtual_jwt_key
+      MCP_VIRTUAL_ADMIN_TOKEN_FILE: /run/secrets/mcp_virtual_admin_token
+    secrets: [mcp_virtual_jwt_key, mcp_virtual_admin_token]
+    networks: [daon2_user]
+    mem_limit: 256m
+    cpus: 0.5
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  knowledge-ops-virtual:
+    build:
+      context: ../../services/mcp-virtual
+    environment:
+      MCP_VIRTUAL_KIND: ops
+      MCP_VIRTUAL_PORT: "8642"
+      MCP_VIRTUAL_PROTOCOL: ${MCP_VIRTUAL_OPS_PROTOCOL-2025-06-18}
+      MCP_VIRTUAL_FAULTS: ${MCP_VIRTUAL_FAULTS-false}
+      MCP_VIRTUAL_JWT_KEY_FILE: /run/secrets/mcp_virtual_jwt_key
+      MCP_VIRTUAL_ADMIN_TOKEN_FILE: /run/secrets/mcp_virtual_admin_token
+    secrets: [mcp_virtual_jwt_key, mcp_virtual_admin_token]
+    networks: [daon2_user]
+    mem_limit: 256m
+    cpus: 0.5
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+networks:
+  daon2_user:
+    external: true
+    name: daon2_user_network
+secrets:
+  mcp_virtual_jwt_key:
+    file: ${MCP_VIRTUAL_JWT_KEY_FILE:?virtual MCP JWT key file required}
+  mcp_virtual_admin_token:
+    file: ${MCP_VIRTUAL_ADMIN_TOKEN_FILE:?virtual MCP admin token file required}

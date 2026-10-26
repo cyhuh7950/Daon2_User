@@ -1,0 +1,2480 @@
+"""Identity, session, device and step-up domain core for Release 1 M4.
+
+The module deliberately stops at the verified OIDC-provider protocol and HTTP/cookie
+boundary.  It persists only digests of browser/native credentials and PKCE material.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+import sqlite3
+import smtplib
+from email.message import EmailMessage
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from pathlib import Path
+from threading import RLock
+from time import monotonic
+from typing import Callable, Iterator, Protocol
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+
+from .audit import ActorType, AuditDuplicateEventError, AuditEventDraft, AuditOutcome
+
+
+SCHEMA_VERSION = 6
+SELF_LOGOUT_DISPATCH_LIMIT = 32
+SELF_LOGOUT_DISPATCH_SECONDS = 0.25
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_HASHER = PasswordHasher()
+INITIAL_ADMIN_USER_ID = "admin"
+INITIAL_ADMIN_TENANT_ID = "admin"
+INITIAL_ADMIN_PASSWORD = "admin"
+INITIAL_ADMIN_BOOTSTRAP_MARKER = "initial_admin_v1"
+MAIL_REQUEST_COOLDOWN = timedelta(seconds=60)
+MAIL_REQUEST_WINDOW = timedelta(hours=1)
+MAIL_REQUEST_MAX_PER_WINDOW = 3
+OIDC_TRANSACTION_TTL = timedelta(minutes=5)
+ACCESS_TTL = timedelta(hours=1)
+# Web sessions are persistent until explicit logout.  The database contract
+# keeps a non-null timestamp, so use the representable UTC maximum rather than
+# applying the short-lived native access-token TTL to browser sessions.
+WEB_SESSION_EXPIRY = datetime.max.replace(tzinfo=timezone.utc)
+REFRESH_TTL = timedelta(days=30)
+DEFAULT_STEP_UP_TTL_SECONDS = 300
+MAX_STEP_UP_TTL_SECONDS = 600
+STEP_UP_TOKEN_KEY_ID = "daon-step-up-hmac"
+STEP_UP_TOKEN_KEY_VERSION = 1
+MINIMUM_STEP_UP_ACTION_GROUPS = frozenset(
+    {
+        "external_transfer",
+        "data_area_move",
+        "external_share_or_download",
+        "final_approval_or_knowledge_registration",
+        "organization_security_or_connector_policy_change",
+        "device_session_or_sync_key_revoke",
+        "permanent_delete_or_restore_rollback",
+    }
+)
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+class ClientKind(str, Enum):
+    WEB = "web"
+    NATIVE = "native"
+
+
+class DevicePlatform(str, Enum):
+    WEB = "web"
+    WINDOWS = "windows"
+    ANDROID = "android"
+    IOS = "ios"
+
+
+class IdentityError(RuntimeError):
+    """Stable, value-free error safe for an API error envelope."""
+
+    def __init__(self, code: str, http_status: int = 400) -> None:
+        self.code = code
+        self.http_status = http_status
+        super().__init__(code)
+
+
+@dataclass(frozen=True, slots=True)
+class OidcClientPolicy:
+    issuer: str
+    client_id: str
+    audience: str
+    redirect_uris: frozenset[str]
+    client_kind: ClientKind
+    tenant_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedOidcClaims:
+    verification_complete: bool
+    issuer: str
+    audience: str
+    subject: str
+    nonce: str
+    expires_at: datetime
+
+
+class VerifiedOidcProvider(Protocol):
+    def exchange_verified(
+        self,
+        *,
+        authorization_code: str,
+        code_verifier: str,
+        expected_code_challenge: str,
+        expected_issuer: str,
+        expected_audience: str,
+        expected_nonce_digest: str,
+        now: datetime,
+    ) -> VerifiedOidcClaims: ...
+
+
+@dataclass(frozen=True, slots=True)
+class OidcLoginStart:
+    transaction_id: str
+    state: str
+    nonce: str
+    code_verifier: str
+    code_challenge: str
+    code_challenge_method: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SessionCredentials:
+    access_token: str
+    refresh_token: str | None
+    user_id: str
+    session_id: str
+    device_id: str
+    tenant_id: str
+    client_kind: ClientKind
+    delivery: str
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityPrincipal:
+    user_id: str
+    session_id: str
+    device_id: str
+    tenant_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class IdentitySessionView:
+    principal: IdentityPrincipal
+    login_id: str | None
+    client_kind: ClientKind
+    expires_at: datetime
+    password_change_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StepUpGrant:
+    authorization: str
+    issued_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceRevocationEvent:
+    device_id: str
+    sync_key_revoke_required: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SessionRevocationEvent:
+    session_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentSessionLogoutEvent:
+    replayed: bool
+
+
+class EmailSender(Protocol):
+    def send(self, *, recipient: str, subject: str, body: str) -> None: ...
+
+
+class IdentityRow(Protocol):
+    def __getitem__(self, key: str) -> object: ...
+
+
+class SmtpEmailSender:
+    def __init__(self, *, host: str | None, port: int, username: str | None,
+                 password: str | None, sender: str | None, secure: bool) -> None:
+        self.host, self.port = host, port
+        self.username, self.password, self.sender, self.secure = username, password, sender, secure
+
+    @classmethod
+    def from_env(cls) -> "SmtpEmailSender":
+        return cls(
+            host=os.environ.get("DAON_SMTP_HOST"),
+            port=int(os.environ.get("DAON_SMTP_PORT", "587")),
+            username=os.environ.get("DAON_SMTP_USERNAME"),
+            password=os.environ.get("DAON_SMTP_PASSWORD"),
+            sender=os.environ.get("DAON_EMAIL_FROM"),
+            secure=os.environ.get("DAON_SMTP_SECURE", "true").lower() == "true",
+        )
+
+    def send(self, *, recipient: str, subject: str, body: str) -> None:
+        if not self.host or not self.sender:
+            raise IdentityError("EMAIL_DELIVERY_UNAVAILABLE", 503)
+        message = EmailMessage()
+        message["From"], message["To"], message["Subject"] = self.sender, recipient, subject
+        message.set_content(body)
+        try:
+            with smtplib.SMTP(self.host, self.port, timeout=10) as server:
+                if self.secure:
+                    server.starttls()
+                if self.username:
+                    server.login(self.username, self.password or "")
+                server.send_message(message)
+        except (OSError, smtplib.SMTPException) as error:
+            raise IdentityError("EMAIL_DELIVERY_UNAVAILABLE", 503) from error
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _opaque() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def _id(prefix: str) -> str:
+    return f"{prefix}-{secrets.token_urlsafe(18)}"
+
+
+def _iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
+def _dt(value: str) -> datetime:
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def _checked_text(value: object, *, opaque: bool = False) -> str:
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > 512:
+        raise IdentityError("INVALID_INPUT")
+    if any(ord(character) < 32 for character in value):
+        raise IdentityError("INVALID_INPUT")
+    if not opaque and not _SAFE_ID.fullmatch(value):
+        raise IdentityError("INVALID_INPUT")
+    return value
+
+
+def _checked_utc(value: datetime) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise IdentityError("INVALID_TIME")
+    return value.astimezone(timezone.utc)
+
+
+def _email(value: object) -> str:
+    if not isinstance(value, str) or value != value.strip() or len(value) > 320:
+        raise IdentityError("INVALID_INPUT")
+    normalized = value.strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+        raise IdentityError("INVALID_INPUT")
+    return normalized
+
+
+def _password(value: object) -> str:
+    if not isinstance(value, str) or len(value) < PASSWORD_MIN_LENGTH or len(value) > 256:
+        raise IdentityError("PASSWORD_POLICY_FAILED")
+    if any(ord(character) < 32 for character in value):
+        raise IdentityError("PASSWORD_POLICY_FAILED")
+    return value
+
+
+def is_protected_initial_admin_record(row: IdentityRow) -> bool:
+    """Return whether a persisted user is the one protected bootstrap identity."""
+    try:
+        return bool(
+            row["user_id"] == INITIAL_ADMIN_USER_ID
+            and row["issuer"] == "local"
+            and row["subject"] == INITIAL_ADMIN_USER_ID
+            and row["login_id"] == INITIAL_ADMIN_USER_ID
+            and row["email"] is None
+            and row["state"] == "active"
+            and row["password_digest"]
+            and row["password_change_required"] in (0, 1, False, True)
+        )
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def revoke_user_sessions(
+    connection: sqlite3.Connection, *, user_id: str, updated_at: datetime,
+) -> None:
+    """Revoke every access session and refresh family for one persisted user."""
+    connection.execute(
+        "UPDATE sessions SET state='revoked',updated_at=? WHERE user_id=?",
+        (_iso(updated_at), user_id),
+    )
+    connection.execute(
+        "UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id IN "
+        "(SELECT session_id FROM sessions WHERE user_id=?)",
+        (_iso(updated_at), user_id),
+    )
+
+
+class SqliteIdentityRepository:
+    """Injected-path, transactional SQLite adapter with restart-safe IAM state."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._lock = RLock()
+        self._closed = False
+        self._path = Path(path)
+        try:
+            connection = self._connect()
+            self._create_schema(connection)
+            connection.close()
+        except sqlite3.Error as error:
+            raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from error
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            str(self._path), isolation_level=None, check_same_thread=False
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = WAL")
+        return connection
+
+    def user_state_for_storage(self, state: str) -> str:
+        return state
+
+    def user_state_for_api(self, state: str) -> str:
+        return state
+
+    def _create_schema(self, connection: sqlite3.Connection) -> None:
+        schema = """
+        CREATE TABLE IF NOT EXISTS tenants (
+          tenant_id TEXT PRIMARY KEY
+        );
+        CREATE TABLE IF NOT EXISTS users (
+          user_id TEXT PRIMARY KEY,
+          issuer TEXT NOT NULL DEFAULT 'oidc',
+          subject TEXT NOT NULL,
+          login_id TEXT,
+          email TEXT,
+          password_digest TEXT,
+          email_verified_at TEXT,
+          password_change_required INTEGER NOT NULL DEFAULT 0,
+          state TEXT NOT NULL DEFAULT 'active',
+          UNIQUE(issuer, subject)
+        );
+        CREATE TABLE IF NOT EXISTS bootstrap_state (
+          marker_key TEXT PRIMARY KEY,
+          completed_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS email_verification_tokens (
+          token_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(user_id),
+          token_digest TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          token_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(user_id),
+          token_digest TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS memberships (
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          user_id TEXT NOT NULL REFERENCES users(user_id),
+          role TEXT NOT NULL,
+          PRIMARY KEY(tenant_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS devices (
+          device_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          user_id TEXT NOT NULL REFERENCES users(user_id),
+          platform TEXT NOT NULL,
+          state TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sessions (
+          session_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          user_id TEXT NOT NULL REFERENCES users(user_id),
+          device_id TEXT NOT NULL REFERENCES devices(device_id),
+          client_kind TEXT NOT NULL,
+          access_digest TEXT NOT NULL UNIQUE,
+          access_expires_at TEXT NOT NULL,
+          state TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS refresh_families (
+          family_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          state TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+          refresh_id TEXT PRIMARY KEY,
+          family_id TEXT NOT NULL REFERENCES refresh_families(family_id),
+          refresh_digest TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS session_audit_outbox (
+          event_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          action TEXT NOT NULL CHECK(action = 'identity.session.self_revoked'),
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          actor_id TEXT NOT NULL REFERENCES users(user_id),
+          occurred_at TEXT NOT NULL,
+          trace_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          delivered_at TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(session_id, action)
+        );
+        CREATE TABLE IF NOT EXISTS session_tenant_switch_outbox (
+          event_id TEXT PRIMARY KEY,
+          prior_session_id TEXT NOT NULL UNIQUE,
+          new_session_id TEXT NOT NULL UNIQUE,
+          prior_tenant_id TEXT NOT NULL,
+          target_tenant_id TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          outcome TEXT NOT NULL CHECK(outcome='succeeded'),
+          reason_code TEXT NOT NULL CHECK(reason_code='USER_SELECTED'),
+          occurred_at TEXT NOT NULL,
+          trace_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          delivered_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS admin_audit_outbox (
+          event_id TEXT PRIMARY KEY,
+          operation TEXT NOT NULL,
+          idempotency_scope TEXT,
+          request_fingerprint TEXT,
+          actor_id TEXT NOT NULL,
+          actor_type TEXT NOT NULL,
+          tenant_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          target_type TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          occurred_at TEXT NOT NULL,
+          trace_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          before_state TEXT,
+          after_state TEXT,
+          metadata_json TEXT NOT NULL,
+          delivered_at TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(operation, idempotency_scope)
+        );
+        CREATE TABLE IF NOT EXISTS oidc_transactions (
+          transaction_id TEXT PRIMARY KEY,
+          state_digest TEXT NOT NULL UNIQUE,
+          nonce_digest TEXT NOT NULL,
+          code_challenge TEXT NOT NULL,
+          issuer TEXT NOT NULL,
+          client_id TEXT NOT NULL,
+          audience TEXT NOT NULL,
+          redirect_uri TEXT NOT NULL,
+          client_kind TEXT NOT NULL,
+          tenant_id TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          used_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS android_auth_transactions (
+          transaction_id TEXT PRIMARY KEY,
+          client_id TEXT NOT NULL,
+          redirect_uri TEXT NOT NULL,
+          state TEXT NOT NULL,
+          code_challenge TEXT NOT NULL,
+          code_challenge_method TEXT NOT NULL CHECK(code_challenge_method='S256'),
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          code_digest TEXT UNIQUE,
+          code_expires_at TEXT,
+          user_id TEXT,
+          tenant_id TEXT,
+          authorized_at TEXT,
+          used_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS android_auth_transactions_expiry_idx
+          ON android_auth_transactions(expires_at);
+        CREATE TABLE IF NOT EXISTS tenant_step_up_actions (
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          action_group TEXT NOT NULL,
+          is_mandatory INTEGER NOT NULL,
+          PRIMARY KEY(tenant_id, action_group)
+        );
+        CREATE TABLE IF NOT EXISTS step_up_authorizations (
+          step_up_id TEXT PRIMARY KEY,
+          authorization_digest TEXT NOT NULL UNIQUE,
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          actor_id TEXT NOT NULL REFERENCES users(user_id),
+          session_id TEXT NOT NULL REFERENCES sessions(session_id),
+          device_id TEXT NOT NULL REFERENCES devices(device_id),
+          action_group TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          used_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS step_up_idempotency (
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          actor_id TEXT NOT NULL REFERENCES users(user_id),
+          idempotency_key TEXT NOT NULL,
+          request_fingerprint TEXT NOT NULL,
+          step_up_id TEXT NOT NULL REFERENCES step_up_authorizations(step_up_id),
+          authorization_digest TEXT NOT NULL,
+          action_group TEXT NOT NULL,
+          target_id TEXT NOT NULL,
+          policy_version TEXT NOT NULL,
+          key_id TEXT NOT NULL,
+          key_version INTEGER NOT NULL,
+          issued_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, actor_id, idempotency_key)
+        );
+        CREATE TABLE IF NOT EXISTS step_up_consumptions (
+          tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+          actor_id TEXT NOT NULL REFERENCES users(user_id),
+          operation TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          request_fingerprint TEXT NOT NULL,
+          step_up_id TEXT NOT NULL REFERENCES step_up_authorizations(step_up_id),
+          consumed_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, actor_id, operation, idempotency_key)
+        );
+        """
+        connection.executescript(schema)
+        connection.executescript(
+            """
+            CREATE TRIGGER IF NOT EXISTS session_audit_outbox_intent_immutable
+            BEFORE UPDATE OF event_id,session_id,action,tenant_id,actor_id,occurred_at,trace_id,policy_version,created_at
+            ON session_audit_outbox
+            BEGIN SELECT RAISE(ABORT, 'session_audit_outbox intent is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS session_audit_outbox_delivery_one_way
+            BEFORE UPDATE OF delivered_at ON session_audit_outbox
+            WHEN NOT (OLD.delivered_at IS NULL AND NEW.delivered_at IS NOT NULL)
+            BEGIN SELECT RAISE(ABORT, 'session_audit_outbox delivery is one-way'); END;
+            CREATE TRIGGER IF NOT EXISTS session_audit_outbox_delete_blocked
+            BEFORE DELETE ON session_audit_outbox
+            BEGIN SELECT RAISE(ABORT, 'session_audit_outbox delete is blocked'); END;
+            CREATE TRIGGER IF NOT EXISTS session_tenant_switch_outbox_intent_immutable
+            BEFORE UPDATE OF event_id,prior_session_id,new_session_id,prior_tenant_id,
+              target_tenant_id,actor_id,outcome,reason_code,occurred_at,trace_id,
+              policy_version,created_at ON session_tenant_switch_outbox
+            BEGIN SELECT RAISE(ABORT, 'session tenant switch intent is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS session_tenant_switch_outbox_delivery_one_way
+            BEFORE UPDATE OF delivered_at ON session_tenant_switch_outbox
+            WHEN NOT (OLD.delivered_at IS NULL AND NEW.delivered_at IS NOT NULL)
+            BEGIN SELECT RAISE(ABORT, 'session tenant switch delivery is one-way'); END;
+            CREATE TRIGGER IF NOT EXISTS session_tenant_switch_outbox_delete_blocked
+            BEFORE DELETE ON session_tenant_switch_outbox
+            BEGIN SELECT RAISE(ABORT, 'session tenant switch intent deletion is blocked'); END;
+            CREATE TRIGGER IF NOT EXISTS admin_audit_outbox_intent_immutable
+            BEFORE UPDATE OF event_id,operation,idempotency_scope,request_fingerprint,actor_id,
+              actor_type,tenant_id,action,target_type,target_id,occurred_at,trace_id,
+              policy_version,before_state,after_state,metadata_json,created_at
+            ON admin_audit_outbox
+            BEGIN SELECT RAISE(ABORT, 'admin_audit_outbox intent is immutable'); END;
+            CREATE TRIGGER IF NOT EXISTS admin_audit_outbox_delivery_one_way
+            BEFORE UPDATE OF delivered_at ON admin_audit_outbox
+            WHEN NOT (OLD.delivered_at IS NULL AND NEW.delivered_at IS NOT NULL)
+            BEGIN SELECT RAISE(ABORT, 'admin_audit_outbox delivery is one-way'); END;
+            CREATE TRIGGER IF NOT EXISTS admin_audit_outbox_delete_blocked
+            BEFORE DELETE ON admin_audit_outbox
+            BEGIN SELECT RAISE(ABORT, 'admin_audit_outbox delete is blocked'); END;
+            """
+        )
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(users)")}
+        for name, definition in (
+            ("login_id", "TEXT"), ("email", "TEXT"), ("password_digest", "TEXT"),
+            ("email_verified_at", "TEXT"), ("state", "TEXT NOT NULL DEFAULT 'active'"),
+            ("password_change_required", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in columns:
+                connection.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_login_id_unique ON users(login_id) WHERE login_id IS NOT NULL")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email) WHERE email IS NOT NULL")
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        from .account_settings import install_sqlite_account_schema
+        install_sqlite_account_schema(connection)
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise IdentityError("PERSISTENCE_UNAVAILABLE", 503)
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            self._ensure_open()
+            connection: sqlite3.Connection | None = None
+            try:
+                connection = self._connect()
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except IdentityError:
+                if connection is not None and connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            except sqlite3.Error as error:
+                if connection is not None and connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from error
+            except Exception:
+                if connection is not None and connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+            finally:
+                if connection is not None:
+                    connection.close()
+
+    def close(self) -> None:
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+
+    def pending_self_logout_audits(
+        self, session_id: str | None = None, *, limit: int = SELF_LOGOUT_DISPATCH_LIMIT,
+    ) -> tuple[sqlite3.Row, ...]:
+        bounded_limit = max(1, min(limit, SELF_LOGOUT_DISPATCH_LIMIT))
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                if session_id is None:
+                    rows = connection.execute(
+                        "SELECT event_id,session_id,tenant_id,actor_id,occurred_at,trace_id,policy_version "
+                        "FROM session_audit_outbox WHERE delivered_at IS NULL ORDER BY created_at,event_id LIMIT ?",
+                        (bounded_limit,),
+                    ).fetchall()
+                else:
+                    rows = connection.execute(
+                        "SELECT event_id,session_id,tenant_id,actor_id,occurred_at,trace_id,policy_version "
+                        "FROM session_audit_outbox WHERE session_id=? AND delivered_at IS NULL ORDER BY created_at,event_id LIMIT ?",
+                        (session_id, bounded_limit),
+                    ).fetchall()
+                return tuple(rows)
+            except sqlite3.Error as error:
+                raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from error
+            finally:
+                connection.close()
+
+    def mark_self_logout_audit_delivered(self, event_id: str, delivered_at: datetime) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                "UPDATE session_audit_outbox SET delivered_at=? WHERE event_id=? AND delivered_at IS NULL",
+                (_iso(delivered_at), event_id),
+            )
+
+    def pending_tenant_switch_audits(self) -> tuple[sqlite3.Row, ...]:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                return tuple(connection.execute(
+                    "SELECT event_id,prior_session_id,new_session_id,prior_tenant_id,"
+                    "target_tenant_id,actor_id,occurred_at,trace_id,policy_version,reason_code "
+                    "FROM session_tenant_switch_outbox WHERE delivered_at IS NULL "
+                    "ORDER BY created_at,event_id LIMIT ?",
+                    (SELF_LOGOUT_DISPATCH_LIMIT,),
+                ).fetchall())
+            except sqlite3.Error as error:
+                raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from error
+            finally:
+                connection.close()
+
+    def mark_tenant_switch_audit_delivered(self, event_id: str, delivered_at: datetime) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                "UPDATE session_tenant_switch_outbox SET delivered_at=? "
+                "WHERE event_id=? AND delivered_at IS NULL",
+                (_iso(delivered_at), event_id),
+            )
+
+    def schema_version(self) -> int:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                return int(connection.execute("PRAGMA user_version").fetchone()[0])
+            finally:
+                connection.close()
+
+    def foreign_keys_enabled(self) -> int:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                return int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
+            finally:
+                connection.close()
+
+    def journal_mode(self) -> str:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                return str(connection.execute("PRAGMA journal_mode").fetchone()[0])
+            finally:
+                connection.close()
+
+    def oidc_state_digest(self, transaction_id: str) -> str | None:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT state_digest FROM oidc_transactions WHERE transaction_id = ?",
+                    (_checked_text(transaction_id),),
+                ).fetchone()
+                return None if row is None else str(row[0])
+            finally:
+                connection.close()
+
+    def _ensure_tenant(self, connection: sqlite3.Connection, tenant_id: str) -> None:
+        connection.execute("INSERT OR IGNORE INTO tenants(tenant_id) VALUES (?)", (tenant_id,))
+
+    def _seed_minimum_step_up_actions(
+        self, connection: sqlite3.Connection, tenant_id: str,
+    ) -> None:
+        """Keep the tenant's mandatory step-up policy atomic with membership creation."""
+        for action in MINIMUM_STEP_UP_ACTION_GROUPS:
+            connection.execute(
+                "INSERT OR IGNORE INTO tenant_step_up_actions(tenant_id, action_group, is_mandatory) VALUES (?, ?, 1)",
+                (tenant_id, action),
+            )
+
+    def add_tenant_membership(self, *, tenant_id: str, user_id: str, role: str) -> None:
+        """Provision an approved organization membership idempotently."""
+        tenant_id = _checked_text(tenant_id)
+        user_id = _checked_text(user_id)
+        role = _checked_text(role)
+        with self.transaction() as connection:
+            user = connection.execute("SELECT 1 FROM users WHERE user_id=?", (user_id,)).fetchone()
+            if user is None:
+                raise IdentityError("USER_NOT_FOUND", 404)
+            self._ensure_tenant(connection, tenant_id)
+            connection.execute(
+                "INSERT INTO memberships(tenant_id,user_id,role) VALUES (?,?,?) "
+                "ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=excluded.role",
+                (tenant_id, user_id, role),
+            )
+            self._seed_minimum_step_up_actions(connection, tenant_id)
+
+    def required_step_up_actions(self, tenant_id: str) -> frozenset[str]:
+        checked = _checked_text(tenant_id)
+        with self.transaction() as connection:
+            self._ensure_tenant(connection, checked)
+            rows = connection.execute(
+                "SELECT action_group FROM tenant_step_up_actions WHERE tenant_id = ?",
+                (checked,),
+            ).fetchall()
+            return frozenset(str(row[0]) for row in rows)
+
+    def add_step_up_action(self, tenant_id: str, action_group: str) -> None:
+        checked_tenant = _checked_text(tenant_id)
+        checked_action = _checked_text(action_group)
+        with self.transaction() as connection:
+            self._ensure_tenant(connection, checked_tenant)
+            connection.execute(
+                "INSERT OR IGNORE INTO tenant_step_up_actions(tenant_id, action_group, is_mandatory) VALUES (?, ?, 0)",
+                (checked_tenant, checked_action),
+            )
+
+    def remove_step_up_action(self, tenant_id: str, action_group: str) -> None:
+        _checked_text(tenant_id)
+        _checked_text(action_group)
+        raise IdentityError("STEP_UP_ACTION_REMOVE_DENIED", 403)
+
+    def device_state(self, device_id: str) -> str | None:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT state FROM devices WHERE device_id = ?", (_checked_text(device_id),)
+                ).fetchone()
+                return None if row is None else str(row[0])
+            finally:
+                connection.close()
+
+    def device_last_seen(self, device_id: str) -> datetime | None:
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                row = connection.execute(
+                    "SELECT last_seen_at FROM devices WHERE device_id = ?",
+                    (_checked_text(device_id),),
+                ).fetchone()
+                return None if row is None else _dt(str(row[0]))
+            finally:
+                connection.close()
+
+    def entity_counts(self) -> dict[str, int]:
+        tables = (
+            "users", "tenants", "memberships", "sessions", "refresh_families",
+            "refresh_tokens", "devices", "oidc_transactions", "step_up_authorizations",
+        )
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                return {
+                    table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                    for table in tables
+                }
+            finally:
+                connection.close()
+
+    def list_directory_users(self) -> tuple[dict[str, str | None], ...]:
+        """Return non-secret identity fields for the system-admin directory."""
+        with self._lock:
+            self._ensure_open()
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    "SELECT user_id,login_id,email,state FROM users ORDER BY user_id"
+                ).fetchall()
+                return tuple({
+                    "user_id": str(row["user_id"]),
+                    "login_id": None if row["login_id"] is None else str(row["login_id"]),
+                    "email": None if row["email"] is None else str(row["email"]),
+                    "state": self.user_state_for_api(str(row["state"])),
+                } for row in rows)
+            finally:
+                connection.close()
+
+
+def dispatch_admin_audit_outbox(
+    repository: SqliteIdentityRepository,
+    audit_store: object,
+    clock: Callable[[], datetime],
+    *,
+    event_id: str | None = None,
+) -> None:
+    """Best-effort projection of committed administrator audit intents."""
+    try:
+        with repository.transaction() as connection:
+            if event_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM admin_audit_outbox WHERE delivered_at IS NULL "
+                    "ORDER BY created_at,event_id LIMIT 32"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM admin_audit_outbox WHERE event_id=? AND delivered_at IS NULL",
+                    (event_id,),
+                ).fetchall()
+    except IdentityError:
+        return
+    for row in rows:
+        try:
+            before = None if row["before_state"] is None else {"state": str(row["before_state"])}
+            after = None if row["after_state"] is None else {"state": str(row["after_state"])}
+            audit_store.append(AuditEventDraft(  # type: ignore[attr-defined]
+                event_id=str(row["event_id"]), occurred_at=_dt(str(row["occurred_at"])),
+                actor_id=str(row["actor_id"]), actor_type=ActorType(str(row["actor_type"])),
+                tenant_id=str(row["tenant_id"]), workspace_id=None,
+                action=str(row["action"]), target_type=str(row["target_type"]),
+                target_id=str(row["target_id"]), outcome=AuditOutcome.SUCCEEDED,
+                trace_id=str(row["trace_id"]), policy_version=str(row["policy_version"]),
+                before=before, after=after, metadata=json.loads(str(row["metadata_json"])),
+            ))
+        except AuditDuplicateEventError:
+            pass
+        except Exception:
+            continue
+        try:
+            with repository.transaction() as connection:
+                connection.execute(
+                    "UPDATE admin_audit_outbox SET delivered_at=? "
+                    "WHERE event_id=? AND delivered_at IS NULL",
+                    (_iso(_checked_utc(clock())), str(row["event_id"])),
+                )
+        except IdentityError:
+            continue
+
+
+class IdentityService:
+    def __init__(
+        self,
+        *,
+        repository: SqliteIdentityRepository,
+        audit_store: object,
+        oidc_policies: tuple[OidcClientPolicy, ...],
+        clock: Callable[[], datetime],
+        email_sender: EmailSender | None = None,
+        step_up_token_key: bytes | None = None,
+        dispatch_pending_audits: bool = True,
+        notification_inbox_enabled: bool = False,
+    ) -> None:
+        if type(notification_inbox_enabled) is not bool:
+            raise ValueError("NOTIFICATION_INBOX_FLAG_INVALID")
+        self._notification_inbox_enabled = notification_inbox_enabled
+        self._repository = repository
+        self._audit_store = audit_store
+        self._clock = clock
+        self._lock = RLock()
+        self._policies = tuple(oidc_policies)
+        self._email_sender = email_sender or SmtpEmailSender.from_env()
+        self._step_up_token_key = step_up_token_key or b"daon-test-step-up-key-v1"
+        if dispatch_pending_audits:
+            self.dispatch_pending_self_logout_audits()
+            self.dispatch_pending_admin_audits()
+            self.dispatch_pending_tenant_switch_audits()
+
+    def _now(self) -> datetime:
+        return _checked_utc(self._clock())
+
+    def _policy(
+        self, issuer: str, client_id: str, audience: str, redirect_uri: str,
+        client_kind: ClientKind, tenant_id: str,
+    ) -> OidcClientPolicy:
+        if not isinstance(client_kind, ClientKind):
+            raise IdentityError("INVALID_INPUT")
+        for policy in self._policies:
+            if (
+                policy.issuer == issuer and policy.client_id == client_id
+                and policy.audience == audience and redirect_uri in policy.redirect_uris
+                and policy.client_kind is client_kind and policy.tenant_id == tenant_id
+            ):
+                return policy
+        raise IdentityError("OIDC_POLICY_DENIED", 403)
+
+    def _audit(
+        self, *, action: str, outcome: AuditOutcome, trace_id: str,
+        policy_version: str, tenant_id: str, actor_id: str = "anonymous",
+        target_type: str = "identity", target_id: str = "identity-public",
+        metadata: dict[str, object] | None = None,
+        actor_type: ActorType | None = None,
+    ) -> AuditEventDraft:
+        draft = AuditEventDraft(
+            event_id=_id("audit"), occurred_at=self._now(), actor_id=actor_id,
+            actor_type=(
+                actor_type
+                if actor_type is not None
+                else ActorType.USER if actor_id != "anonymous" else ActorType.SYSTEM
+            ),
+            tenant_id=tenant_id, workspace_id=None, action=action,
+            target_type=target_type, target_id=target_id, outcome=outcome,
+            trace_id=_checked_text(trace_id), policy_version=_checked_text(policy_version),
+            metadata=metadata or {},
+        )
+        try:
+            self._audit_store.append(draft)  # type: ignore[attr-defined]
+        except Exception as error:
+            raise IdentityError("AUDIT_WRITE_FAILED", 503) from error
+        return draft
+
+    def _enqueue_login_notification(
+        self, connection, event: AuditEventDraft, *, oidc_transaction_id: str | None = None,
+    ) -> None:
+        """확정 로그인 INSERT 영수증을 같은 원업무 연결에서 읽기 검증한다."""
+        if not self._notification_inbox_enabled or not hasattr(connection, "_connection"):
+            return
+        if (not isinstance(event, AuditEventDraft) or event.actor_type is not ActorType.USER
+            or event.outcome is not AuditOutcome.SUCCEEDED
+            or event.action != "identity.login.succeeded" or event.target_type != "session"
+            or event.actor_id == "anonymous"):
+            return
+        from psycopg import Error
+        from .notification import NotificationError
+        from .notification_events import enqueue_identity_login_event
+        from .organization_membership import OrganizationWorkflowError
+        try:
+            enqueue_identity_login_event(connection, self, event=event, oidc_transaction_id=oidc_transaction_id)
+        except (Error, sqlite3.Error, NotificationError, OrganizationWorkflowError):
+            raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from None
+
+    @contextmanager
+    def _login_notification_scope(
+        self, connection, *, tenant_id: str, actor_id: str, session_id: str,
+        trace_id: str, policy_version: str, metadata: dict[str, object],
+        oidc_transaction_id: str | None = None,
+    ):
+        """세 확정 로그인만 INSERT 영수증→기존 중앙 append→읽기 검증 순서로 묶는다."""
+        audit_arguments = dict(action="identity.login.succeeded", outcome=AuditOutcome.SUCCEEDED,
+            trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+            actor_id=actor_id, target_type="session", target_id=session_id, metadata=metadata)
+        if self._notification_inbox_enabled is not True or not hasattr(connection, "_connection"):
+            yield
+            self._audit(**audit_arguments)
+            return
+        from psycopg import Error
+        from .notification import NotificationError
+        from .notification_events import prepare_identity_login_event
+        from .organization_membership import OrganizationWorkflowError
+
+        def event_factory():
+            return AuditEventDraft(event_id=_id("audit"), occurred_at=self._now(),
+                actor_type=ActorType.USER, workspace_id=None, **audit_arguments)
+
+        try:
+            with prepare_identity_login_event(connection, self, tenant_id=tenant_id,
+                actor_id=actor_id, event_factory=event_factory,
+                oidc_transaction_id=oidc_transaction_id) as draft:
+                yield
+                if draft is None:
+                    # 현재 발행 범위0은 기존 로그인/감사 의미를 그대로 유지한다.
+                    self._audit(**audit_arguments)
+                else:
+                    try:
+                        self._audit_store.append(draft)  # type: ignore[attr-defined]
+                    except Exception as error:
+                        raise IdentityError("AUDIT_WRITE_FAILED", 503) from error
+                    self._enqueue_login_notification(connection, draft,
+                        oidc_transaction_id=oidc_transaction_id)
+        except (Error, sqlite3.Error, NotificationError, OrganizationWorkflowError):
+            raise IdentityError("PERSISTENCE_UNAVAILABLE", 503) from None
+
+    def dispatch_pending_self_logout_audits(self, session_id: str | None = None) -> None:
+        """Project a bounded batch of durable intents without delaying service startup."""
+        deadline = monotonic() + SELF_LOGOUT_DISPATCH_SECONDS
+        try:
+            pending = self._repository.pending_self_logout_audits(session_id)
+        except IdentityError:
+            return
+        for row in pending:
+            if monotonic() > deadline:
+                break
+            try:
+                draft = AuditEventDraft(
+                    event_id=str(row["event_id"]), occurred_at=_dt(str(row["occurred_at"])),
+                    actor_id=str(row["actor_id"]), actor_type=ActorType.USER,
+                    tenant_id=str(row["tenant_id"]), workspace_id=None,
+                    action="identity.session.self_revoked", target_type="session",
+                    target_id=str(row["session_id"]), outcome=AuditOutcome.SUCCEEDED,
+                    trace_id=str(row["trace_id"]), policy_version=str(row["policy_version"]),
+                    metadata={"reason_code": "USER_LOGOUT"},
+                )
+                self._audit_store.append(draft)  # type: ignore[attr-defined]
+            except AuditDuplicateEventError:
+                pass
+            except Exception:
+                continue
+            try:
+                self._repository.mark_self_logout_audit_delivered(
+                    str(row["event_id"]), self._now(),
+                )
+            except IdentityError:
+                # The immutable central event already exists; the deterministic event ID
+                # makes a later retry safe if delivery marking temporarily fails.
+                continue
+
+    def _project_self_logout_audit(self, session_id: str) -> None:
+        self.dispatch_pending_self_logout_audits(session_id)
+
+    def dispatch_pending_tenant_switch_audits(self) -> None:
+        """Retry durable successful switch intents with deterministic event IDs."""
+        deadline = monotonic() + SELF_LOGOUT_DISPATCH_SECONDS
+        try:
+            pending = self._repository.pending_tenant_switch_audits()
+        except IdentityError:
+            return
+        for row in pending:
+            if monotonic() > deadline:
+                break
+            try:
+                self._audit_store.append(AuditEventDraft(
+                    event_id=str(row["event_id"]), occurred_at=_dt(str(row["occurred_at"])),
+                    actor_id=str(row["actor_id"]), actor_type=ActorType.USER,
+                    tenant_id=str(row["target_tenant_id"]), workspace_id=None,
+                    action="identity.session.tenant_switched", target_type="session",
+                    target_id=str(row["new_session_id"]), outcome=AuditOutcome.SUCCEEDED,
+                    trace_id=str(row["trace_id"]), policy_version=str(row["policy_version"]),
+                    metadata={
+                        "prior_session_id": str(row["prior_session_id"]),
+                        "prior_tenant_id": str(row["prior_tenant_id"]),
+                        "reason_code": str(row["reason_code"]),
+                    },
+                ))  # type: ignore[attr-defined]
+            except AuditDuplicateEventError:
+                pass
+            except Exception:
+                continue
+            try:
+                self._repository.mark_tenant_switch_audit_delivered(
+                    str(row["event_id"]), self._now(),
+                )
+            except IdentityError:
+                continue
+
+    def dispatch_pending_admin_audits(self, event_id: str | None = None) -> None:
+        dispatch_admin_audit_outbox(
+            self._repository, self._audit_store, self._clock, event_id=event_id,
+        )
+
+    def _issue_token(self, connection: sqlite3.Connection, *, table: str, user_id: str,
+                     now: datetime, ttl: timedelta) -> str:
+        token = _opaque()
+        connection.execute(
+            f"INSERT INTO {table}(token_id,user_id,token_digest,expires_at,used_at,attempts,created_at) VALUES (?,?,?,?,?,?,?)",
+            (_id("tok"), user_id, _digest(token), _iso(now + ttl), None, 0, _iso(now)),
+        )
+        return token
+
+    def ensure_initial_admin(self) -> None:
+        """Create the protected local administrator once without rotating its password."""
+        with self._lock, self._repository.transaction() as connection:
+            marker = connection.execute(
+                "SELECT marker_key FROM bootstrap_state WHERE marker_key=?",
+                (INITIAL_ADMIN_BOOTSTRAP_MARKER,),
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT user_id,issuer,subject,login_id,email,password_digest,"
+                "password_change_required,state FROM users WHERE user_id=?",
+                (INITIAL_ADMIN_USER_ID,),
+            ).fetchone()
+            if marker is not None and existing is None:
+                raise IdentityError("INITIAL_ADMIN_MISSING", 503)
+            if existing is None:
+                login_collision = connection.execute(
+                    "SELECT user_id FROM users WHERE login_id=?",
+                    (INITIAL_ADMIN_USER_ID,),
+                ).fetchone()
+                if login_collision is not None:
+                    raise IdentityError("INITIAL_ADMIN_CONFLICT", 503)
+                connection.execute(
+                    "INSERT INTO users(user_id,issuer,subject,login_id,email,password_digest,"
+                    "email_verified_at,password_change_required,state) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        INITIAL_ADMIN_USER_ID,
+                        "local",
+                        INITIAL_ADMIN_USER_ID,
+                        INITIAL_ADMIN_USER_ID,
+                        None,
+                        PASSWORD_HASHER.hash(INITIAL_ADMIN_PASSWORD),
+                        None,
+                        True,
+                        "active",
+                    ),
+                )
+            elif not is_protected_initial_admin_record(existing):
+                raise IdentityError("INITIAL_ADMIN_CONFLICT", 503)
+            self._repository._ensure_tenant(connection, INITIAL_ADMIN_TENANT_ID)
+            connection.execute(
+                "INSERT OR IGNORE INTO memberships(tenant_id,user_id,role) VALUES (?,?,?)",
+                (INITIAL_ADMIN_TENANT_ID, INITIAL_ADMIN_USER_ID, "personal_owner"),
+            )
+            self._repository._seed_minimum_step_up_actions(connection, INITIAL_ADMIN_TENANT_ID)
+            if marker is None:
+                connection.execute(
+                    "INSERT INTO bootstrap_state(marker_key,completed_at) VALUES (?,?)",
+                    (INITIAL_ADMIN_BOOTSTRAP_MARKER, _iso(self._now())),
+                )
+
+    def require_initial_admin_recovery_target(self) -> str:
+        """Resolve the fixed console-recovery target without changing credentials."""
+        with self._lock, self._repository.transaction() as connection:
+            marker = connection.execute(
+                "SELECT marker_key FROM bootstrap_state WHERE marker_key=?",
+                (INITIAL_ADMIN_BOOTSTRAP_MARKER,),
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT user_id,issuer,subject,login_id,email,password_digest,"
+                "password_change_required,state FROM users WHERE user_id=?",
+                (INITIAL_ADMIN_USER_ID,),
+            ).fetchone()
+            if marker is None or existing is None:
+                raise IdentityError("INITIAL_ADMIN_MISSING", 503)
+            if not is_protected_initial_admin_record(existing):
+                raise IdentityError("INITIAL_ADMIN_CONFLICT", 503)
+            return INITIAL_ADMIN_USER_ID
+
+    def reset_initial_admin_password(self, *, trace_id: str, policy_version: str) -> None:
+        """Restore only the canonical initial admin to its forced-change state."""
+        _checked_text(trace_id)
+        _checked_text(policy_version)
+        now = self._now()
+        replacement_digest = PASSWORD_HASHER.hash(INITIAL_ADMIN_PASSWORD)
+        event_id = _id("audit-admin-reset")
+        with self._lock, self._repository.transaction() as connection:
+            marker = connection.execute(
+                "SELECT marker_key FROM bootstrap_state WHERE marker_key=?",
+                (INITIAL_ADMIN_BOOTSTRAP_MARKER,),
+            ).fetchone()
+            existing = connection.execute(
+                "SELECT user_id,issuer,subject,login_id,email,password_digest,"
+                "password_change_required,state FROM users WHERE user_id=?",
+                (INITIAL_ADMIN_USER_ID,),
+            ).fetchone()
+            if marker is None or existing is None:
+                raise IdentityError("INITIAL_ADMIN_MISSING", 503)
+            if not is_protected_initial_admin_record(existing):
+                raise IdentityError("INITIAL_ADMIN_CONFLICT", 503)
+            connection.execute(
+                "UPDATE users SET password_digest=?,password_change_required=TRUE "
+                "WHERE user_id=?",
+                (replacement_digest, INITIAL_ADMIN_USER_ID),
+            )
+            revoke_user_sessions(
+                connection, user_id=INITIAL_ADMIN_USER_ID, updated_at=now,
+            )
+            connection.execute(
+                "INSERT INTO admin_audit_outbox(event_id,operation,idempotency_scope,"
+                "request_fingerprint,actor_id,actor_type,tenant_id,action,target_type,"
+                "target_id,occurred_at,trace_id,policy_version,before_state,after_state,"
+                "metadata_json,delivered_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event_id, "reset_initial_password", None, None, "server-console",
+                    ActorType.SYSTEM.value, INITIAL_ADMIN_TENANT_ID,
+                    "identity.initial_admin_password.reset", "user",
+                    INITIAL_ADMIN_USER_ID, _iso(now), trace_id, policy_version, None, None,
+                    json.dumps({"reason_code": "SERVER_CONSOLE_RECOVERY"}, sort_keys=True),
+                    None, _iso(now),
+                ),
+            )
+        self.dispatch_pending_admin_audits(event_id)
+
+    def _enforce_mail_rate_limit(self, connection: sqlite3.Connection, *, table: str,
+                                 user_id: str, now: datetime) -> None:
+        rows = connection.execute(
+            f"SELECT created_at FROM {table} WHERE user_id=? AND created_at>? ORDER BY created_at DESC",
+            (user_id, _iso(now - MAIL_REQUEST_WINDOW)),
+        ).fetchall()
+        if rows and now - _dt(str(rows[0]["created_at"])) < MAIL_REQUEST_COOLDOWN:
+            raise IdentityError("RATE_LIMITED", 429)
+        if len(rows) >= MAIL_REQUEST_MAX_PER_WINDOW:
+            raise IdentityError("RATE_LIMITED", 429)
+
+    def signup(self, *, login_id: str, email: str, password: str,
+               trace_id: str, policy_version: str) -> None:
+        login = _checked_text(login_id).lower()
+        address, secret = _email(email), _password(password)
+        password_digest = PASSWORD_HASHER.hash(secret)
+        _checked_text(trace_id); _checked_text(policy_version)
+        now, user_id, tenant_id = self._now(), _id("usr"), _id("tenant")
+        with self._lock, self._repository.transaction() as connection:
+            if connection.execute("SELECT 1 FROM users WHERE login_id=? OR email=?", (login, address)).fetchone():
+                return
+            connection.execute(
+                "INSERT INTO users(user_id,issuer,subject,login_id,email,password_digest,state) VALUES (?,?,?,?,?,?,?)",
+                (user_id, "local", login, login, address, password_digest, "pending_email"),
+            )
+            self._repository._ensure_tenant(connection, tenant_id)
+            connection.execute("INSERT INTO memberships(tenant_id,user_id,role) VALUES (?,?,?)", (tenant_id, user_id, "personal_owner"))
+            self._repository._seed_minimum_step_up_actions(connection, tenant_id)
+            token = self._issue_token(connection, table="email_verification_tokens", user_id=user_id, now=now, ttl=timedelta(hours=24))
+            self._email_sender.send(recipient=address, subject="Daon 이메일 인증", body=f"Daon 이메일 인증 토큰: {token}\n24시간 내 인증하세요.")
+            self._audit(action="identity.signup.accepted", outcome=AuditOutcome.SUCCEEDED, trace_id=trace_id,
+                        policy_version=policy_version, tenant_id=tenant_id, actor_id=user_id,
+                        target_type="user", target_id=user_id)
+
+    def verify_email(self, *, token: str, trace_id: str, policy_version: str) -> None:
+        _checked_text(token, opaque=True); _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute("SELECT * FROM email_verification_tokens WHERE token_digest=?", (_digest(token),)).fetchone()
+            if row is None or row["used_at"] is not None or _dt(str(row["expires_at"])) <= now:
+                raise IdentityError("EMAIL_TOKEN_INVALID", 400)
+            connection.execute("UPDATE email_verification_tokens SET used_at=?,attempts=attempts+1 WHERE token_id=?", (_iso(now), str(row["token_id"])))
+            connection.execute("UPDATE users SET email_verified_at=?,state='active' WHERE user_id=?", (_iso(now), str(row["user_id"])))
+            self._audit(action="identity.email_verified", outcome=AuditOutcome.SUCCEEDED, trace_id=trace_id,
+                        policy_version=policy_version, tenant_id="identity-public", actor_id=str(row["user_id"]), target_type="user", target_id=str(row["user_id"]))
+
+    def resend_verification(self, *, identifier: str, trace_id: str, policy_version: str) -> None:
+        value = _checked_text(identifier).lower(); _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute("SELECT * FROM users WHERE login_id=? OR email=?", (value, value)).fetchone()
+            if row is None or row["state"] != "pending_email":
+                return
+            self._enforce_mail_rate_limit(connection, table="email_verification_tokens", user_id=str(row["user_id"]), now=now)
+            token = self._issue_token(connection, table="email_verification_tokens", user_id=str(row["user_id"]), now=now, ttl=timedelta(hours=24))
+            self._email_sender.send(recipient=str(row["email"]), subject="Daon 이메일 인증 재전송", body=f"Daon 이메일 인증 토큰: {token}")
+
+    def request_password_reset(
+        self, *, identifier: str, trace_id: str, policy_version: str,
+        revoke_sessions: bool = False,
+        _admin_transaction_hook: Callable[[sqlite3.Connection, sqlite3.Row], bool] | None = None,
+    ) -> None:
+        value = _checked_text(identifier).lower(); _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            target_lock = " FOR UPDATE" if _admin_transaction_hook is not None and hasattr(connection, "_connection") else ""
+            row = connection.execute("SELECT * FROM users WHERE (login_id=? OR email=?) AND issuer='local' AND email_verified_at IS NOT NULL" + target_lock, (value, value)).fetchone()
+            if row is None:
+                return
+            # Internal admin reservation/replay uses this very transaction, before any
+            # rate-limit, token, revocation or external delivery side effect.
+            if _admin_transaction_hook is not None and not _admin_transaction_hook(connection, row):
+                return
+            self._enforce_mail_rate_limit(connection, table="password_reset_tokens", user_id=str(row["user_id"]), now=now)
+            token = self._issue_token(connection, table="password_reset_tokens", user_id=str(row["user_id"]), now=now, ttl=timedelta(minutes=30))
+            if revoke_sessions:
+                revoke_user_sessions(connection, user_id=str(row["user_id"]), updated_at=now)
+            self._email_sender.send(recipient=str(row["email"]), subject="Daon 비밀번호 재설정", body=f"Daon 비밀번호 재설정 토큰: {token}")
+
+    def confirm_password_reset(self, *, token: str, new_password: str, trace_id: str, policy_version: str) -> None:
+        _checked_text(token, opaque=True); secret = _password(new_password); _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            reset_lock = " FOR UPDATE" if hasattr(connection, "_connection") else ""
+            row = connection.execute("SELECT * FROM password_reset_tokens WHERE token_digest=?" + reset_lock, (_digest(token),)).fetchone()
+            if row is None or row["used_at"] is not None or _dt(str(row["expires_at"])) <= now:
+                raise IdentityError("PASSWORD_RESET_TOKEN_INVALID", 400)
+            connection.execute("UPDATE users SET password_digest=? WHERE user_id=?", (PASSWORD_HASHER.hash(secret), str(row["user_id"])))
+            connection.execute("UPDATE password_reset_tokens SET used_at=?,attempts=attempts+1 WHERE token_id=?", (_iso(now), str(row["token_id"])))
+            connection.execute("UPDATE sessions SET state='revoked',updated_at=? WHERE user_id=?", (_iso(now), str(row["user_id"])))
+            connection.execute("UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id IN (SELECT session_id FROM sessions WHERE user_id=?)", (_iso(now), str(row["user_id"])))
+            if self._notification_inbox_enabled is True and hasattr(connection, "_connection"):
+                from .notification_password_reset import record_password_reset_event
+                record_password_reset_event(connection, self, reset_id=str(row["token_id"]),
+                    user_id=str(row["user_id"]), occurred_at=now,
+                    trace_id=trace_id, policy_version=policy_version)
+
+    def local_login(self, *, login_id: str, password: str, platform: DevicePlatform,
+                    trace_id: str, policy_version: str) -> SessionCredentials:
+        login = _checked_text(login_id).lower()
+        if not isinstance(password, str) or len(password) > 256 or any(ord(character) < 32 for character in password):
+            raise IdentityError("PASSWORD_POLICY_FAILED")
+        secret = password
+        _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute("SELECT * FROM users WHERE login_id=? AND issuer='local'", (login,)).fetchone()
+            initial_admin_login = bool(
+                row is not None
+                and str(row["user_id"]) == INITIAL_ADMIN_USER_ID
+                and bool(row["password_change_required"])
+                and secret == INITIAL_ADMIN_PASSWORD
+            )
+            if not initial_admin_login:
+                _password(secret)
+            try:
+                if (
+                    row is None or row["password_digest"] is None
+                    or (row["email_verified_at"] is None and str(row["user_id"]) != INITIAL_ADMIN_USER_ID)
+                    or row["state"] != "active"
+                ):
+                    raise VerifyMismatchError()
+                PASSWORD_HASHER.verify(str(row["password_digest"]), secret)
+            except Exception as error:
+                raise IdentityError("AUTHENTICATION_REQUIRED", 401) from error
+            user_id = str(row["user_id"]); tenant = connection.execute("SELECT tenant_id FROM memberships WHERE user_id=? ORDER BY CASE WHEN role='personal_owner' THEN 0 ELSE 1 END, tenant_id LIMIT 1", (user_id,)).fetchone()
+            if tenant is None:
+                raise IdentityError("AUTHENTICATION_REQUIRED", 401)
+            tenant_id = str(tenant[0]); device_id, session_id, access = _id("dev"), _id("ses"), _opaque()
+            with self._login_notification_scope(connection, tenant_id=tenant_id, actor_id=user_id,
+                session_id=session_id, trace_id=trace_id, policy_version=policy_version,
+                metadata={"client_type": "web", "auth_method": "local"}):
+                connection.execute("INSERT INTO devices(device_id,tenant_id,user_id,platform,state,last_seen_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)", (device_id, tenant_id, user_id, platform.value, "registered", _iso(now), _iso(now), _iso(now)))
+                connection.execute("INSERT INTO sessions(session_id,tenant_id,user_id,device_id,client_kind,access_digest,access_expires_at,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (session_id, tenant_id, user_id, device_id, "web", _digest(access), _iso(WEB_SESSION_EXPIRY), "active", _iso(now), _iso(now)))
+        return SessionCredentials(access, None, user_id, session_id, device_id, tenant_id, ClientKind.WEB, "web_session_cookie_boundary_m4_05")
+
+    def local_native_login(
+        self, *, login_id: str, password: str, trace_id: str, policy_version: str,
+    ) -> SessionCredentials:
+        """Issue the Windows-only opaque credential pair for a verified local user."""
+        login = _checked_text(login_id).lower(); secret = _password(password)
+        _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE login_id=? AND issuer='local'", (login,)
+            ).fetchone()
+            try:
+                if (
+                    row is None or row["password_digest"] is None
+                    or row["email_verified_at"] is None or row["state"] != "active"
+                ):
+                    raise VerifyMismatchError()
+                PASSWORD_HASHER.verify(str(row["password_digest"]), secret)
+            except Exception as error:
+                raise IdentityError("AUTHENTICATION_REQUIRED", 401) from error
+            user_id = str(row["user_id"])
+            tenant = connection.execute(
+                "SELECT tenant_id FROM memberships WHERE user_id=? ORDER BY CASE WHEN role='personal_owner' THEN 0 ELSE 1 END, tenant_id LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if tenant is None:
+                raise IdentityError("AUTHENTICATION_REQUIRED", 401)
+            tenant_id = str(tenant[0]); device_id, session_id = _id("dev"), _id("ses")
+            access, refresh, family_id = _opaque(), _opaque(), _id("fam")
+            with self._login_notification_scope(connection, tenant_id=tenant_id, actor_id=user_id,
+                session_id=session_id, trace_id=trace_id, policy_version=policy_version,
+                metadata={"client_type": ClientKind.NATIVE.value, "auth_method": "local"}):
+                connection.execute(
+                    "INSERT INTO devices(device_id,tenant_id,user_id,platform,state,last_seen_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (device_id, tenant_id, user_id, DevicePlatform.WINDOWS.value, "registered", _iso(now), _iso(now), _iso(now)),
+                )
+                connection.execute(
+                    "INSERT INTO sessions(session_id,tenant_id,user_id,device_id,client_kind,access_digest,access_expires_at,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (session_id, tenant_id, user_id, device_id, ClientKind.NATIVE.value, _digest(access), _iso(now + ACCESS_TTL), "active", _iso(now), _iso(now)),
+                )
+                connection.execute(
+                    "INSERT INTO refresh_families(family_id,session_id,state,created_at,updated_at) VALUES (?,?,?,?,?)",
+                    (family_id, session_id, "active", _iso(now), _iso(now)),
+                )
+                connection.execute(
+                    "INSERT INTO refresh_tokens(refresh_id,family_id,refresh_digest,expires_at,used_at,created_at) VALUES (?,?,?,?,?,?)",
+                    (_id("ref"), family_id, _digest(refresh), _iso(now + REFRESH_TTL), None, _iso(now)),
+                )
+        return SessionCredentials(
+            access, refresh, user_id, session_id, device_id, tenant_id,
+            ClientKind.NATIVE, "native_opaque_refresh_rotation",
+        )
+
+    def begin_oidc_login(
+        self, *, issuer: str, client_id: str, audience: str, redirect_uri: str,
+        client_kind: ClientKind, tenant_id: str, trace_id: str, policy_version: str,
+    ) -> OidcLoginStart:
+        for value in (issuer, redirect_uri):
+            _checked_text(value, opaque=True)
+        for value in (client_id, audience, tenant_id, trace_id, policy_version):
+            _checked_text(value)
+        policy = self._policy(issuer, client_id, audience, redirect_uri, client_kind, tenant_id)
+        now = self._now()
+        state, nonce, verifier = _opaque(), _opaque(), _opaque()
+        challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode("ascii")).digest()
+        ).decode("ascii").rstrip("=")
+        transaction_id = _id("oidc")
+        expires_at = now + OIDC_TRANSACTION_TTL
+        with self._repository.transaction() as connection:
+            self._repository._ensure_tenant(connection, tenant_id)
+            connection.execute(
+                """INSERT INTO oidc_transactions(
+                transaction_id,state_digest,nonce_digest,code_challenge,issuer,client_id,
+                audience,redirect_uri,client_kind,tenant_id,expires_at,used_at,created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (transaction_id, _digest(state), _digest(nonce), challenge, policy.issuer,
+                 policy.client_id, policy.audience, redirect_uri, client_kind.value,
+                 tenant_id, _iso(expires_at), None, _iso(now)),
+            )
+            self._audit(
+                action="identity.login.started", outcome=AuditOutcome.SUCCEEDED,
+                trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                target_type="oidc_transaction", target_id=transaction_id,
+                metadata={"client_type": client_kind.value},
+            )
+        return OidcLoginStart(
+            transaction_id, state, nonce, verifier, challenge, "S256", expires_at
+        )
+
+    def complete_oidc_login(
+        self, *, state: str, authorization_code: str, code_verifier: str,
+        client_id: str, redirect_uri: str, provider: VerifiedOidcProvider,
+        platform: DevicePlatform, trace_id: str, policy_version: str,
+    ) -> SessionCredentials:
+        for value in (state, authorization_code, code_verifier, redirect_uri):
+            _checked_text(value, opaque=True)
+        for value in (client_id, trace_id, policy_version):
+            _checked_text(value)
+        if not isinstance(platform, DevicePlatform):
+            raise IdentityError("INVALID_INPUT")
+        now = self._now()
+        state_digest = _digest(state)
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM oidc_transactions WHERE state_digest = ?", (state_digest,)
+            ).fetchone()
+            if row is None or row["used_at"] is not None:
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version,
+                    tenant_id="identity-public", metadata={"reason_code": "OIDC_STATE_INVALID"},
+                )
+                raise IdentityError("OIDC_STATE_INVALID", 401)
+            tenant_id = str(row["tenant_id"])
+            transaction_id = str(row["transaction_id"])
+            if _dt(str(row["expires_at"])) <= now:
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_TRANSACTION_EXPIRED"},
+                )
+                raise IdentityError("OIDC_TRANSACTION_EXPIRED", 401)
+            if client_id != row["client_id"] or redirect_uri != row["redirect_uri"]:
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_POLICY_DENIED"},
+                )
+                raise IdentityError("OIDC_POLICY_DENIED", 403)
+            computed = base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode("ascii")).digest()
+            ).decode("ascii").rstrip("=")
+            if not secrets.compare_digest(computed, str(row["code_challenge"])):
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_PKCE_INVALID"},
+                )
+                raise IdentityError("OIDC_PKCE_INVALID", 401)
+            try:
+                claims = provider.exchange_verified(
+                    authorization_code=authorization_code, code_verifier=code_verifier,
+                    expected_code_challenge=str(row["code_challenge"]),
+                    expected_issuer=str(row["issuer"]), expected_audience=str(row["audience"]),
+                    expected_nonce_digest=str(row["nonce_digest"]), now=now,
+                )
+            except Exception as error:
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_PROVIDER_REJECTED"},
+                )
+                raise IdentityError("OIDC_PROVIDER_REJECTED", 401) from error
+            if (
+                not isinstance(claims, VerifiedOidcClaims) or not claims.verification_complete
+                or claims.issuer != row["issuer"] or claims.audience != row["audience"]
+                or _digest(claims.nonce) != row["nonce_digest"]
+            ):
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_CLAIMS_INVALID"},
+                )
+                raise IdentityError("OIDC_CLAIMS_INVALID", 401)
+            if _checked_utc(claims.expires_at) <= now:
+                self._audit(
+                    action="identity.login.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    target_type="oidc_transaction", target_id=transaction_id,
+                    metadata={"reason_code": "OIDC_CLAIMS_EXPIRED"},
+                )
+                raise IdentityError("OIDC_CLAIMS_EXPIRED", 401)
+            subject = _checked_text(claims.subject, opaque=True)
+            connection.execute(
+                "UPDATE oidc_transactions SET used_at = ? WHERE transaction_id = ? AND used_at IS NULL",
+                (_iso(now), transaction_id),
+            )
+            existing = connection.execute(
+                "SELECT user_id FROM users WHERE issuer = ? AND subject = ?",
+                (claims.issuer, subject),
+            ).fetchone()
+            user_id = str(existing[0]) if existing else _id("usr")
+            if existing is None:
+                connection.execute(
+                    "INSERT INTO users(user_id,issuer,subject) VALUES (?,?,?)",
+                    (user_id, claims.issuer, subject),
+                )
+            connection.execute(
+                "INSERT OR IGNORE INTO memberships(tenant_id,user_id,role) VALUES (?,?,?)",
+                (tenant_id, user_id, "member"),
+            )
+            self._repository._seed_minimum_step_up_actions(connection, tenant_id)
+            device_id, session_id = _id("dev"), _id("ses")
+            access = _opaque()
+            client_kind = ClientKind(str(row["client_kind"]))
+            with self._login_notification_scope(connection, tenant_id=tenant_id, actor_id=user_id,
+                session_id=session_id, trace_id=trace_id, policy_version=policy_version,
+                metadata={"client_type": client_kind.value}, oidc_transaction_id=transaction_id):
+                connection.execute(
+                    "INSERT INTO devices(device_id,tenant_id,user_id,platform,state,last_seen_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (device_id, tenant_id, user_id, platform.value, "registered", _iso(now), _iso(now), _iso(now)),
+                )
+                connection.execute(
+                    """INSERT INTO sessions(session_id,tenant_id,user_id,device_id,client_kind,
+                    access_digest,access_expires_at,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (session_id, tenant_id, user_id, device_id, client_kind.value,
+                     _digest(access), _iso(now + ACCESS_TTL), "active", _iso(now), _iso(now)),
+                )
+                refresh: str | None = None
+                if client_kind is ClientKind.NATIVE:
+                    refresh, family_id = _opaque(), _id("fam")
+                    connection.execute(
+                        "INSERT INTO refresh_families(family_id,session_id,state,created_at,updated_at) VALUES (?,?,?,?,?)",
+                        (family_id, session_id, "active", _iso(now), _iso(now)),
+                    )
+                    connection.execute(
+                        "INSERT INTO refresh_tokens(refresh_id,family_id,refresh_digest,expires_at,used_at,created_at) VALUES (?,?,?,?,?,?)",
+                        (_id("ref"), family_id, _digest(refresh), _iso(now + REFRESH_TTL), None, _iso(now)),
+                    )
+        delivery = (
+            "web_session_cookie_boundary_m4_05" if client_kind is ClientKind.WEB
+            else "native_opaque_refresh_rotation"
+        )
+        return SessionCredentials(access, refresh, user_id, session_id, device_id, tenant_id, client_kind, delivery)
+
+    def _principal(self, connection: sqlite3.Connection, access_token: str, now: datetime) -> sqlite3.Row:
+        _checked_text(access_token, opaque=True)
+        row = connection.execute(
+            "SELECT * FROM sessions WHERE access_digest = ?", (_digest(access_token),)
+        ).fetchone()
+        if row is None:
+            raise IdentityError("ACCESS_INVALID", 401)
+        if row["state"] != "active":
+            raise IdentityError("SESSION_REVOKED", 401)
+        if str(row["client_kind"]) != ClientKind.WEB.value and _dt(str(row["access_expires_at"])) <= now:
+            raise IdentityError("ACCESS_EXPIRED", 401)
+        connection.execute(
+            "UPDATE devices SET last_seen_at = ?, updated_at = ? WHERE device_id = ?",
+            (_iso(now), _iso(now), str(row["device_id"])),
+        )
+        return row
+
+    def validate_access(self, access_token: str, *, trace_id: str, policy_version: str) -> IdentityPrincipal:
+        _checked_text(trace_id); _checked_text(policy_version)
+        with self._repository.transaction() as connection:
+            now = self._now()
+            try:
+                row = self._principal(connection, access_token, now)
+            except IdentityError as error:
+                known = None
+                if isinstance(access_token, str):
+                    known = connection.execute(
+                        "SELECT * FROM sessions WHERE access_digest = ?", (_digest(access_token),)
+                    ).fetchone()
+                reason_code = error.code if error.code in {"ACCESS_EXPIRED", "SESSION_REVOKED"} else "ACCESS_INVALID"
+                action = "identity.access.expired" if reason_code == "ACCESS_EXPIRED" else "identity.access.denied"
+                self._audit(
+                    action=action,
+                    outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id,
+                    policy_version=policy_version,
+                    tenant_id="identity-public" if known is None else str(known["tenant_id"]),
+                    actor_id="anonymous" if known is None else str(known["user_id"]),
+                    target_type="access_credential" if known is None else "session",
+                    target_id="unknown-access" if known is None else str(known["session_id"]),
+                    metadata={"reason_code": reason_code},
+                )
+                if reason_code != error.code:
+                    raise IdentityError(reason_code, 401) from error
+                raise
+            return IdentityPrincipal(str(row["user_id"]), str(row["session_id"]), str(row["device_id"]), str(row["tenant_id"]))
+
+    def describe_access(
+        self, access_token: str, *, trace_id: str, policy_version: str
+    ) -> IdentitySessionView:
+        """Return the safe public session projection after normal credential validation."""
+        principal = self.validate_access(
+            access_token, trace_id=trace_id, policy_version=policy_version
+        )
+        with self._repository.transaction() as connection:
+            row = connection.execute(
+                "SELECT s.client_kind,s.access_expires_at,u.login_id,u.password_change_required "
+                "FROM sessions s JOIN users u ON u.user_id=s.user_id WHERE s.session_id = ?",
+                (principal.session_id,),
+            ).fetchone()
+            if row is None:
+                raise IdentityError("ACCESS_INVALID", 401)
+            return IdentitySessionView(
+                principal=principal,
+                login_id=None if row["login_id"] is None else str(row["login_id"]),
+                client_kind=ClientKind(str(row["client_kind"])),
+                expires_at=_dt(str(row["access_expires_at"])),
+                password_change_required=bool(row["password_change_required"]),
+            )
+
+    def _selectable_tenant_workspaces(
+        self, connection: sqlite3.Connection, user_id: str,
+    ) -> tuple[tuple[str, str, str], ...]:
+        rows = connection.execute(
+                "SELECT m.tenant_id,m.role,w.workspace_id,w.workspace_kind "
+                "FROM memberships m JOIN users u ON u.user_id=m.user_id "
+                "JOIN auth_workspaces w ON w.tenant_id=m.tenant_id "
+                "WHERE m.user_id=? AND u.state='active' "
+                "AND ((m.role='personal_owner' AND w.workspace_kind='personal') "
+                "OR (m.role<>'personal_owner' AND w.workspace_kind='organization')) "
+                "AND (EXISTS (SELECT 1 FROM auth_tenant_roles r "
+                "WHERE r.tenant_id=w.tenant_id AND r.user_id=m.user_id "
+                "AND r.state='active' AND ((w.workspace_kind='personal' AND r.role='personal_owner') "
+                "OR (w.workspace_kind='organization' AND r.role='organization_admin'))) "
+                "OR EXISTS (SELECT 1 FROM auth_memberships a "
+                "WHERE a.tenant_id=w.tenant_id AND a.workspace_id=w.workspace_id "
+                "AND a.user_id=m.user_id AND a.state='active')) "
+                "ORDER BY m.tenant_id,w.workspace_id",
+            (_checked_text(user_id),),
+        ).fetchall()
+        selected: dict[str, tuple[str, str, str]] = {}
+        for row in rows:
+            tenant_id = str(row["tenant_id"])
+            if row["workspace_kind"] == "organization":
+                from .organization_access import OrganizationAccessBridge
+                from .organization_membership import OrganizationWorkflowError
+                try:
+                    OrganizationAccessBridge(postgres=hasattr(self._repository, "_dsn")).assert_organization_active(
+                        connection=connection, tenant_id=tenant_id, user_id=user_id,
+                    )
+                except OrganizationWorkflowError as error:
+                    if error.code != "ORGANIZATION_MEMBERSHIP_SUSPENDED":
+                        raise
+                    continue
+            if tenant_id not in selected:
+                selected[tenant_id] = (
+                    tenant_id, "personal" if str(row["role"]) == "personal_owner" else "organization",
+                    str(row["workspace_id"]),
+                )
+        return tuple(selected.values())
+
+    def selectable_tenant_workspaces(
+        self, *, user_id: str,
+    ) -> tuple[tuple[str, str, str], ...]:
+        """Identity membership intersected with current effective auth bindings."""
+        with self._repository.transaction() as connection:
+            return self._selectable_tenant_workspaces(connection, user_id)
+
+    def notification_workspace_ids(self, *, user_id: str, tenant_id: str) -> tuple[str, ...]:
+        """알림의 서버 내부 수신 범위. 정확 tenant의 현재 identity/auth 교집합만 읽는다.
+
+        작업 범위 메뉴의 tenant당 첫 Workspace 선택과 분리한다. 소속 없는 admin에
+        가상 Workspace를 만들지 않으며 조회·접속 장애를 빈 목록 성공으로 바꾸지 않는다.
+        """
+        with self._repository.transaction() as connection:
+            return self._notification_workspace_ids(connection, user_id=user_id, tenant_id=tenant_id)
+
+    def _notification_workspace_ids(self, connection, *, user_id: str, tenant_id: str) -> tuple[str, ...]:
+        """원업무가 전달한 identity 연결에서도 같은 조회를 한다. 연결을 commit/close하지 않는다."""
+        from .organization_access import OrganizationAccessBridge
+        from .organization_membership import OrganizationWorkflowError
+        user, tenant = _checked_text(user_id), _checked_text(tenant_id)
+        rows = connection.execute(
+            "SELECT DISTINCT w.workspace_id,w.workspace_kind FROM memberships m "
+            "JOIN users u ON u.user_id=m.user_id JOIN auth_workspaces w ON w.tenant_id=m.tenant_id "
+            "WHERE m.user_id=? AND m.tenant_id=? AND u.state='active' "
+            "AND (EXISTS(SELECT 1 FROM auth_tenant_roles r WHERE r.tenant_id=w.tenant_id "
+            "AND r.user_id=m.user_id AND r.state='active' AND ((w.workspace_kind='personal' AND r.role='personal_owner') "
+            "OR (w.workspace_kind='organization' AND r.role='organization_admin'))) "
+            "OR EXISTS(SELECT 1 FROM auth_memberships a WHERE a.tenant_id=w.tenant_id "
+            "AND a.workspace_id=w.workspace_id AND a.user_id=m.user_id AND a.state='active')) "
+            "ORDER BY w.workspace_id", (user, tenant),
+        ).fetchall()
+        organization_active = True
+        if any(row['workspace_kind'] == 'organization' for row in rows):
+            try:
+                OrganizationAccessBridge(postgres=hasattr(self._repository, '_dsn')).assert_organization_active(
+                    connection=connection, tenant_id=tenant, user_id=user)
+            except OrganizationWorkflowError as error:
+                if error.code != 'ORGANIZATION_MEMBERSHIP_SUSPENDED':
+                    raise
+                organization_active = False
+        return tuple(str(row['workspace_id']) for row in rows
+            if row['workspace_kind'] != 'organization' or organization_active)
+
+    def audit_tenant_switch_denied(
+        self, *, principal: IdentityPrincipal, target_tenant_id: str | None,
+        reason_code: str, trace_id: str, policy_version: str,
+    ) -> None:
+        if reason_code not in {"TENANT_UNAVAILABLE", "INVALID_INPUT", "CSRF_VALIDATION_FAILED"}:
+            raise IdentityError("INVALID_INPUT", 422)
+        target = "unknown-tenant" if target_tenant_id is None else _checked_text(target_tenant_id)
+        self._audit(
+            action="identity.session.tenant_switch_denied", outcome=AuditOutcome.DENIED,
+            trace_id=trace_id, policy_version=policy_version,
+            tenant_id=principal.tenant_id, actor_id=principal.user_id,
+            target_type="tenant", target_id=target,
+            metadata={
+                "prior_session_id": principal.session_id,
+                "prior_tenant_id": principal.tenant_id,
+                "target_tenant_id": target,
+                "reason_code": reason_code,
+            },
+        )
+
+    def switch_session_tenant(
+        self, *, access_token: str, tenant_id: str, trace_id: str,
+        policy_version: str,
+    ) -> tuple[SessionCredentials, str]:
+        target_tenant = _checked_text(tenant_id)
+        _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            from .identity_postgres import PostgresIdentityRepository
+            if isinstance(self._repository, PostgresIdentityRepository):
+                connection.execute(
+                    "SELECT session_id FROM sessions WHERE access_digest=? FOR UPDATE",
+                    (_digest(access_token),),
+                ).fetchone()
+            prior = self._principal(connection, access_token, now)
+            user_id = str(prior["user_id"])
+            choices = self._selectable_tenant_workspaces(connection, user_id)
+            workspace_id = next(
+                (workspace for candidate, _, workspace in choices if candidate == target_tenant),
+                None,
+            )
+            if workspace_id is None:
+                raise IdentityError("TENANT_UNAVAILABLE", 404)
+            kind = ClientKind(str(prior["client_kind"]))
+            if target_tenant == str(prior["tenant_id"]):
+                return (
+                    SessionCredentials(
+                        access_token, None, user_id, str(prior["session_id"]),
+                        str(prior["device_id"]), target_tenant, kind,
+                        "native_https_opaque_bearer" if kind is ClientKind.NATIVE
+                        else "web_session_cookie_boundary_m4_05",
+                    ),
+                    workspace_id,
+                )
+            old_device = connection.execute(
+                "SELECT platform FROM devices WHERE device_id=? AND user_id=?",
+                (str(prior["device_id"]), user_id),
+            ).fetchone()
+            if old_device is None:
+                raise IdentityError("ACCESS_INVALID", 401)
+            device_id, session_id, access = _id("dev"), _id("ses"), _opaque()
+            access_expiry = WEB_SESSION_EXPIRY if kind is ClientKind.WEB else now + ACCESS_TTL
+            connection.execute(
+                "INSERT INTO devices(device_id,tenant_id,user_id,platform,state,last_seen_at,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (device_id, target_tenant, user_id, str(old_device["platform"]), "registered",
+                 _iso(now), _iso(now), _iso(now)),
+            )
+            connection.execute(
+                "INSERT INTO sessions(session_id,tenant_id,user_id,device_id,client_kind,access_digest,"
+                "access_expires_at,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (session_id, target_tenant, user_id, device_id, kind.value, _digest(access),
+                 _iso(access_expiry), "active", _iso(now), _iso(now)),
+            )
+            refresh = None
+            if kind is ClientKind.NATIVE:
+                family_id, refresh = _id("fam"), _opaque()
+                connection.execute(
+                    "INSERT INTO refresh_families(family_id,session_id,state,created_at,updated_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (family_id, session_id, "active", _iso(now), _iso(now)),
+                )
+                connection.execute(
+                    "INSERT INTO refresh_tokens(refresh_id,family_id,refresh_digest,expires_at,used_at,created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (_id("ref"), family_id, _digest(refresh), _iso(now + REFRESH_TTL), None, _iso(now)),
+                )
+            connection.execute(
+                "UPDATE sessions SET state='revoked',updated_at=? WHERE session_id=? AND state='active'",
+                (_iso(now), str(prior["session_id"])),
+            )
+            connection.execute(
+                "UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id=?",
+                (_iso(now), str(prior["session_id"])),
+            )
+            connection.execute(
+                "INSERT INTO session_tenant_switch_outbox(event_id,prior_session_id,new_session_id,"
+                "prior_tenant_id,target_tenant_id,actor_id,outcome,reason_code,occurred_at,trace_id,"
+                "policy_version,delivered_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (_id("audit"), str(prior["session_id"]), session_id,
+                 str(prior["tenant_id"]), target_tenant, user_id, "succeeded", "USER_SELECTED",
+                 _iso(now), trace_id, policy_version, None, _iso(now)),
+            )
+            credentials = SessionCredentials(
+                access, refresh, user_id, session_id, device_id, target_tenant, kind,
+                "web_session_cookie_boundary_m4_05" if kind is ClientKind.WEB
+                else "native_opaque_refresh_rotation",
+            )
+        self.dispatch_pending_tenant_switch_audits()
+        return credentials, workspace_id
+
+    def change_current_password(
+        self,
+        *,
+        access_token: str,
+        current_password: str,
+        new_password: str,
+        trace_id: str,
+        policy_version: str,
+    ) -> None:
+        replacement = _password(new_password)
+        _checked_text(trace_id); _checked_text(policy_version)
+        if (
+            not isinstance(current_password, str)
+            or len(current_password) > 256
+            or any(ord(character) < 32 for character in current_password)
+        ):
+            raise IdentityError("AUTHENTICATION_REQUIRED", 401)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            user = connection.execute(
+                "SELECT password_digest FROM users WHERE user_id=? AND issuer='local'",
+                (str(principal["user_id"]),),
+            ).fetchone()
+            try:
+                if user is None or user["password_digest"] is None:
+                    raise VerifyMismatchError()
+                PASSWORD_HASHER.verify(str(user["password_digest"]), current_password)
+            except Exception as error:
+                raise IdentityError("AUTHENTICATION_REQUIRED", 401) from error
+            connection.execute(
+                "UPDATE users SET password_digest=?,password_change_required=FALSE WHERE user_id=?",
+                (PASSWORD_HASHER.hash(replacement), str(principal["user_id"])),
+            )
+            revoke_user_sessions(
+                connection, user_id=str(principal["user_id"]), updated_at=now,
+            )
+            draft = self._audit(
+                action="identity.password.changed",
+                outcome=AuditOutcome.SUCCEEDED,
+                trace_id=trace_id,
+                policy_version=policy_version,
+                tenant_id=str(principal["tenant_id"]),
+                actor_id=str(principal["user_id"]),
+                target_type="user",
+                target_id=str(principal["user_id"]),
+                metadata={"reason_code": "CURRENT_PASSWORD_CHANGED"},
+            )
+            if self._notification_inbox_enabled is True and hasattr(connection, "_connection"):
+                from .notification_password import record_password_change_event
+                record_password_change_event(connection, self, principal, event=draft)
+
+    def rotate_refresh(self, refresh_token: str | None, *, trace_id: str, policy_version: str) -> SessionCredentials:
+        _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        replay = False
+        with self._lock, self._repository.transaction() as connection:
+            row = None
+            if refresh_token is not None:
+                try:
+                    _checked_text(refresh_token, opaque=True)
+                except IdentityError:
+                    refresh_token = None
+                else:
+                    row = connection.execute(
+                        """SELECT rt.*,rf.session_id,rf.state AS family_state,s.*
+                        FROM refresh_tokens rt JOIN refresh_families rf ON rf.family_id=rt.family_id
+                        JOIN sessions s ON s.session_id=rf.session_id WHERE rt.refresh_digest=?""",
+                        (_digest(refresh_token),),
+                    ).fetchone()
+            if row is None:
+                self._audit(
+                    action="identity.refresh.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id="identity-public",
+                    target_type="refresh_credential", target_id="unknown-refresh",
+                    metadata={"reason_code": "REFRESH_INVALID"},
+                )
+                raise IdentityError("REFRESH_INVALID", 401)
+            family_id, session_id = str(row["family_id"]), str(row["session_id"])
+            if row["used_at"] is not None:
+                connection.execute("UPDATE refresh_families SET state='revoked',updated_at=? WHERE family_id=?", (_iso(now), family_id))
+                connection.execute("UPDATE sessions SET state='revoked',updated_at=? WHERE session_id=?", (_iso(now), session_id))
+                self._audit(
+                    action="identity.refresh.replay_denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(row["tenant_id"]),
+                    actor_id=str(row["user_id"]), target_type="refresh_family", target_id=family_id,
+                    metadata={"reason_code": "REFRESH_REPLAYED"},
+                )
+                self._audit(
+                    action="identity.session.revoked", outcome=AuditOutcome.SUCCEEDED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(row["tenant_id"]),
+                    actor_id=str(row["user_id"]), target_type="session", target_id=session_id,
+                    metadata={"reason_code": "REFRESH_REPLAYED"},
+                )
+                replay = True
+            elif row["family_state"] != "active" or row["state"] != "active":
+                self._audit(
+                    action="identity.refresh.denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(row["tenant_id"]),
+                    actor_id=str(row["user_id"]), target_type="refresh_family", target_id=family_id,
+                    metadata={"reason_code": "SESSION_REVOKED", "session_id": session_id},
+                )
+                raise IdentityError("SESSION_REVOKED", 401)
+            elif _dt(str(row["expires_at"])) <= now:
+                self._audit(
+                    action="identity.refresh.expired", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(row["tenant_id"]),
+                    actor_id=str(row["user_id"]), target_type="refresh_family", target_id=family_id,
+                    metadata={"reason_code": "REFRESH_EXPIRED", "session_id": session_id},
+                )
+                raise IdentityError("REFRESH_EXPIRED", 401)
+            else:
+                access, refresh = _opaque(), _opaque()
+                connection.execute("UPDATE refresh_tokens SET used_at=? WHERE refresh_id=? AND used_at IS NULL", (_iso(now), str(row["refresh_id"])))
+                connection.execute("UPDATE sessions SET access_digest=?,access_expires_at=?,updated_at=? WHERE session_id=?", (_digest(access), _iso(now + ACCESS_TTL), _iso(now), session_id))
+                connection.execute("INSERT INTO refresh_tokens(refresh_id,family_id,refresh_digest,expires_at,used_at,created_at) VALUES (?,?,?,?,?,?)", (_id("ref"), family_id, _digest(refresh), _iso(now + REFRESH_TTL), None, _iso(now)))
+                self._audit(
+                    action="identity.refresh.rotated", outcome=AuditOutcome.SUCCEEDED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(row["tenant_id"]),
+                    actor_id=str(row["user_id"]), target_type="session", target_id=session_id,
+                )
+                result = SessionCredentials(access, refresh, str(row["user_id"]), session_id, str(row["device_id"]), str(row["tenant_id"]), ClientKind.NATIVE, "native_opaque_refresh_rotation")
+        if replay:
+            raise IdentityError("REFRESH_REPLAYED", 401)
+        return result
+
+    def requires_step_up(self, tenant_id: str, action_group: str) -> bool:
+        return _checked_text(action_group) in self._repository.required_step_up_actions(_checked_text(tenant_id))
+
+    def issue_step_up(self, *, access_token: str, action_group: str, target_id: str,
+                      policy_version: str, trace_id: str, ttl_seconds: int = DEFAULT_STEP_UP_TTL_SECONDS) -> StepUpGrant:
+        action_group = _checked_text(action_group); target_id = _checked_text(target_id)
+        _checked_text(policy_version); _checked_text(trace_id)
+        if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or not 1 <= ttl_seconds <= MAX_STEP_UP_TTL_SECONDS:
+            raise IdentityError("STEP_UP_TTL_INVALID")
+        now = self._now(); raw = _opaque()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            tenant_id = str(principal["tenant_id"])
+            actions = connection.execute("SELECT 1 FROM tenant_step_up_actions WHERE tenant_id=? AND action_group=?", (tenant_id, action_group)).fetchone()
+            if actions is None:
+                raise IdentityError("STEP_UP_ACTION_NOT_REQUIRED", 403)
+            expires = now + timedelta(seconds=ttl_seconds)
+            step_id = _id("sup")
+            connection.execute(
+                """INSERT INTO step_up_authorizations(step_up_id,authorization_digest,tenant_id,
+                actor_id,session_id,device_id,action_group,target_id,policy_version,issued_at,expires_at,used_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (step_id, _digest(raw), tenant_id, str(principal["user_id"]), str(principal["session_id"]),
+                 str(principal["device_id"]), action_group, target_id, policy_version, _iso(now), _iso(expires), None),
+            )
+            self._audit(action="identity.step_up.issued", outcome=AuditOutcome.SUCCEEDED,
+                        trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                        actor_id=str(principal["user_id"]), target_type="step_up", target_id=step_id,
+                        metadata={"action_group": action_group})
+        return StepUpGrant(raw, now, expires)
+
+    def issue_step_up_after_reauthentication(
+        self, *, access_token: str, password: str, action_group: str, target_id: str,
+        policy_version: str, trace_id: str,
+        ttl_seconds: int = DEFAULT_STEP_UP_TTL_SECONDS,
+        idempotency_key: str | None = None,
+    ) -> StepUpGrant:
+        """Issue a step-up grant only after current local credentials are verified."""
+        secret = _password(password)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            if idempotency_key is not None:
+                _checked_text(idempotency_key)
+                if not 16 <= len(idempotency_key) <= 128:
+                    raise IdentityError("INVALID_INPUT")
+                fingerprint = hashlib.sha256(
+                    json.dumps([str(principal["tenant_id"]), str(principal["user_id"]), str(principal["session_id"]), action_group, target_id, policy_version, ttl_seconds], separators=(",", ":")).encode("utf-8")
+                ).hexdigest()
+                existing = connection.execute(
+                    """SELECT replay.*, authorization.authorization_digest AS stored_authorization_digest,
+                              authorization.session_id AS stored_session_id,
+                              authorization.action_group AS stored_action_group,
+                              authorization.target_id AS stored_target_id,
+                              authorization.policy_version AS stored_policy_version
+                       FROM step_up_idempotency AS replay
+                       JOIN step_up_authorizations AS authorization
+                         ON authorization.step_up_id=replay.step_up_id
+                       WHERE replay.tenant_id=? AND replay.actor_id=? AND replay.idempotency_key=?""",
+                    (str(principal["tenant_id"]), str(principal["user_id"]), idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing["request_fingerprint"]) != fingerprint:
+                        raise IdentityError("IDEMPOTENCY_KEY_REUSED", 409)
+                    if (
+                        str(existing["key_id"]) != STEP_UP_TOKEN_KEY_ID
+                        or int(existing["key_version"]) != STEP_UP_TOKEN_KEY_VERSION
+                    ):
+                        raise IdentityError("STEP_UP_TOKEN_KEY_VERSION_UNAVAILABLE", 503)
+                    raw = self._step_up_hmac(str(principal["tenant_id"]), str(principal["user_id"]), idempotency_key, fingerprint, str(existing["step_up_id"]))
+                    expected_binding = (
+                        _digest(raw),
+                        str(principal["session_id"]),
+                        action_group,
+                        target_id,
+                        policy_version,
+                    )
+                    stored_binding = (
+                        str(existing["authorization_digest"]),
+                        str(existing["stored_session_id"]),
+                        str(existing["stored_action_group"]),
+                        str(existing["stored_target_id"]),
+                        str(existing["stored_policy_version"]),
+                    )
+                    if (
+                        expected_binding != stored_binding
+                        or str(existing["stored_authorization_digest"])
+                        != str(existing["authorization_digest"])
+                    ):
+                        raise IdentityError("STEP_UP_REPLAY_INVALID", 503)
+                    return StepUpGrant(raw, _dt(str(existing["issued_at"])), _dt(str(existing["expires_at"])))
+            user = connection.execute(
+                "SELECT issuer,password_digest FROM users WHERE user_id=?",
+                (str(principal["user_id"]),),
+            ).fetchone()
+            if user is None or str(user["issuer"]) != "local" or user["password_digest"] is None:
+                raise IdentityError("STEP_UP_REAUTH_UNAVAILABLE", 403)
+            try:
+                PASSWORD_HASHER.verify(str(user["password_digest"]), secret)
+            except Exception as error:
+                raise IdentityError("STEP_UP_REAUTH_REQUIRED", 403) from error
+            expires = now + timedelta(seconds=ttl_seconds)
+            step_id = _id("sup")
+            raw = _opaque() if idempotency_key is None else self._step_up_hmac(str(principal["tenant_id"]), str(principal["user_id"]), idempotency_key, fingerprint, step_id)
+            connection.execute("""INSERT INTO step_up_authorizations(step_up_id,authorization_digest,tenant_id,actor_id,session_id,device_id,action_group,target_id,policy_version,issued_at,expires_at,used_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (step_id,_digest(raw),str(principal["tenant_id"]),str(principal["user_id"]),str(principal["session_id"]),str(principal["device_id"]),action_group,target_id,policy_version,_iso(now),_iso(expires),None))
+            if idempotency_key is not None:
+                connection.execute(
+                    """INSERT INTO step_up_idempotency
+                    (tenant_id,actor_id,idempotency_key,request_fingerprint,step_up_id,
+                     authorization_digest,action_group,target_id,policy_version,key_id,key_version,
+                     issued_at,expires_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        str(principal["tenant_id"]), str(principal["user_id"]),
+                        idempotency_key, fingerprint, step_id, _digest(raw), action_group,
+                        target_id, policy_version, STEP_UP_TOKEN_KEY_ID,
+                        STEP_UP_TOKEN_KEY_VERSION, _iso(now), _iso(expires),
+                    ),
+                )
+            self._audit(action="identity.step_up.issued", outcome=AuditOutcome.SUCCEEDED, trace_id=trace_id, policy_version=policy_version, tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]), target_type="step_up", target_id=step_id, metadata={"action_group": action_group})
+            return StepUpGrant(raw, now, expires)
+
+    def _step_up_hmac(self, tenant_id: str, actor_id: str, idempotency_key: str, fingerprint: str, step_id: str) -> str:
+        material = "|".join(("daon-step-up-v1", tenant_id, actor_id, idempotency_key, fingerprint, step_id)).encode("utf-8")
+        return "sup_" + hmac.new(self._step_up_token_key, material, hashlib.sha256).hexdigest()
+
+    def _consume_step_up(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        raw: str | None,
+        principal: sqlite3.Row,
+        action_group: str,
+        target_id: str,
+        policy_version: str,
+        trace_id: str,
+        now: datetime,
+        operation: str | None = None,
+        idempotency_key: str | None = None,
+        success_audit=None,
+        operations_scope=None,
+    ) -> None:
+        tenant_id, actor_id = str(principal["tenant_id"]), str(principal["user_id"])
+        if (operation is None) != (idempotency_key is None):
+            raise IdentityError("INVALID_INPUT")
+        if operation is not None and idempotency_key is not None:
+            operation = _checked_text(operation)
+            idempotency_key = _checked_text(idempotency_key)
+            if len(idempotency_key) > 128:
+                raise IdentityError("INVALID_INPUT")
+        if raw is None:
+            raise IdentityError("STEP_UP_REQUIRED", 403)
+        _checked_text(raw, opaque=True)
+        row = connection.execute("SELECT * FROM step_up_authorizations WHERE authorization_digest=?", (_digest(raw),)).fetchone()
+        if row is None:
+            raise IdentityError("STEP_UP_REQUIRED", 403)
+        from .operations_audit_scope import scope_metadata
+        observed_scope=scope_metadata(operations_scope,principal)
+        def denial_metadata(reason):
+            value={"reason_code":reason}
+            if observed_scope is not None:value["operations_scope"]=observed_scope
+            return value
+        consumption_fingerprint = hashlib.sha256(
+            json.dumps(
+                [
+                    str(row["step_up_id"]),
+                    actor_id,
+                    str(principal["session_id"]),
+                    str(principal["device_id"]),
+                    tenant_id,
+                    action_group,
+                    target_id,
+                    policy_version,
+                ],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if row["used_at"] is not None:
+            if operation is not None and idempotency_key is not None:
+                replay = connection.execute(
+                    """SELECT request_fingerprint,step_up_id
+                       FROM step_up_consumptions
+                       WHERE tenant_id=? AND actor_id=? AND operation=? AND idempotency_key=?""",
+                    (tenant_id, actor_id, operation, idempotency_key),
+                ).fetchone()
+                if (
+                    replay is not None
+                    and str(replay["request_fingerprint"]) == consumption_fingerprint
+                    and str(replay["step_up_id"]) == str(row["step_up_id"])
+                ):
+                    return
+            self._audit(action="identity.step_up.reuse_denied", outcome=AuditOutcome.DENIED,
+                        trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                        actor_id=actor_id, target_type="step_up", target_id=str(row["step_up_id"]),
+                        metadata=denial_metadata("STEP_UP_REUSED"))
+            raise IdentityError("STEP_UP_REUSED", 403)
+        if _dt(str(row["expires_at"])) <= now:
+            self._audit(action="identity.step_up.expired", outcome=AuditOutcome.DENIED,
+                        trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                        actor_id=actor_id, target_type="step_up", target_id=str(row["step_up_id"]),
+                        metadata=denial_metadata("STEP_UP_EXPIRED"))
+            raise IdentityError("STEP_UP_EXPIRED", 403)
+        binding = (actor_id, str(principal["session_id"]), str(principal["device_id"]), tenant_id, action_group, target_id, policy_version)
+        expected = (str(row["actor_id"]), str(row["session_id"]), str(row["device_id"]), str(row["tenant_id"]), str(row["action_group"]), str(row["target_id"]), str(row["policy_version"]))
+        if binding != expected:
+            self._audit(action="identity.step_up.binding_denied", outcome=AuditOutcome.DENIED,
+                        trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                        actor_id=actor_id, target_type="step_up", target_id=str(row["step_up_id"]),
+                        metadata=denial_metadata("STEP_UP_BINDING_DENIED"))
+            raise IdentityError("STEP_UP_BINDING_DENIED", 403)
+        connection.execute("UPDATE step_up_authorizations SET used_at=? WHERE step_up_id=? AND used_at IS NULL", (_iso(now), str(row["step_up_id"])))
+        if operation is not None and idempotency_key is not None:
+            connection.execute(
+                """INSERT INTO step_up_consumptions
+                (tenant_id,actor_id,operation,idempotency_key,request_fingerprint,step_up_id,consumed_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                (
+                    tenant_id,
+                    actor_id,
+                    operation,
+                    idempotency_key,
+                    consumption_fingerprint,
+                    str(row["step_up_id"]),
+                    _iso(now),
+                ),
+            )
+        (success_audit or self._audit)(action="identity.step_up.used", outcome=AuditOutcome.SUCCEEDED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=tenant_id,
+                    actor_id=actor_id, target_type="step_up", target_id=str(row["step_up_id"]),
+                    metadata={"action_group": action_group})
+
+    def consume_step_up(
+        self,
+        *,
+        step_up_authorization: str | None,
+        access_token: str,
+        action_group: str,
+        target_id: str,
+        policy_version: str,
+        trace_id: str,
+        operation: str | None = None,
+        idempotency_key: str | None = None,
+        operations_scope=None,
+    ) -> None:
+        action_group = _checked_text(action_group); target_id = _checked_text(target_id)
+        _checked_text(policy_version); _checked_text(trace_id)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            self._consume_step_up(connection, raw=step_up_authorization, principal=principal,
+                                  action_group=action_group, target_id=target_id,
+                                  policy_version=policy_version, trace_id=trace_id, now=now,
+                                  operation=operation, idempotency_key=idempotency_key,operations_scope=operations_scope)
+
+    def trust_device(self, *, access_token: str, device_id: str, trace_id: str, policy_version: str) -> None:
+        device_id = _checked_text(device_id); _checked_text(trace_id); _checked_text(policy_version)
+        now = self._now()
+        with self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            self._trust_device_in_transaction(connection, principal, device_id, now, trace_id, policy_version)
+
+    def _trust_device_in_transaction(self, connection, principal, device_id, now, trace_id, policy_version, success_audit=None):
+            if str(principal["device_id"]) != device_id:
+                self._audit(
+                    action="identity.device.trust_denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version,
+                    tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                    target_type="device", target_id=device_id,
+                    metadata={"reason_code": "DEVICE_BINDING_DENIED"},
+                )
+                raise IdentityError("DEVICE_BINDING_DENIED", 403)
+            try:
+                self._owned_account_target(connection, principal, "devices", "device_id", device_id)
+            except IdentityError:
+                self._audit(action="identity.device.trust_denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(principal["tenant_id"]),
+                    actor_id=str(principal["user_id"]), target_type="device", target_id="unavailable-device",
+                    metadata={"reason_code": "DEVICE_BINDING_DENIED"})
+                raise
+            connection.execute("UPDATE devices SET state='trusted',updated_at=? WHERE device_id=?", (_iso(now), device_id))
+            (success_audit or self._audit)(
+                action="identity.device.trusted", outcome=AuditOutcome.SUCCEEDED,
+                trace_id=trace_id, policy_version=policy_version,
+                tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                target_type="device", target_id=device_id,
+            )
+
+    @staticmethod
+    def _owned_account_target(connection, principal, table, key, target_id):
+        # Identifiers are internal constants, never request strings. Lock before consuming Step-up.
+        assert (table, key) in {("devices", "device_id"), ("sessions", "session_id")}
+        suffix = " FOR UPDATE" if hasattr(connection, "_connection") else ""
+        row = connection.execute(
+            f"SELECT {key} FROM {table} WHERE {key}=? AND tenant_id=? AND user_id=? AND state<>'revoked'" + suffix,
+            (target_id, str(principal["tenant_id"]), str(principal["user_id"])),
+        ).fetchone()
+        if row is None: raise IdentityError("DEVICE_TARGET_UNAVAILABLE" if table == "devices" else "SESSION_TARGET_UNAVAILABLE", 404)
+        return row
+
+    def revoke_session(self, *, access_token: str, session_id: str,
+                       step_up_authorization: str | None, policy_version: str,
+                       trace_id: str) -> SessionRevocationEvent:
+        session_id = _checked_text(session_id); _checked_text(policy_version); _checked_text(trace_id)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            self._revoke_session_in_transaction(connection, principal, session_id, step_up_authorization, now, trace_id, policy_version)
+        return SessionRevocationEvent(session_id)
+
+    def _revoke_session_in_transaction(self, connection, principal, session_id, step_up_authorization, now, trace_id, policy_version, success_audit=None):
+            try:
+                self._owned_account_target(connection, principal, "sessions", "session_id", session_id)
+            except IdentityError:
+                self._audit(action="identity.session.revoke_denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version, tenant_id=str(principal["tenant_id"]),
+                    actor_id=str(principal["user_id"]), target_type="session", target_id="unavailable-session",
+                    metadata={"reason_code": "SESSION_TARGET_UNAVAILABLE"})
+                raise
+            target = connection.execute(
+                """SELECT session_id FROM sessions
+                WHERE session_id=? AND tenant_id=? AND user_id=? AND state='active'""",
+                (session_id, str(principal["tenant_id"]), str(principal["user_id"])),
+            ).fetchone()
+            if target is None:
+                self._audit(
+                    action="identity.session.revoke_denied", outcome=AuditOutcome.DENIED,
+                    trace_id=trace_id, policy_version=policy_version,
+                    tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                    target_type="session", target_id="unavailable-session",
+                    metadata={"reason_code": "SESSION_TARGET_UNAVAILABLE"},
+                )
+                raise IdentityError("SESSION_TARGET_UNAVAILABLE", 404)
+            self._consume_step_up(
+                connection, raw=step_up_authorization, principal=principal,
+                action_group="device_session_or_sync_key_revoke", target_id=session_id,
+                policy_version=policy_version, trace_id=trace_id, now=now, success_audit=success_audit,
+            )
+            connection.execute(
+                "UPDATE sessions SET state='revoked',updated_at=? WHERE session_id=? AND state='active'",
+                (_iso(now), session_id),
+            )
+            connection.execute(
+                "UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id=?",
+                (_iso(now), session_id),
+            )
+            (success_audit or self._audit)(
+                action="identity.session.revoked", outcome=AuditOutcome.SUCCEEDED,
+                trace_id=trace_id, policy_version=policy_version,
+                tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                target_type="session", target_id=session_id,
+                metadata={"reason_code": "USER_REQUESTED"},
+            )
+
+    def revoke_current_web_session(
+        self, *, access_token: str, policy_version: str, trace_id: str,
+    ) -> CurrentSessionLogoutEvent:
+        """Revoke only the web session bound to the presented cookie credential."""
+        _checked_text(policy_version); _checked_text(trace_id)
+        try:
+            checked_access = _checked_text(access_token, opaque=True)
+        except IdentityError as error:
+            raise IdentityError("ACCESS_INVALID", 401) from error
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE access_digest = ?", (_digest(checked_access),)
+            ).fetchone()
+            if row is None or str(row["client_kind"]) != ClientKind.WEB.value:
+                raise IdentityError("ACCESS_INVALID", 401)
+            session_id = str(row["session_id"])
+            replayed = str(row["state"]) != "active" or _dt(str(row["access_expires_at"])) <= now
+            if not replayed:
+                connection.execute(
+                    "UPDATE sessions SET state='revoked',updated_at=? WHERE session_id=? AND state='active'",
+                    (_iso(now), session_id),
+                )
+                connection.execute(
+                    "UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id=?",
+                    (_iso(now), session_id),
+                )
+                event_id = "audit-self-logout-" + hashlib.sha256(
+                    f"SELF_LOGOUT\0{session_id}".encode("utf-8")
+                ).hexdigest()[:32]
+                connection.execute(
+                    "INSERT INTO session_audit_outbox(event_id,session_id,action,tenant_id,actor_id,occurred_at,trace_id,policy_version,delivered_at,created_at) "
+                    "VALUES (?,?, 'identity.session.self_revoked',?,?,?,?,?,?,?)",
+                    (event_id, session_id, str(row["tenant_id"]), str(row["user_id"]),
+                     _iso(now), trace_id, policy_version, None, _iso(now)),
+                )
+        self._project_self_logout_audit(session_id)
+        return CurrentSessionLogoutEvent(replayed=replayed)
+
+    def revoke_current_native_session(
+        self, *, access_token: str, policy_version: str, trace_id: str,
+    ) -> CurrentSessionLogoutEvent:
+        """Revoke the one native session identified by the presented access digest."""
+        _checked_text(policy_version); _checked_text(trace_id)
+        try:
+            checked_access = _checked_text(access_token, opaque=True)
+        except IdentityError as error:
+            raise IdentityError("ACCESS_INVALID", 401) from error
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE access_digest = ?", (_digest(checked_access),)
+            ).fetchone()
+            if row is None or str(row["client_kind"]) != ClientKind.NATIVE.value:
+                raise IdentityError("ACCESS_INVALID", 401)
+            session_id = str(row["session_id"])
+            replayed = str(row["state"]) != "active"
+            if not replayed:
+                connection.execute(
+                    "UPDATE sessions SET state='revoked',updated_at=? WHERE session_id=? AND state='active'",
+                    (_iso(now), session_id),
+                )
+                connection.execute(
+                    "UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id=?",
+                    (_iso(now), session_id),
+                )
+                event_id = "audit-self-logout-" + hashlib.sha256(
+                    f"SELF_LOGOUT\0{session_id}".encode("utf-8")
+                ).hexdigest()[:32]
+                connection.execute(
+                    "INSERT INTO session_audit_outbox(event_id,session_id,action,tenant_id,actor_id,occurred_at,trace_id,policy_version,delivered_at,created_at) "
+                    "VALUES (?,?, 'identity.session.self_revoked',?,?,?,?,?,?,?)",
+                    (event_id, session_id, str(row["tenant_id"]), str(row["user_id"]),
+                     _iso(now), trace_id, policy_version, None, _iso(now)),
+                )
+        self._project_self_logout_audit(session_id)
+        return CurrentSessionLogoutEvent(replayed=replayed)
+
+    def revoke_device(self, *, access_token: str, device_id: str,
+                      step_up_authorization: str | None, policy_version: str,
+                      trace_id: str) -> DeviceRevocationEvent:
+        device_id = _checked_text(device_id); _checked_text(policy_version); _checked_text(trace_id)
+        now = self._now()
+        with self._lock, self._repository.transaction() as connection:
+            principal = self._principal(connection, access_token, now)
+            self._revoke_device_in_transaction(connection, principal, device_id, step_up_authorization, now, trace_id, policy_version)
+        return DeviceRevocationEvent(device_id, True)
+
+    def _revoke_device_in_transaction(self, connection, principal, device_id, step_up_authorization, now, trace_id, policy_version, success_audit=None):
+            self._owned_account_target(connection, principal, "devices", "device_id", device_id)
+            targets = connection.execute("SELECT session_id FROM sessions WHERE device_id=? AND tenant_id=? AND user_id=? AND state='active' ORDER BY session_id" + (" FOR UPDATE" if hasattr(connection, "_connection") else ""),
+                (device_id, str(principal["tenant_id"]), str(principal["user_id"]))).fetchall()
+            self._consume_step_up(connection, raw=step_up_authorization, principal=principal,
+                                  action_group="device_session_or_sync_key_revoke", target_id=device_id,
+                                  policy_version=policy_version, trace_id=trace_id, now=now, success_audit=success_audit)
+            connection.execute("UPDATE devices SET state='revoked',updated_at=? WHERE device_id=? AND tenant_id=? AND user_id=?", (_iso(now), device_id, str(principal["tenant_id"]), str(principal["user_id"])))
+            connection.execute("UPDATE sessions SET state='revoked',updated_at=? WHERE device_id=? AND tenant_id=? AND user_id=?", (_iso(now), device_id, str(principal["tenant_id"]), str(principal["user_id"])))
+            connection.execute("UPDATE refresh_families SET state='revoked',updated_at=? WHERE session_id IN (SELECT session_id FROM sessions WHERE device_id=? AND tenant_id=? AND user_id=?)", (_iso(now), device_id, str(principal["tenant_id"]), str(principal["user_id"])))
+            for target in targets:
+                (success_audit or self._audit)(action="identity.session.revoked", outcome=AuditOutcome.SUCCEEDED,
+                        trace_id=trace_id, policy_version=policy_version,
+                        tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                        target_type="session", target_id=str(target["session_id"]),
+                        metadata={"reason_code": "DEVICE_REVOKED"})
+            (success_audit or self._audit)(action="identity.device.revoked", outcome=AuditOutcome.SUCCEEDED,
+                        trace_id=trace_id, policy_version=policy_version,
+                        tenant_id=str(principal["tenant_id"]), actor_id=str(principal["user_id"]),
+                        target_type="device", target_id=device_id,
+                        metadata={"sync_key_revoke_required": True})
+
+
+def identity_contract_summary() -> dict[str, object]:
+    """Public deterministic capability summary for repository verification."""
+    return {
+        "schema_version": str(SCHEMA_VERSION),
+        "oidc_flow": "authorization_code_pkce_s256",
+        "credential_storage": "sha256_digest_only",
+        "web_delivery_boundary": "m4_05_same_origin_cookie",
+        "native_delivery": "opaque_access_refresh_rotation",
+        "sqlite": {"foreign_keys": True, "journal_mode": "WAL"},
+        "step_up_default_ttl_seconds": DEFAULT_STEP_UP_TTL_SECONDS,
+        "step_up_max_ttl_seconds": MAX_STEP_UP_TTL_SECONDS,
+        "minimum_step_up_actions": sorted(MINIMUM_STEP_UP_ACTION_GROUPS),
+        "explicit_session_revoke": True,
+        "denied_credential_audit": True,
+        "external_provider_verified": False,
+        "http_runtime_implemented": False,
+    }

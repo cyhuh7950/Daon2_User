@@ -1,0 +1,9 @@
+[project]
+name = "mcp-virtual"
+version = "0.1.0"
+description = "가상 MCP 서버(개발·시험 전용). 운영 환경에서는 기동하지 않는다."
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.uv]
+package = false

@@ -1,0 +1,206 @@
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from daon2_user_api.audit import AuditEventStore
+from daon2_user_api.identity import ClientKind, DevicePlatform, IdentityError, IdentityService, SqliteIdentityRepository
+
+
+class Sender:
+    def __init__(self): self.messages = []
+    def send(self, **message): self.messages.append(message)
+
+
+class Clock:
+    def __init__(self): self.now = datetime(2026, 8, 5, tzinfo=timezone.utc)
+    def __call__(self): return self.now
+    def advance(self, **delta): self.now += timedelta(**delta)
+
+
+def service(tmp_path, clock=None):
+    sender = Sender()
+    repo = SqliteIdentityRepository(tmp_path / "identity.db")
+    service = IdentityService(repository=repo, audit_store=AuditEventStore(), oidc_policies=(), clock=clock or (lambda: datetime.now(timezone.utc)), email_sender=sender)
+    return service, repo, sender
+
+
+def test_signup_verify_login_and_password_reset(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="Alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    assert len(sender.messages) == 1
+    token = sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0]
+    identity.verify_email(token=token, trace_id="t2", policy_version="p1")
+    credentials = identity.local_login(login_id="alice", password="correct horse battery staple", platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+    assert credentials.user_id.startswith("usr-")
+    identity.request_password_reset(identifier="alice", trace_id="t4", policy_version="p1")
+    reset = sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0]
+    identity.confirm_password_reset(token=reset, new_password="a newer correct password", trace_id="t5", policy_version="p1")
+    with pytest.raises(IdentityError) as error:
+        identity.validate_access(credentials.access_token, trace_id="t6", policy_version="p1")
+    assert error.value.code == "SESSION_REVOKED"
+    repo.close()
+
+
+def test_admin_reset_request_revokes_existing_sessions_before_email_delivery(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    verification = sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0]
+    identity.verify_email(token=verification, trace_id="t2", policy_version="p1")
+    credentials = identity.local_login(login_id="alice", password="correct horse battery staple", platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+    identity.request_password_reset(identifier="alice", trace_id="t4", policy_version="p1", revoke_sessions=True)
+    connection = repo._connect()
+    try:
+        session_state = connection.execute("SELECT state FROM sessions WHERE session_id=?", (credentials.session_id,)).fetchone()[0]
+    finally:
+        connection.close()
+    assert session_state == "revoked"
+    assert len(sender.messages) == 2
+    repo.close()
+
+
+def test_local_native_login_issues_windows_native_rotating_credentials_without_changing_web_contract(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    token = sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0]
+    identity.verify_email(token=token, trace_id="t2", policy_version="p1")
+
+    web = identity.local_login(login_id="alice", password="correct horse battery staple", platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+    native = identity.local_native_login(login_id="alice", password="correct horse battery staple", trace_id="t4", policy_version="p1")
+
+    assert web.client_kind is ClientKind.WEB
+    assert web.refresh_token is None
+    assert web.delivery == "web_session_cookie_boundary_m4_05"
+    assert native.client_kind is ClientKind.NATIVE
+    assert native.delivery == "native_opaque_refresh_rotation"
+    assert native.refresh_token is not None
+    connection = repo._connect()
+    try:
+        device = connection.execute("SELECT platform FROM devices WHERE device_id=?", (native.device_id,)).fetchone()
+        session = connection.execute("SELECT client_kind FROM sessions WHERE session_id=?", (native.session_id,)).fetchone()
+        refresh_family = connection.execute("SELECT family_id FROM refresh_families WHERE session_id=?", (native.session_id,)).fetchall()
+        refresh_token = connection.execute("SELECT used_at FROM refresh_tokens WHERE family_id=?", (refresh_family[0][0],)).fetchone()
+    finally:
+        connection.close()
+    assert device[0] == DevicePlatform.WINDOWS.value
+    assert session[0] == ClientKind.NATIVE.value
+    assert len(refresh_family) == 1
+    assert refresh_token[0] is None
+
+    rotated = identity.rotate_refresh(native.refresh_token, trace_id="t5", policy_version="p1")
+    assert rotated.client_kind is ClientKind.NATIVE
+    assert rotated.refresh_token is not None
+    with pytest.raises(IdentityError) as error:
+        identity.rotate_refresh(native.refresh_token, trace_id="t6", policy_version="p1")
+    assert error.value.code == "REFRESH_REPLAYED"
+    repo.close()
+
+
+def test_web_login_keeps_personal_tenant_when_organization_id_sorts_first(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    identity.verify_email(token=sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0], trace_id="t2", policy_version="p1")
+    connection = repo._connect()
+    try:
+        row = connection.execute("SELECT tenant_id,user_id FROM memberships WHERE role='personal_owner'").fetchone()
+        personal_tenant, user_id = str(row["tenant_id"]), str(row["user_id"])
+    finally:
+        connection.close()
+    repo.add_tenant_membership(tenant_id="qa-organization", user_id=user_id, role="member")
+
+    credentials = identity.local_login(login_id="alice", password="correct horse battery staple", platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+
+    assert credentials.tenant_id == personal_tenant
+    connection = repo._connect()
+    try:
+        session = connection.execute("SELECT tenant_id FROM sessions WHERE session_id=?", (credentials.session_id,)).fetchone()
+        organization = connection.execute("SELECT role FROM memberships WHERE tenant_id='qa-organization' AND user_id=?", (user_id,)).fetchone()
+    finally:
+        connection.close()
+    assert session["tenant_id"] == personal_tenant
+    assert organization["role"] == "member"
+    repo.close()
+
+
+def test_native_login_and_refresh_keep_personal_tenant_when_organization_id_sorts_first(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    identity.verify_email(token=sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0], trace_id="t2", policy_version="p1")
+    connection = repo._connect()
+    try:
+        row = connection.execute("SELECT tenant_id,user_id FROM memberships WHERE role='personal_owner'").fetchone()
+        personal_tenant, user_id = str(row["tenant_id"]), str(row["user_id"])
+    finally:
+        connection.close()
+    repo.add_tenant_membership(tenant_id="qa-organization", user_id=user_id, role="member")
+
+    credentials = identity.local_native_login(login_id="alice", password="correct horse battery staple", trace_id="t3", policy_version="p1")
+    refreshed = identity.rotate_refresh(credentials.refresh_token, trace_id="t4", policy_version="p1")
+
+    assert credentials.tenant_id == personal_tenant
+    assert refreshed.tenant_id == personal_tenant
+    repo.close()
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_local_login_without_personal_membership_preserves_organization_fallback(tmp_path, native):
+    identity, repo, sender = service(tmp_path)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    identity.verify_email(token=sender.messages[-1]["body"].split(": ", 1)[1].splitlines()[0], trace_id="t2", policy_version="p1")
+    connection = repo._connect()
+    try:
+        user_id = str(connection.execute("SELECT user_id FROM users WHERE login_id='alice'").fetchone()[0])
+    finally:
+        connection.close()
+    repo.add_tenant_membership(tenant_id="qa-organization", user_id=user_id, role="member")
+    with repo.transaction() as connection:
+        connection.execute("DELETE FROM memberships WHERE user_id=? AND role='personal_owner'", (user_id,))
+
+    if native:
+        credentials = identity.local_native_login(login_id="alice", password="correct horse battery staple", trace_id="t3", policy_version="p1")
+    else:
+        credentials = identity.local_login(login_id="alice", password="correct horse battery staple", platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+
+    assert credentials.tenant_id == "qa-organization"
+    connection = repo._connect()
+    try:
+        session = connection.execute("SELECT tenant_id FROM sessions WHERE session_id=?", (credentials.session_id,)).fetchone()
+    finally:
+        connection.close()
+    assert session["tenant_id"] == "qa-organization"
+    repo.close()
+
+
+def test_smtp_missing_configuration_is_explicit(tmp_path):
+    identity, repo, _ = service(tmp_path)
+    identity._email_sender = type("Unavailable", (), {"send": lambda self, **kwargs: (_ for _ in ()).throw(IdentityError("EMAIL_DELIVERY_UNAVAILABLE", 503))})()
+    with pytest.raises(IdentityError) as error:
+        identity.signup(login_id="bob", email="bob@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    assert error.value.code == "EMAIL_DELIVERY_UNAVAILABLE"
+    repo.close()
+
+
+def test_duplicate_signup_does_not_disclose_existing_account(tmp_path):
+    identity, repo, sender = service(tmp_path)
+    input_data = dict(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    identity.signup(**input_data)
+    identity.signup(**input_data)
+    assert len(sender.messages) == 1
+    repo.close()
+
+
+def test_verification_and_reset_mail_requests_are_rate_limited(tmp_path):
+    clock = Clock()
+    identity, repo, sender = service(tmp_path, clock)
+    identity.signup(login_id="alice", email="alice@example.com", password="correct horse battery staple", trace_id="t1", policy_version="p1")
+    with pytest.raises(IdentityError) as verification_error:
+        identity.resend_verification(identifier="alice", trace_id="t2", policy_version="p1")
+    assert verification_error.value.code == "RATE_LIMITED"
+    clock.advance(seconds=61)
+    identity.resend_verification(identifier="alice", trace_id="t3", policy_version="p1")
+    token = sender.messages[0]["body"].split(": ", 1)[1].splitlines()[0]
+    identity.verify_email(token=token, trace_id="t4", policy_version="p1")
+    identity.request_password_reset(identifier="alice", trace_id="t5", policy_version="p1")
+    with pytest.raises(IdentityError) as reset_error:
+        identity.request_password_reset(identifier="alice", trace_id="t6", policy_version="p1")
+    assert reset_error.value.code == "RATE_LIMITED"
+    repo.close()

@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+
+MIGRATION = (
+    Path(__file__).parents[1]
+    / "migrations/versions/0040_system_provider_connections.py"
+)
+ACCESS_MIGRATION = MIGRATION.with_name("0050_provider_connection_access.py")
+ROUTER_AUTO_MIGRATION = MIGRATION.with_name("0052_router_auto_model.py")
+
+
+class RecordingOperations:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+
+
+def load_migration():  # type: ignore[no-untyped-def]
+    spec = importlib.util.spec_from_file_location(
+        "system_provider_connections_0040",
+        MIGRATION,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def migration_sql() -> str:
+    module = load_migration()
+    operations = RecordingOperations()
+    with patch.object(module, "op", operations):
+        module.upgrade()
+    return "\n".join(operations.statements)
+
+
+def access_migration_sql() -> str:
+    spec = importlib.util.spec_from_file_location("provider_connection_access_0050", ACCESS_MIGRATION)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (module.revision, module.down_revision) == ("0050", "0049")
+    operations = RecordingOperations()
+    with patch.object(module, "op", operations):
+        module.upgrade()
+    return "\n".join(operations.statements)
+
+
+def test_migration_0052_adds_router_auto_without_rewriting_existing_data() -> None:
+    spec = importlib.util.spec_from_file_location("router_auto_model_0052", ROUTER_AUTO_MIGRATION)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (module.revision, module.down_revision) == ("0052", "0051")
+    operations = RecordingOperations()
+    with patch.object(module, "op", operations):
+        module.upgrade()
+    sql = "\n".join(operations.statements)
+    assert "ADD COLUMN auto_model_id text" in sql
+    assert "ADD COLUMN catalog_origin text" in sql
+    assert "DEFAULT 'upstream'" in sql
+    assert "'OMNIROUTE'" in sql and "'auto'" in sql
+    assert "'OPENROUTER'" in sql and "'openrouter/auto'" in sql
+    assert "CUSTOM" not in sql
+    assert "UPDATE system_provider_models" in sql
+    assert "catalog_origin='logical'" in sql
+    assert "c.provider_code='OMNIROUTE'" in sql and "m.model_id='auto'" in sql
+    for table in ("system_provider_allowed_models", "workspace_model_defaults", "user_provider_credentials"):
+        assert f"UPDATE {table}" not in sql
+        assert f"DELETE FROM {table}" not in sql
+
+
+def test_migration_0050_adds_policy_and_separate_allowed_models_without_deleting_data() -> None:
+    sql = access_migration_sql()
+
+    for field in ("access_mode", "credential_requirement", "short_code", "adapter_type", "provider_name"):
+        assert f"ADD COLUMN {field}" in sql
+    assert "CREATE TABLE system_provider_allowed_models" in sql
+    assert "INSERT INTO system_provider_allowed_models" in sql
+    assert "FROM system_provider_models" in sql
+    assert "CREATE UNIQUE INDEX" in sql and "short_code" in sql
+    assert "provider_code='OPENROUTER'" in sql and "'OR'" in sql
+    assert "ORDER BY connection_id" in sql
+    assert "DELETE FROM system_provider_connections" not in sql
+    assert "DELETE FROM system_provider_models" not in sql
+    assert "DELETE FROM workspace_model_defaults" not in sql
+
+
+def test_migration_0050_preserves_existing_credentials_and_defaults() -> None:
+    sql = access_migration_sql()
+
+    assert "encrypted_credential IS NOT NULL" in sql
+    assert "credential_requirement='none'" in sql
+    assert "THEN 'public' ELSE 'personal' END" in sql
+    assert "verification_status" in sql
+    assert "ALTER TABLE user_provider_credentials" in sql
+    assert "REFERENCES system_provider_models(connection_id, model_id)" in sql
+
+
+def test_migration_0040_creates_named_connection_catalog_and_workspace_defaults() -> None:
+    sql = migration_sql()
+
+    assert "CREATE TABLE system_provider_connections" in sql
+    assert "connection_id text PRIMARY KEY" in sql
+    assert "UNIQUE (provider_code)" not in sql
+    assert "encrypted_credential bytea" in sql
+    assert "credential_nonce bytea" in sql
+    assert "credential_schema_version integer" in sql
+    assert "CREATE TABLE system_provider_models" in sql
+    assert "PRIMARY KEY (connection_id, model_id)" in sql
+    assert "CREATE TABLE workspace_model_defaults" in sql
+    assert "PRIMARY KEY (tenant_id, workspace_id, capability)" in sql
+    assert "'MEDIA_BRIDGE','SENTENCE_TRANSFORMERS'" in sql
+
+
+def test_migration_0040_allows_nullable_credentials_but_requires_complete_envelope() -> None:
+    sql = migration_sql()
+
+    assert "encrypted_credential IS NULL" in sql
+    assert "credential_nonce IS NULL" in sql
+    assert "encryption_key_version IS NULL" in sql
+    assert "credential_schema_version IS NULL" in sql
+    assert "credential_version = 0" in sql
+    assert "credential_schema_version = 1" in sql
+    assert "octet_length(credential_nonce) = 12" in sql
+
+
+def test_migration_0040_maps_active_legacy_defaults_without_deleting_history() -> None:
+    sql = migration_sql()
+
+    assert "FROM provider_setting_role_bindings" in sql
+    assert "JOIN provider_setting_deployments" in sql
+    assert "JOIN provider_setting_profiles" in sql
+    assert "'text' THEN 'text_generation'" in sql
+    assert "'vision' THEN 'image_understanding'" in sql
+    assert "'document_parser' THEN 'document_parsing'" in sql
+    assert "PROVIDER_DEFAULT_MIGRATION_UNSUPPORTED_ROLE" in sql
+    assert "PROVIDER_DEFAULT_MIGRATION_COUNT_MISMATCH" in sql
+    upgrade_sql = MIGRATION.read_text("utf-8").split("def downgrade", 1)[0]
+    assert "DELETE FROM provider_setting_" not in upgrade_sql
+    assert "DROP TABLE provider_setting_" not in upgrade_sql
+
+
+def test_migration_0040_preserves_system_scope_and_workspace_rls_permissions() -> None:
+    sql = migration_sql()
+
+    assert "ALTER TABLE system_provider_connections OWNER TO daon_app" in sql
+    assert "ALTER TABLE system_provider_models OWNER TO daon_app" in sql
+    assert "ALTER TABLE workspace_model_defaults OWNER TO daon_app" in sql
+    assert "ALTER TABLE workspace_model_defaults ENABLE ROW LEVEL SECURITY" in sql
+    assert "ALTER TABLE workspace_model_defaults FORCE ROW LEVEL SECURITY" in sql
+    assert "current_setting('app.tenant_id', true)" in sql
+    assert "current_setting('app.workspace_id', true)" in sql
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON system_provider_connections" in sql
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON system_provider_models" in sql
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON workspace_model_defaults" in sql
+    assert "system_provider_connections ENABLE ROW LEVEL SECURITY" not in sql
+    assert "system_provider_models ENABLE ROW LEVEL SECURITY" not in sql
+
+
+def test_migration_0040_adds_immutable_system_idempotency_and_audit_outbox() -> None:
+    sql = migration_sql()
+
+    assert "CREATE TABLE system_provider_admin_idempotency" in sql
+    assert "PRIMARY KEY (tenant_id, actor_id, operation, idempotency_key)" in sql
+    assert "request_fingerprint text NOT NULL" in sql
+    assert "result jsonb NOT NULL" in sql
+    assert "CREATE TRIGGER system_provider_admin_idempotency_immutable" in sql
+    assert "CREATE TABLE system_provider_audit_outbox" in sql
+    assert "audit_payload jsonb NOT NULL" in sql
+    assert "published_at timestamptz" in sql
+    assert "GRANT SELECT, INSERT ON system_provider_admin_idempotency TO daon_app" in sql
+    assert "GRANT SELECT, INSERT, UPDATE (published_at) ON system_provider_audit_outbox TO daon_app" in sql
+    assert "system_provider_admin_idempotency ENABLE ROW LEVEL SECURITY" not in sql
+    assert "system_provider_audit_outbox ENABLE ROW LEVEL SECURITY" not in sql
+
+
+def test_migration_0040_is_forward_only() -> None:
+    module = load_migration()
+
+    with pytest.raises(RuntimeError, match="^PROVIDER_CONNECTIONS_DOWNGRADE_BLOCKED$"):
+        module.downgrade()

@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "report_schema_version": "1.0",
+  "foundation_status": "NOT_APPLICABLE_FOUNDATION_ONLY",
+  "categories": ["lint", "type", "unit", "contract", "build", "security", "independence"],
+  "components": [
+    {
+      "id": "apps/web",
+      "root": "apps/web",
+      "manifest": "apps/web/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["eslint.config.js", ".eslintrc.json"] }, "command": { "id": "web-workspace-lint", "command": ["npm", "run", "lint:workspace"], "failure_kind": "quality", "evidence_files": ["scripts/lint-workspace.mjs", "apps/web/app/page.jsx"] } },
+        "type": { "signals": { "extensions": [".ts", ".tsx"], "files": ["tsconfig.json"] }, "command": null },
+        "unit": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "directories": ["test", "tests", "__tests__"] }, "command": { "id": "web-workspace-unit", "command": ["npm", "run", "verify:workspace"], "failure_kind": "quality", "evidence_files": ["scripts/tests/workspace.test.mjs"] } },
+        "contract": { "signals": { "extensions": [], "files": ["openapi.json", "openapi.yaml", "openapi.yml"] }, "command": null },
+        "build": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["next.config.js", "next.config.mjs", "tsconfig.json"], "directories": ["src", "app", "pages"] }, "command": { "id": "web-production-build", "command": ["npm", "run", "build", "--workspace", "@daon2-user/web"], "failure_kind": "quality", "evidence_files": ["apps/web/next.config.mjs", "apps/web/app/page.jsx"] } }
+      }
+    },
+    {
+      "id": "apps/desktop",
+      "root": "apps/desktop",
+      "manifest": "apps/desktop/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".rs"], "files": ["eslint.config.js"] }, "command": { "id": "desktop-shell-lint", "command": ["npm", "run", "verify:desktop-lint"], "failure_kind": "quality", "evidence_files": ["scripts/lint-workspace.mjs", "apps/desktop/src/desktop-shell.jsx"] } },
+        "type": { "signals": { "extensions": [".ts", ".tsx", ".rs"], "files": ["tsconfig.json", "Cargo.toml"] }, "command": { "id": "desktop-rust-type", "command": ["npm", "run", "verify:desktop-type"], "failure_kind": "quality", "evidence_files": ["apps/desktop/src-tauri/Cargo.toml", "apps/desktop/src-tauri/Cargo.lock"] } },
+        "unit": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".rs"], "directories": ["test", "tests", "__tests__"] }, "command": { "id": "desktop-shell-unit", "command": ["npm", "run", "verify:desktop-unit"], "failure_kind": "quality", "evidence_files": ["scripts/tests/desktop-tauri-shell.test.mjs"] } },
+        "contract": { "signals": { "extensions": [], "files": [] }, "command": null },
+        "build": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".rs"], "files": ["tsconfig.json", "Cargo.toml", "tauri.conf.json"], "directories": ["src", "src-tauri"] }, "command": { "id": "desktop-production-assets", "command": ["npm", "run", "verify:desktop-build"], "failure_kind": "quality", "evidence_files": ["apps/desktop/index.html", "apps/desktop/src-tauri/tauri.conf.json"] } }
+      }
+    },
+    {
+      "id": "apps/mobile",
+      "root": "apps/mobile",
+      "manifest": "apps/mobile/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["eslint.config.js"] }, "command": { "id": "mobile-shell-lint", "command": ["npm", "run", "lint", "--workspace", "@daon2-user/mobile"], "failure_kind": "quality", "evidence_files": ["scripts/lint-workspace.mjs", "apps/mobile/src/MobileShell.tsx"] } },
+        "type": { "signals": { "extensions": [".ts", ".tsx"], "files": ["tsconfig.json"] }, "command": { "id": "mobile-shell-type", "command": ["npm", "run", "type", "--workspace", "@daon2-user/mobile"], "failure_kind": "quality", "evidence_files": ["apps/mobile/tsconfig.json", "apps/mobile/src/domain/navigation.ts"] } },
+        "unit": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "directories": ["test", "tests", "__tests__"] }, "command": { "id": "mobile-shell-unit", "command": ["npm", "run", "unit", "--workspace", "@daon2-user/mobile"], "failure_kind": "quality", "evidence_files": ["scripts/tests/mobile-shared-shell.test.mjs"] } },
+        "contract": { "signals": { "extensions": [".json"], "files": [] }, "command": { "id": "mobile-shell-contract", "command": ["npm", "run", "contract", "--workspace", "@daon2-user/mobile"], "failure_kind": "quality", "evidence_files": ["packages/contracts/mobile-studio-actions.json", "scripts/verify-mobile-studio-contract.mjs"] } },
+        "build": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["tsconfig.json", "app.json", "metro.config.cjs"], "directories": ["src", "android", "ios"] }, "command": { "id": "mobile-shell-production-bundle", "command": ["npm", "run", "build", "--workspace", "@daon2-user/mobile"], "failure_kind": "quality", "evidence_files": ["apps/mobile/index.js", "apps/mobile/metro.config.cjs", "apps/mobile/babel.config.cjs"] } }
+      }
+    },
+    {
+      "id": "packages/ui",
+      "root": "packages/ui",
+      "manifest": "packages/ui/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["eslint.config.js"] }, "command": { "id": "ui-workspace-lint", "command": ["npm", "run", "lint:workspace"], "failure_kind": "quality", "evidence_files": ["scripts/lint-workspace.mjs", "packages/ui/src/adaptive-workspace.jsx"] } },
+        "type": { "signals": { "extensions": [".ts", ".tsx"], "files": ["tsconfig.json"] }, "command": null },
+        "unit": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "directories": ["test", "tests", "__tests__"] }, "command": { "id": "ui-workspace-unit", "command": ["npm", "run", "verify:workspace"], "failure_kind": "quality", "evidence_files": ["scripts/tests/workspace.test.mjs"] } },
+        "contract": { "signals": { "extensions": [], "files": [] }, "command": null },
+        "build": { "signals": { "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"], "files": ["tsconfig.json"], "directories": ["src"] }, "command": { "id": "ui-production-build", "command": ["npm", "run", "build", "--workspace", "@daon2-user/web"], "failure_kind": "quality", "evidence_files": ["packages/ui/src/adaptive-workspace.jsx", "packages/ui/src/workspace.css"] } }
+      }
+    },
+    {
+      "id": "packages/contracts",
+      "root": "packages/contracts",
+      "manifest": "packages/contracts/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".py", ".json", ".yaml", ".yml"], "files": [] }, "command": { "id": "contracts-lint", "command": ["npm", "run", "verify:product-foundation"], "failure_kind": "quality", "evidence_files": ["packages/contracts/navigation.json", "packages/contracts/screens.json"] } },
+        "type": { "signals": { "extensions": [".ts", ".py"], "files": ["tsconfig.json", "pyrightconfig.json"] }, "command": null },
+        "unit": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".py"], "directories": ["test", "tests", "__tests__"] }, "command": null },
+        "contract": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".py", ".json", ".yaml", ".yml"], "directories": ["schemas", "openapi", "src"] }, "command": { "id": "contracts-contract", "command": ["npm", "run", "verify:product-foundation"], "failure_kind": "quality", "evidence_files": ["packages/contracts/navigation.json", "packages/contracts/screens.json"] } },
+        "build": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".py"], "files": ["tsconfig.json", "pyproject.toml"], "directories": ["src"] }, "command": null }
+      }
+    },
+    {
+      "id": "packages/design-tokens",
+      "root": "packages/design-tokens",
+      "manifest": "packages/design-tokens/package.json",
+      "foundation_allowed_files": ["README.md", "package.json"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".json"], "files": [] }, "command": { "id": "design-tokens-lint", "command": ["npm", "run", "verify:product-foundation"], "failure_kind": "quality", "evidence_files": ["packages/design-tokens/tokens.json", "packages/design-tokens/tokens.css", "packages/design-tokens/tokens.ts"] } },
+        "type": { "signals": { "extensions": [".ts"], "files": ["tsconfig.json"] }, "command": { "id": "design-tokens-type", "command": ["npx", "tsc", "--project", "packages/design-tokens/tsconfig.json", "--noEmit"], "failure_kind": "quality", "evidence_files": ["packages/design-tokens/tokens.ts", "packages/design-tokens/tsconfig.json"] } },
+        "unit": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts"], "directories": ["test", "tests", "__tests__"] }, "command": { "id": "design-tokens-unit", "command": ["npm", "run", "verify:product-foundation"], "failure_kind": "quality", "evidence_files": ["scripts/tests/product-foundation.test.mjs"] } },
+        "contract": { "signals": { "extensions": [], "files": [] }, "command": null },
+        "build": { "signals": { "extensions": [".js", ".mjs", ".cjs", ".ts", ".json"], "files": ["tsconfig.json"], "directories": ["src", "tokens"] }, "command": { "id": "design-tokens-build", "command": ["npx", "tsc", "--project", "packages/design-tokens/tsconfig.json", "--noEmit"], "failure_kind": "quality", "evidence_files": ["packages/design-tokens/tokens.ts", "packages/design-tokens/tokens.json"] } }
+      }
+    },
+    {
+      "id": "services/api",
+      "root": "services/api",
+      "manifest": "services/api/pyproject.toml",
+      "foundation_allowed_files": ["README.md", "pyproject.toml"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".py"], "files": ["ruff.toml"] }, "command": { "id": "api-authorization-lint", "command": ["node", "scripts/verify-api-authorization.mjs", "--check-only"], "failure_kind": "quality", "evidence_files": ["services/api/src/daon2_user_api/authorization.py", "services/api/src/daon2_user_api/identity.py"] } },
+        "type": { "signals": { "extensions": [".py"], "files": ["pyrightconfig.json", "mypy.ini"] }, "command": { "id": "api-authorization-type", "command": ["node", "scripts/verify-api-authorization.mjs", "--check-only"], "failure_kind": "quality", "evidence_files": ["services/api/src/daon2_user_api/authorization.py", "services/api/tests/test_authorization_persistence.py"] } },
+        "unit": { "signals": { "extensions": [".py"], "directories": ["test", "tests"] }, "command": { "id": "api-authorization-unit", "command": ["node", "scripts/verify-api-authorization.mjs", "--check-only"], "failure_kind": "quality", "evidence_files": ["services/api/tests/test_authorization_roles.py", "services/api/tests/test_authorization_access.py", "services/api/tests/test_identity_security_c01.py"] } },
+        "contract": { "signals": { "extensions": [".json", ".yaml", ".yml"], "files": ["openapi.json", "openapi.yaml", "openapi.yml"] }, "command": null },
+        "build": { "signals": { "extensions": [".py"], "directories": ["src", "app"] }, "command": { "id": "api-runtime-build", "command": ["npm", "run", "verify:api-runtime", "--", "--check-only"], "failure_kind": "quality", "evidence_files": ["services/api/pyproject.toml", "services/api/src/daon2_user_api/runtime.py", "apps/web/app/bff/api/[...path]/route.js"] } }
+      }
+    },
+    {
+      "id": "services/local-service",
+      "root": "services/local-service",
+      "manifest": "services/local-service/pyproject.toml",
+      "foundation_allowed_files": ["README.md", "pyproject.toml"],
+      "capabilities": {
+        "lint": { "signals": { "extensions": [".py"], "files": ["ruff.toml"] }, "command": { "id": "local-service-lint", "command": ["node", "scripts/run-local-service-tool.mjs", "lint"], "failure_kind": "quality", "evidence_files": ["services/local-service/pyproject.toml", "services/local-service/src/daon2_user_local_service/app.py"] } },
+        "type": { "signals": { "extensions": [".py"], "files": ["pyrightconfig.json", "mypy.ini"] }, "command": { "id": "local-service-type", "command": ["node", "scripts/run-local-service-tool.mjs", "type"], "failure_kind": "quality", "evidence_files": ["services/local-service/pyproject.toml", "services/local-service/src/daon2_user_local_service/protocol.py"] } },
+        "unit": { "signals": { "extensions": [".py"], "directories": ["test", "tests"] }, "command": { "id": "local-service-unit", "command": ["node", "scripts/run-local-service-tool.mjs", "unit"], "failure_kind": "quality", "evidence_files": ["services/local-service/tests/test_protocol.py", "services/local-service/tests/test_app.py"] } },
+        "contract": { "signals": { "extensions": [".py", ".json", ".yaml", ".yml"], "files": [] }, "command": { "id": "local-service-contract", "command": ["node", "scripts/run-local-service-tool.mjs", "contract"], "failure_kind": "quality", "evidence_files": ["services/local-service/tests/test_protocol.py", "services/local-service/tests/test_app.py"] } },
+        "build": { "signals": { "extensions": [".py"], "directories": ["src", "app"] }, "command": { "id": "local-service-build", "command": ["node", "scripts/run-local-service-tool.mjs", "build"], "failure_kind": "quality", "evidence_files": ["services/local-service/entrypoint.py", "services/local-service/src/daon2_user_local_service/main.py"] } }
+      }
+    }
+  ],
+  "mandatory_checks": [
+    { "id": "product-ui-boundary", "category": "security", "command": ["npm", "run", "verify:product-ui-boundary"], "failure_kind": "quality", "evidence_files": ["scripts/verify-product-ui-boundary.mjs", "scripts/tests/product-ui-boundary.test.mjs"] },
+    { "id": "public-repository-boundary", "category": "security", "command": ["npm", "run", "verify:public-repository-boundary"], "failure_kind": "quality", "evidence_files": [".gitignore", "scripts/tests/public-repository-boundary.test.mjs"] },
+    { "id": "quality-gate-runner-tests", "category": "unit", "command": ["node", "--test", "scripts/tests/quality-gate.test.mjs"], "failure_kind": "quality", "evidence_files": ["scripts/tests/quality-gate.test.mjs"] },
+    { "id": "local-service-runtime-verifier-tests", "category": "unit", "command": ["node", "--test", "scripts/tests/local-service-runtime-verifier.test.mjs", "scripts/tests/local-service-stage-helper.test.mjs"], "failure_kind": "quality", "evidence_files": ["scripts/verify-local-service-runtime.mjs", "scripts/stage-local-service-sidecar.ps1"] },
+    { "id": "public-check-only-verifier-contract", "category": "unit", "command": ["node", "--test", "scripts/tests/verification-evidence-mode.test.mjs", "scripts/tests/verification-check-only-contract.test.mjs"], "failure_kind": "quality", "evidence_files": ["scripts/lib/verification-evidence-mode.mjs", "scripts/verify-api-identity.mjs", "scripts/verify-api-authorization.mjs", "scripts/verify-api-runtime.mjs", "services/api/tests/runtime_process_probe.py"] },
+    { "id": "toolchain-baseline", "category": "build", "command": ["npm", "run", "verify:toolchain"], "failure_kind": "quality", "evidence_files": ["toolchain-versions.json", "package-lock.json", "uv.lock"] },
+    { "id": "braces-patch-behavior", "category": "security", "command": ["node", "--test", "scripts/tests/braces-patch.test.mjs"], "failure_kind": "quality", "evidence_files": ["scripts/tests/braces-patch.test.mjs", "vendor/braces/lib/parse.js"] },
+    { "id": "braces-patch-integrity", "category": "security", "command": ["npm", "run", "verify:braces-patch"], "failure_kind": "quality", "evidence_files": ["scripts/verify-braces-patch.mjs", "vendor/braces-3.0.3.tgz", "package-lock.json"] },
+    { "id": "production-dependency-audit", "category": "security", "command": ["npm", "audit", "--omit=dev", "--audit-level=high", "--json"], "kind": "npm_audit", "failure_kind": "execution", "evidence_files": ["package.json", "package-lock.json"] },
+    { "id": "local-service-full-environment-audit", "category": "security", "command": ["node", "scripts/run-local-service-tool.mjs", "security"], "failure_kind": "execution", "evidence_files": ["services/local-service/pyproject.toml", "uv.lock"] },
+    { "id": "repository-independence", "category": "independence", "command": ["npm", "run", "verify:independence", "--", "--no-write"], "failure_kind": "quality", "evidence_files": ["independence-policy.json", "repo-boundaries.json"] }
+  ],
+  "security": {
+    "scan_roots": ["apps", "services", "packages", ".github"],
+    "excluded_files": [],
+    "secret_patterns": [
+      { "id": "SECRET_ASSIGNMENT", "pattern": "(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|private[_-]?key)\\s*[:=]\\s*['\\\"][^'\\\"]{6,}['\\\"]" },
+      { "id": "PRIVATE_KEY_BLOCK", "pattern": "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----" }
+    ],
+    "forbidden_runtime_patterns": [
+      { "id": "BROWSER_INTERNAL_ADDRESS", "pattern": "https?://(?:localhost|127\\.0\\.0\\.1|[a-z0-9-]+(?::\\d+)?)(?:/|['\\\"])" },
+      { "id": "CLIENT_PUBLIC_INTERNAL_API", "pattern": "NEXT_PUBLIC_API_BASE_URL" }
+    ]
+  },
+  "artifacts": {
+    "result": "docs/03_evidence/release_1/R1-M1-05/quality-gate-result.json",
+    "summary": "docs/03_evidence/release_1/R1-M1-05/quality-gate-summary.md"
+  }
+}

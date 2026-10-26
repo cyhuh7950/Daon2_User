@@ -1,0 +1,3311 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Daon2-User Studio v2 API",
+    "version": "0.1.0",
+    "description": "Studio v2 (flag DAON_STUDIO_V2_ENABLED). The v1 Studio contract in openapi.json is frozen."
+  },
+  "paths": {
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/types": {
+      "get": {
+        "operationId": "listStudioV2Types",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2TypesEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs": {
+      "get": {
+        "operationId": "listStudioV2Outputs",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2OutputPageEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2CreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CreateReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CreateReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}": {
+      "get": {
+        "operationId": "getStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/Revision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2OutputDetailEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "renameStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2RenameRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2RenameReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/revisions": {
+      "post": {
+        "operationId": "createStudioV2Revision",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2RevisionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2RevisionReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/regenerate": {
+      "post": {
+        "operationId": "regenerateStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2RegenerateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CreateReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/cancel": {
+      "post": {
+        "operationId": "cancelStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CancelReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/provenance": {
+      "get": {
+        "operationId": "getStudioV2Provenance",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/Revision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2ProvenanceEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/exports/{format_name}": {
+      "get": {
+        "operationId": "exportStudioV2Output",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/FormatName"
+          },
+          {
+            "$ref": "#/components/parameters/Revision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attachment",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/audio": {
+      "get": {
+        "operationId": "getStudioV2Audio",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audio overview mp3 (supports single Range)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial audio",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/video": {
+      "get": {
+        "operationId": "getStudioV2Video",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video overview mp4 (supports single Range)",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial video",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/sharing": {
+      "get": {
+        "operationId": "getStudioV2Sharing",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2SharingEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/learning-attempts": {
+      "get": {
+        "operationId": "listStudioV2LearningAttempts",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2LearningAttemptsEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "recordStudioV2LearningAttempt",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2LearningRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2LearningReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/evidence/{ref_id}/content": {
+      "get": {
+        "operationId": "getStudioV2EvidenceContent",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/RefId"
+          },
+          {
+            "$ref": "#/components/parameters/Revision"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Evidence content",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/customization": {
+      "get": {
+        "operationId": "getStudioV2Customization",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CustomizationEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putStudioV2Customization",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2CustomizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2CustomizationEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/authoring/templates": {
+      "get": {
+        "operationId": "listStudioV2AuthoringTemplates",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringTemplatesEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/authoring/sessions": {
+      "post": {
+        "operationId": "createStudioV2AuthoringSession",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2AuthoringCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Template candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringSessionEnvelope"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringSessionEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/authoring/sessions/{output_id}": {
+      "get": {
+        "operationId": "getStudioV2AuthoringSession",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringSessionEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/authoring/sessions/{output_id}/answers": {
+      "post": {
+        "operationId": "answerStudioV2AuthoringSession",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2AuthoringAnswersRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/authoring/sessions/{output_id}/review": {
+      "put": {
+        "operationId": "reviewStudioV2AuthoringSession",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2AuthoringReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2AuthoringReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/memos": {
+      "post": {
+        "operationId": "createStudioV2Memo",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2MemoRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2MemoReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "WorkspaceId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+        }
+      },
+      "NotebookId": {
+        "name": "notebook_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+        }
+      },
+      "OutputId": {
+        "name": "output_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^sv2-[0-9a-f]{32}$"
+        }
+      },
+      "RefId": {
+        "name": "ref_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+        }
+      },
+      "FormatName": {
+        "name": "format_name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "docx",
+            "pdf",
+            "md",
+            "txt",
+            "xlsx",
+            "csv",
+            "json",
+            "svg",
+            "png",
+            "pptx",
+            "mp3",
+            "wav",
+            "mp4"
+          ]
+        }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Revision": {
+        "name": "revision",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      }
+    },
+    "schemas": {
+      "StudioV2Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "INVALID_REQUEST",
+                  "AUTHENTICATION_REQUIRED",
+                  "RESOURCE_UNAVAILABLE",
+                  "IDEMPOTENCY_CONFLICT",
+                  "EXPORT_FORMAT_UNSUPPORTED",
+                  "STUDIO_INPUT_INVALID",
+                  "STUDIO_SERVICE_UNAVAILABLE",
+                  "STUDIO_DATABASE_UNAVAILABLE",
+                  "STUDIO_NO_READY_SOURCE",
+                  "STUDIO_TYPE_UNAVAILABLE",
+                  "STUDIO_VERSION_CONFLICT",
+                  "STUDIO_VALIDATION_FAILED",
+                  "STUDIO_GENERATION_FAILED",
+                  "STUDIO_CANCELLED",
+                  "STUDIO_EXTERNAL_PROVIDER_UNSUPPORTED",
+                  "STUDIO_REVISION_TOO_LARGE",
+                  "STUDIO_SOURCE_TOO_LARGE",
+                  "NOTEBOOK_SCOPE_REQUIRED",
+                  "NOTEBOOK_SCOPE_MISMATCH",
+                  "OBJECT_STORAGE_UNAVAILABLE"
+                ]
+              },
+              "trace_id": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "StudioV2Meta": {
+        "type": "object",
+        "properties": {
+          "trace_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StudioV2Type": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type_id",
+          "formats",
+          "presets",
+          "export_formats",
+          "default_format",
+          "available",
+          "settings_schema"
+        ],
+        "properties": {
+          "type_id": {
+            "type": "string",
+            "enum": [
+              "report",
+              "data_table",
+              "mind_map",
+              "flashcards",
+              "quiz",
+              "slides",
+              "infographic",
+              "audio_overview",
+              "video_overview",
+              "memo",
+              "authored_document"
+            ]
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "presets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "export_formats": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default_format": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "STUDIO_TYPE_UNAVAILABLE"
+            ]
+          },
+          "settings_schema": {
+            "type": "object"
+          }
+        }
+      },
+      "StudioV2Types": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "types",
+          "limits"
+        ],
+        "properties": {
+          "types": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StudioV2Type"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "user_concurrency"
+            ],
+            "properties": {
+              "user_concurrency": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "StudioV2CreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type_id"
+        ],
+        "properties": {
+          "type_id": {
+            "type": "string",
+            "enum": [
+              "report",
+              "data_table",
+              "mind_map",
+              "flashcards",
+              "quiz",
+              "slides",
+              "infographic",
+              "audio_overview",
+              "video_overview",
+              "memo",
+              "authored_document"
+            ]
+          },
+          "format_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "settings": {
+            "type": "object"
+          },
+          "source_version_ids": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+            }
+          }
+        }
+      },
+      "StudioV2CreateReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "job_id",
+          "status"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "job_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "generating",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          }
+        }
+      },
+      "StudioV2Output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "type_id",
+          "format_id",
+          "title",
+          "status",
+          "error_code",
+          "source_count",
+          "current_revision",
+          "created_at",
+          "updated_at",
+          "stale"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "type_id": {
+            "type": "string",
+            "enum": [
+              "report",
+              "data_table",
+              "mind_map",
+              "flashcards",
+              "quiz",
+              "slides",
+              "infographic",
+              "audio_overview",
+              "video_overview",
+              "memo",
+              "authored_document"
+            ]
+          },
+          "format_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "generating",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "current_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stale": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2OutputPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/StudioV2Output"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StudioV2Evidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ref_id",
+          "source_version_id",
+          "evidence_span_id",
+          "locator_kind",
+          "locator_value",
+          "origin",
+          "has_snapshot"
+        ],
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "source_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "evidence_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "locator_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "locator_value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "notebook_source",
+              "mcp_daon_rag",
+              "mcp_daon",
+              "mcp_law"
+            ]
+          },
+          "has_snapshot": {
+            "type": "boolean"
+          },
+          "source_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StudioV2OutputDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StudioV2Output"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "settings",
+              "revision",
+              "evidence",
+              "assets"
+            ],
+            "properties": {
+              "settings": {
+                "type": "object"
+              },
+              "revision": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StudioV2Evidence"
+                }
+              },
+              "assets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "bytes",
+                    "revision_no"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "revision_no": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "StudioV2RenameRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      },
+      "StudioV2RenameReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "title",
+          "updated_at"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StudioV2RevisionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "object"
+          },
+          "change_reason": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      },
+      "StudioV2RevisionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "revision_no"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "revision_no": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "StudioV2RegenerateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "settings": {
+            "type": "object"
+          }
+        }
+      },
+      "StudioV2CancelReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "cancel_requested"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "cancel_requested": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2Provenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "revision_no",
+          "type_id",
+          "format_id",
+          "instruction",
+          "settings",
+          "sources",
+          "evidence"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "type_id": {
+            "type": "string"
+          },
+          "format_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instruction": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "focus",
+              "customization_applied"
+            ],
+            "properties": {
+              "focus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "customization_applied": {
+                "type": "boolean"
+              }
+            }
+          },
+          "settings": {
+            "type": "object"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source_version_id",
+                "source_id",
+                "name",
+                "changed"
+              ],
+              "properties": {
+                "source_version_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+                },
+                "source_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "changed": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StudioV2Evidence"
+            }
+          }
+        }
+      },
+      "StudioV2Sharing": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scope",
+          "public_link",
+          "notebook_id"
+        ],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "notebook"
+            ]
+          },
+          "public_link": {
+            "type": "boolean",
+            "const": false
+          },
+          "notebook_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          }
+        }
+      },
+      "StudioV2LearningRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision_no",
+          "kind",
+          "payload"
+        ],
+        "properties": {
+          "revision_no": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "flashcard",
+              "quiz"
+            ]
+          },
+          "payload": {
+            "type": "object"
+          }
+        }
+      },
+      "StudioV2LearningReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attempt_id"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          }
+        }
+      },
+      "StudioV2LearningAttempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "attempt_id",
+          "revision_no",
+          "kind",
+          "payload",
+          "created_at"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StudioV2LearningAttempts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StudioV2LearningAttempt"
+            }
+          }
+        }
+      },
+      "StudioV2Customization": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instruction",
+          "version"
+        ],
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "StudioV2CustomizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instruction"
+        ],
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        }
+      },
+      "StudioV2MemoRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "markdown": {
+            "type": "string",
+            "maxLength": 200000
+          },
+          "from_run_result_id": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "StudioV2MemoReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "status",
+          "replayed"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2AuthoringTemplates": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "templates"
+        ],
+        "properties": {
+          "templates": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "StudioV2AuthoringCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "request_text": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "StudioV2AuthoringSession": {
+        "type": "object",
+        "required": [
+          "state",
+          "template_id",
+          "revision_no"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "template_id": {
+            "type": "string"
+          },
+          "analysis": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "style": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "collecting",
+              "analyzing",
+              "review",
+              "generating",
+              "completed",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "inputs": {
+            "type": "object"
+          },
+          "assumptions": {
+            "type": "array"
+          },
+          "pending_questions": {
+            "type": "array"
+          },
+          "requests": {
+            "type": "array"
+          },
+          "requirements": {
+            "type": "array"
+          },
+          "plan": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "output_formats": {
+            "type": "array"
+          },
+          "document": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "job_status": {
+            "type": "string"
+          }
+        }
+      },
+      "StudioV2AuthoringAnswersRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_revision",
+          "answers"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "answers": {
+            "type": "array",
+            "maxItems": 10
+          },
+          "skip_remaining": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2AuthoringReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expected_revision"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requirements": {
+            "type": "array"
+          },
+          "plan_sections": {
+            "type": "array"
+          },
+          "output_formats": {
+            "type": "array"
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2AuthoringReceipt": {
+        "type": "object",
+        "required": [
+          "output_id",
+          "revision_no"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "revision_no": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "queued": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2AuthoringTemplatesEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2AuthoringTemplates"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2AuthoringSessionEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2AuthoringSession"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2AuthoringReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2AuthoringReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2TypesEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2Types"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2CreateReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2CreateReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2OutputPageEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2OutputPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2OutputDetailEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2OutputDetail"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2RenameReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2RenameReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2RevisionReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2RevisionReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2CancelReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2CancelReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2ProvenanceEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2Provenance"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2SharingEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2Sharing"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2LearningReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2LearningReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2LearningAttemptsEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2LearningAttempts"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2CustomizationEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2Customization"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2MemoReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2MemoReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      }
+    }
+  }
+}

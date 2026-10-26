@@ -1,0 +1,66 @@
+.provider-settings-shell { box-sizing: border-box; min-height: 100vh; padding: 16px; background: #f5f7fa; color: #172033; font-size: 12px; }
+.provider-settings-shell.is-embedded { min-height: 0; --provider-outer-header: 60px; }
+.provider-settings-shell header, .provider-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.provider-settings-shell h1 { margin: 0; font-size: 16px; }
+.provider-settings-shell h2, .provider-settings-shell h3 { font-size: 14px; }
+.provider-settings-shell h3 { margin: 0; }
+.provider-settings-shell p, .provider-settings-shell label, .provider-settings-shell input, .provider-settings-shell select, .provider-settings-shell button { font-size: 12px; }
+.provider-status { margin: 6px 0 4px; padding: 8px; border: 1px solid #8ca0bf; border-radius: 6px; background: #fff; }
+.provider-status.error { border-color: #b42318; color: #b42318; }
+.provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.provider-card, .role-bindings { display: grid; gap: 8px; padding: 12px; border: 1px solid #ccd5e3; border-radius: 8px; background: #fff; }
+.provider-card:not([aria-pressed="true"]) { color: #172033; }
+.provider-card:not([aria-pressed="true"]) strong { color: #172033; }
+.provider-card:not([aria-pressed="true"]) small { color: #475569; }
+.provider-card > label, .role-grid > label { display: grid; gap: 4px; }
+.provider-card input:not([type]), .role-grid select { min-width: 0; padding: 6px; border: 1px solid #9aa9bd; border-radius: 4px; }
+.provider-card fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; border: 1px solid #d6deea; }
+.provider-switches { display: flex; flex-wrap: wrap; gap: 8px; }
+.provider-card button, .role-bindings button, .provider-settings-shell header button { padding: 6px 10px; border: 1px solid #4668a7; border-radius: 4px; background: #315d9d; color: #fff; }
+.role-bindings { margin-top: 14px; }
+.role-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.provider-admin-panel { display: grid; gap: 6px; padding-top: 4px; }
+.provider-admin-panel > .studio-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.provider-admin-panel .studio-section-heading h2 { margin: 0; }
+.provider-admin-panel .studio-section-heading small { display: block; }
+.provider-settings-shell .provider-status { margin-bottom: 4px; }
+.provider-admin-panel > .studio-section-heading > div,
+.workspace-model-defaults > .studio-section-heading > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
+.provider-admin-panel > .studio-section-heading small,
+.workspace-model-defaults > .studio-section-heading small { display: inline; }
+.provider-admin-panel > .studio-section-heading .section-kicker,
+.workspace-model-defaults > .studio-section-heading .section-kicker { display: none; }
+.workspace-model-defaults > .studio-section-heading h2 { margin: 0; }
+.provider-heading-actions { display: flex; align-items: flex-end; gap: 6px; }
+.provider-heading-actions label { display: inline-flex; align-items: center; gap: 4px; }
+.provider-settings-layout { align-items: start; }
+.provider-connection-list, .provider-detail { box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; }
+.provider-connection-list { max-height: min(640px, max(120px, calc(100dvh - 314px - var(--provider-outer-header, 0px)))); }
+.provider-detail { max-height: min(760px, max(120px, calc(100dvh - 314px - var(--provider-outer-header, 0px)))); scrollbar-gutter: stable; }
+.workspace-model-defaults { box-sizing: border-box; min-height: 120px; max-height: 220px; overflow-y: auto; overscroll-behavior: contain; }
+.workspace-default-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 6px 10px; margin: 8px 0; }
+.workspace-default-controls label { display: grid; gap: 3px; min-width: min(320px, 100%); }
+.workspace-default-controls select { min-height: 30px; }
+.workspace-default-controls small { flex-basis: 100%; }
+.provider-connection-list { display: grid; align-content: start; gap: 4px; padding-right: 4px; }
+.provider-detail { align-content: start; }
+.provider-detail-grid { align-items: start; }
+.provider-configuration-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 8px; }
+.provider-configuration-settings { display: grid; align-content: start; gap: 8px; }
+.provider-settings-shell .provider-model-options input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; margin: 0; padding: 0; }
+@media (max-width: 760px) {
+  .provider-configuration-columns { grid-template-columns: 1fr; }
+  .provider-connection-list { max-height: min(160px, 20dvh); }
+  .provider-detail { max-height: min(440px, max(120px, calc(100dvh - 482px - var(--provider-outer-header, 0px)))); }
+  .workspace-model-defaults { max-height: 180px; }
+}
+.provider-card { min-height: 0; padding: 5px 7px; line-height: 1.25; }
+.provider-card small { line-height: 1.25; }
+@media (max-width: 1439px) { .provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1023px) { .provider-grid, .role-grid { grid-template-columns: 1fr; } }
+
+/* 설정 창(모달) 안: 창은 넓고 크게, 스크롤은 창 하나만(목록·상세 안쪽 스크롤 제거) */
+.workspace-modal:has(.provider-settings-shell.is-embedded) { width: min(1280px, calc(100vw - 36px)); height: calc(100dvh - 36px); max-height: calc(100dvh - 36px); }
+.provider-settings-shell.is-embedded .provider-detail { max-height: none; overflow: visible; }
+.provider-settings-shell.is-embedded .provider-connection-list { max-height: calc(100dvh - 280px); }
+@media (max-width: 760px) { .provider-settings-shell.is-embedded .provider-connection-list { max-height: 220px; } }

@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import pytest
+
+from daon2_user_api.provider_catalog import ProviderCatalog, ProviderCatalogError
+
+
+TOKENIZER_BOOLEAN_OPTIONS = (
+    "tokenizer.ggml.add_eos_token", "tokenizer.ggml.add_bos_token",
+    "tokenizer.ggml.add_padding_token", "tokenizer.ggml.add_unknown_token",
+)
+
+
+def test_native_asr_catalog_requires_exact_installed_metadata():
+    metadata = {"model_id": "faster-whisper-base",
+        "model_digest": "d01c3014881c9c6f3133c182f3d2887eb6ca1c789a7538c5c007196857a0a6a9",
+        "revision": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+        "capability": "speech_to_text", "runtime": "cpu-int8-local"}
+    models = ProviderCatalog.from_native_asr_metadata("asr-qa", metadata)
+    assert len(models) == 1
+    assert models[0].reported_capabilities == ("speech_to_text",)
+    assert models[0].routing_owner == "local_runtime"
+    assert models[0].daon_fallback_allowed is False
+    for field in metadata:
+        with pytest.raises(ProviderCatalogError):
+            ProviderCatalog.from_native_asr_metadata("asr-qa", {**metadata, field: "other"})
+    with pytest.raises(ProviderCatalogError):
+        ProviderCatalog.from_native_asr_metadata("asr-qa", {**metadata, "extra": True})
+
+
+def test_ollama_show_tokenizer_boolean_options_are_not_credentials():
+    info = {"general.architecture": "qwen3vl", **dict(zip(TOKENIZER_BOOLEAN_OPTIONS, (True, False, True, False)))}
+    payload = {"models": [{"name": "qwen3-vl:latest", "digest": "a" * 64,
+                           "native_metadata": {"capabilities": ["completion", "vision"], "model_info": info}}]}
+    models = ProviderCatalog.from_payload("ollama-1", "OLLAMA", payload)
+    assert models[0].reported_capabilities == ("image_understanding", "text_generation")
+    assert payload["models"][0]["native_metadata"]["model_info"] == info
+
+
+@pytest.mark.parametrize("key", TOKENIZER_BOOLEAN_OPTIONS)
+@pytest.mark.parametrize("value", ["fixture-not-a-real-key", b"fixture-not-a-real-key", 1, None])
+def test_ollama_tokenizer_option_non_boolean_still_fails_closed(key, value):
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_CATALOG_RESPONSE_INVALID$"):
+        ProviderCatalog.from_payload("ollama-1", "OLLAMA", {"models": [{"name": "model", "digest": "a" * 64,
+            "native_metadata": {"capabilities": ["vision"], "model_info": {"general.architecture": "x", key: value}}}]})
+
+
+@pytest.mark.parametrize("key", ["access_token", "password", "tokenizer.ggml.add_other_token"])
+def test_ollama_show_other_sensitive_keys_remain_rejected(key):
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_CATALOG_RESPONSE_INVALID$"):
+        ProviderCatalog.from_payload("ollama-1", "OLLAMA", {"models": [{"name": "model", "digest": "a" * 64,
+            "native_metadata": {"capabilities": ["vision"], "model_info": {"general.architecture": "x", key: True}}}]})
+
+
+def test_tokenizer_boolean_exception_is_exact_ollama_show_model_info_path_only():
+    for payload in ({"models": [{"name": "model", TOKENIZER_BOOLEAN_OPTIONS[0]: True}]},
+                    {"models": [{"name": "model", "native_metadata": {TOKENIZER_BOOLEAN_OPTIONS[0]: True}}]}):
+        with pytest.raises(ProviderCatalogError, match="^PROVIDER_CATALOG_RESPONSE_INVALID$"):
+            ProviderCatalog.from_payload("ollama-1", "OLLAMA", payload)
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_CATALOG_RESPONSE_INVALID$"):
+        ProviderCatalog.from_payload("other", "CUSTOM", {"data": [{"id": "model", "model_info": {TOKENIZER_BOOLEAN_OPTIONS[0]: True}}]})
+
+
+def test_ollama_vision_uses_verified_show_metadata_not_model_name():
+    rows = [
+        {"name": "opaque-id", "digest": "a" * 64, "native_metadata": {"capabilities": ["vision"], "model_info": {"architecture": "x"}}},
+        {"name": "vision-name-only", "digest": "b" * 64},
+        {"name": "remote-vision", "digest": "c" * 64, "remote_host": "https://cloud.example",
+         "native_metadata": {"capabilities": ["vision"], "model_info": {"architecture": "x"}}},
+    ]
+    models = ProviderCatalog.from_payload("ollama-1", "OLLAMA", {"models": rows})
+    assert models[0].reported_capabilities == ("image_understanding", "text_generation")
+    assert all("image_understanding" not in m.reported_capabilities for m in models[1:])
+
+
+def test_ollama_catalog_preserves_connection_scope_and_normalizes_duplicate_models() -> None:
+    models = ProviderCatalog.from_payload(
+        "ollama-lan",
+        "OLLAMA",
+        {"models": [{"name": "qwen3"}, {"model": "qwen3"}]},
+    )
+
+    assert [(model.connection_id, model.provider_code, model.model_id) for model in models] == [
+        ("ollama-lan", "OLLAMA", "qwen3")
+    ]
+    assert models[0].reported_capabilities == ("text_generation",)
+
+
+def test_openrouter_catalog_uses_provider_modalities_without_model_name_guessing() -> None:
+    models = ProviderCatalog.from_payload(
+        "openrouter-primary",
+        "OPENROUTER",
+        {
+            "data": [
+                {
+                    "id": "vendor/opaque-model-id",
+                    "architecture": {
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    },
+                }
+            ]
+        },
+    )
+
+    assert models[0].model_id == "vendor/opaque-model-id"
+    assert models[0].reported_capabilities == (
+        "image_understanding",
+        "text_generation",
+    )
+
+
+def test_openrouter_catalog_accepts_non_secret_tokenizer_metadata() -> None:
+    models = ProviderCatalog.from_payload(
+        "openrouter-primary",
+        "OPENROUTER",
+        {
+            "data": [
+                {
+                    "id": "vendor/text-model",
+                    "tokenizer": "ExampleTokenizer",
+                    "supported_parameters": ["max_tokens"],
+                    "architecture": {
+                        "input_modalities": ["text"],
+                        "output_modalities": ["text"],
+                    },
+                }
+            ]
+        },
+    )
+
+    assert models[0].model_id == "vendor/text-model"
+
+
+def test_openrouter_listed_auto_is_not_duplicated() -> None:
+    models = ProviderCatalog.from_payload(
+        "openrouter-primary", "OPENROUTER",
+        {"data": [{"id": "openrouter/auto", "architecture": {"output_modalities": ["text"]}}]},
+    )
+    logical = ProviderCatalog.logical_auto_model("openrouter-primary", "OPENROUTER", "openrouter/auto")
+    merged = {model.model_id: model for model in (logical, *models)}
+    assert len(merged) == 1
+    assert merged["openrouter/auto"].catalog_origin == "upstream"
+
+
+@pytest.mark.parametrize("code", ["OMNIROUTE", "EOUL_GATEWAY"])
+def test_gateway_logical_models_are_explicit_and_never_provider_native(
+    code: str,
+) -> None:
+    models = ProviderCatalog.from_logical_models(
+        "gateway-primary",
+        code,
+        ("assistant-default",),
+    )
+
+    assert [(model.model_id, model.routing_owner) for model in models] == [
+        ("assistant-default", "gateway")
+    ]
+    assert models[0].daon_fallback_allowed is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"models": "not-a-list"},
+        {"models": [{"name": ""}]},
+        {"models": [{"name": "qwen3", "unexpected_secret": "fixture-value"}]},
+    ],
+)
+def test_malformed_ollama_catalog_fails_closed_with_safe_error(payload: object) -> None:
+    with pytest.raises(
+        ProviderCatalogError,
+        match="^PROVIDER_CATALOG_RESPONSE_INVALID$",
+    ) as captured:
+        ProviderCatalog.from_payload("ollama-lan", "OLLAMA", payload)
+
+    assert "fixture-value" not in repr(captured.value)
+
+
+def test_duplicate_logical_model_is_rejected_instead_of_silently_reordered() -> None:
+    with pytest.raises(
+        ProviderCatalogError,
+        match="^PROVIDER_LOGICAL_MODEL_INVALID$",
+    ):
+        ProviderCatalog.from_logical_models(
+            "eoul-primary",
+            "EOUL_GATEWAY",
+            ("assistant-default", "assistant-default"),
+        )
+
+
+def test_verified_manual_models_are_scoped_text_models_in_given_order() -> None:
+    models = ProviderCatalog.from_verified_text_models(
+        "custom-primary", "CUSTOM", ("manual-b", "manual-a"),
+    )
+
+    assert [(item.connection_id, item.provider_code, item.model_id) for item in models] == [
+        ("custom-primary", "CUSTOM", "manual-b"),
+        ("custom-primary", "CUSTOM", "manual-a"),
+    ]
+    assert all(item.reported_capabilities == ("text_generation",) for item in models)
+    assert all(item.routing_owner == "provider" and item.daon_fallback_allowed for item in models)
+
+
+@pytest.mark.parametrize("model_ids", [(), ("",), ("manual id",), ("same", "same")])
+def test_verified_manual_models_reject_empty_invalid_or_duplicate_ids(model_ids: tuple[str, ...]) -> None:
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_MODEL_IDS_INVALID$"):
+        ProviderCatalog.from_verified_text_models("custom-primary", "CUSTOM", model_ids)
+
+
+def test_verified_manual_models_reject_non_custom_provider() -> None:
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_MODEL_IDS_INVALID$"):
+        ProviderCatalog.from_verified_text_models("router", "OPENROUTER", ("manual",))
+
+
+def test_verified_manual_models_limit_probe_count() -> None:
+    model_ids = tuple(f"manual-{index}" for index in range(5))
+    with pytest.raises(ProviderCatalogError, match="^PROVIDER_MODEL_IDS_INVALID$"):
+        ProviderCatalog.from_verified_text_models("custom-primary", "CUSTOM", model_ids)
+
+    assert len(ProviderCatalog.from_verified_text_models(
+        "custom-primary", "CUSTOM", model_ids[:4],
+    )) == 4

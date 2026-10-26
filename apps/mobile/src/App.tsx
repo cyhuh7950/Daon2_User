@@ -1,0 +1,47 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Platform } from "react-native";
+import { MobileShell } from "./MobileShell.tsx";
+import { AndroidAuthScreen } from "./AndroidAuthScreen.tsx";
+import { androidAuth } from "./android-auth-adapter.ts";
+import { createAndroidWorkspacePublicApiClient } from "./android-workspace-client.ts";
+import { androidPermissionAdapter, restoreNavigationRoute as restoreAndroidNavigationRoute, saveNavigationRoute as saveAndroidNavigationRoute, subscribeAndroidDeepLinks, subscribeAndroidLifecycle } from "./platform/android-host.ts";
+import { iosPermissionAdapter, restoreIOSNavigationRoute, saveIOSNavigationRoute, subscribeIOSDeepLinks, subscribeIOSLifecycle } from "./platform/ios-host.ts";
+
+export type MobileHostProps = { clientType?: unknown };
+
+const androidWorkspaceClient = createAndroidWorkspacePublicApiClient(() => androidAuth.getSessionState());
+
+export default function App({ clientType }: MobileHostProps) {
+  const resolvedClientType = clientType ?? Platform.OS;
+  const [initialNativeRouteKey, setInitialNativeRouteKey] = useState<string | null>(null);
+  const [requestedNativeRouteKey, setRequestedNativeRouteKey] = useState<string | null>(null);
+  const hostNavigationAdapter = useMemo(() => Platform.OS === "android" ? {
+    onRouteChanged: ({ nativeRouteKey }: { nativeRouteKey: string }) => { void saveAndroidNavigationRoute(nativeRouteKey); }
+  } : Platform.OS === "ios" ? {
+    onRouteChanged: ({ nativeRouteKey }: { nativeRouteKey: string }) => { void saveIOSNavigationRoute(nativeRouteKey); }
+  } : undefined, []);
+
+  useEffect(() => {
+    if (Platform.OS === "android") {
+      void restoreAndroidNavigationRoute().then(setInitialNativeRouteKey);
+      const removeDeepLinks = subscribeAndroidDeepLinks(setRequestedNativeRouteKey);
+      const removeLifecycle = subscribeAndroidLifecycle(() => undefined);
+      return () => { removeDeepLinks(); removeLifecycle(); };
+    }
+    if (Platform.OS === "ios") {
+      const removeDeepLinks = subscribeIOSDeepLinks(setRequestedNativeRouteKey);
+      const removeLifecycle = subscribeIOSLifecycle(() => undefined);
+      void restoreIOSNavigationRoute().then((restoredRoute) => {
+        setInitialNativeRouteKey(restoredRoute);
+        if (restoredRoute === null) {
+          void saveIOSNavigationRoute("Home");
+        }
+      });
+      return () => { removeDeepLinks(); removeLifecycle(); };
+    }
+  }, []);
+
+  const permissionAdapter = Platform.OS === "android" ? androidPermissionAdapter : Platform.OS === "ios" ? iosPermissionAdapter : undefined;
+  if (Platform.OS === "android") return <AndroidAuthScreen authenticatedContent={<MobileShell clientType={resolvedClientType} initialNativeRouteKey={initialNativeRouteKey} requestedNativeRouteKey={requestedNativeRouteKey} hostNavigationAdapter={hostNavigationAdapter} permissionAdapter={permissionAdapter} publicApiClient={androidWorkspaceClient} />} />;
+  return <MobileShell clientType={resolvedClientType} initialNativeRouteKey={initialNativeRouteKey} requestedNativeRouteKey={requestedNativeRouteKey} hostNavigationAdapter={hostNavigationAdapter} permissionAdapter={permissionAdapter} />;
+}

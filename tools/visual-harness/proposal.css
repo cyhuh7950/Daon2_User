@@ -1,0 +1,38 @@
+/* S7-05 시안: 로그인·노트북 홈·설정 화면 정돈. data-design="proposal"일 때만 적용되며 현재 화면의 구조·라벨은 바꾸지 않는다(스타일만).
+   원칙: ① 로그인 카드를 가운데 정렬하고 제품 이름을 보인다 ② 입력·버튼 높이 40px로 통일하고 포커스 링을 분명히 한다
+        ③ 노트북 카드의 그림 영역과 본문 간격을 고르게 한다 ④ 설정 표는 행 간격·머리글 대비를 높인다 */
+html[data-design="proposal"] .daon-auth-pane {
+  max-width: 420px; margin: 8vh auto 0; padding: 28px 28px 24px; border-radius: 20px;
+  border: 1px solid var(--daon-color-border, #d5dae5); background: var(--daon-color-surface, #fff);
+  box-shadow: 0 8px 28px rgba(20, 30, 60, .10);
+}
+html[data-design="proposal"] .daon-auth-pane::before {
+  content: "Daon2-User"; display: block; margin-bottom: 18px; font-size: 13px; letter-spacing: .08em; font-weight: 700; color: var(--daon-color-accent, #2f55d4);
+}
+html[data-design="proposal"] .daon-auth-heading h2 { font-size: 22px; margin: 0 0 14px; }
+html[data-design="proposal"] .daon-auth-pane label { display: grid; gap: 6px; margin-bottom: 12px; font-size: 13px; font-weight: 600; }
+html[data-design="proposal"] .daon-auth-pane input { height: 40px; padding: 0 12px; border-radius: 10px; font-size: 15px; }
+html[data-design="proposal"] .daon-auth-pane input:focus-visible, html[data-design="proposal"] button:focus-visible { outline: 3px solid var(--daon-color-accent, #2f55d4); outline-offset: 2px; }
+html[data-design="proposal"] .daon-auth-pane button[type="submit"], html[data-design="proposal"] .daon-auth-pane button:first-of-type { min-height: 42px; width: 100%; border-radius: 10px; font-size: 15px; }
+
+html[data-design="proposal"] .notebook-collection.grid { gap: 20px; }
+html[data-design="proposal"] .notebook-card { border-radius: 18px; overflow: hidden; border: 1px solid var(--daon-color-border, #e1e5ee); box-shadow: 0 1px 3px rgba(20, 30, 60, .08); transition: box-shadow .15s ease, transform .15s ease; }
+html[data-design="proposal"] .notebook-card:hover { box-shadow: 0 8px 22px rgba(20, 30, 60, .14); transform: translateY(-2px); }
+html[data-design="proposal"] .notebook-card-art { min-height: 120px; }
+html[data-design="proposal"] .notebook-card-body { padding: 14px 16px 16px; }
+
+html[data-design="proposal"] .connectors-pane { max-width: 960px; margin: 0 auto; padding: 22px 26px; border: 1px solid var(--daon-color-border, #d5dae5); border-radius: 18px; background: var(--daon-color-surface, #fff); }
+html[data-design="proposal"] .connectors-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+html[data-design="proposal"] .connectors-header h2 { font-size: 20px; margin: 0; }
+html[data-design="proposal"] .connectors-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+html[data-design="proposal"] .connectors-table th { text-align: left; color: var(--daon-color-text-secondary, #5b6577); font-weight: 600; padding: 8px 10px; border-bottom: 2px solid var(--daon-color-border, #d5dae5); }
+html[data-design="proposal"] .connectors-table td { padding: 14px 10px; border-bottom: 1px solid var(--daon-color-border, #e6e9f1); }
+html[data-design="proposal"] .connectors-table td button { min-height: 34px; margin-right: 6px; border-radius: 9px; }
+html[data-design="proposal"] .connector-status { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+
+/* 보정: 로그인 입력은 1열, 노트북 카드 본문은 카드 폭을 채운다 */
+html[data-design="proposal"] .daon-auth-grid { grid-template-columns: 1fr; }
+html[data-design="proposal"] .notebook-card-grid { position: relative; }
+html[data-design="proposal"] .notebook-card-main { width: 100%; display: block; text-align: center; }
+html[data-design="proposal"] .notebook-card-art { display: grid; place-items: center; width: 100%; }
+html[data-design="proposal"] .notebook-card-menu-button { position: absolute; top: 8px; right: 8px; }

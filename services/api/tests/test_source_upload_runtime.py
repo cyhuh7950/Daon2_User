@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+import tempfile
+import io
+import zipfile
+import struct
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+import httpx
+
+from test_identity_support import POLICY_VERSION, TRACE_ID, create_service, identity_session_view
+from daon2_user_api.audit import AuditEventStore
+from daon2_user_api.authorization import (
+    AuthorizationService,
+    Role,
+    SqliteAuthorizationRepository,
+)
+from daon2_user_api.identity import IdentityPrincipal
+from daon2_user_api.runtime import (
+    WEB_SESSION_COOKIE,
+    RuntimeDependencies,
+    RuntimeSettings,
+    create_app,
+)
+from daon2_user_api.source_upload import SourceUploadResult
+from daon2_user_api.document_processing import DocumentProcessingStatus
+from daon2_user_api.egress_policy import EgressPolicyContext, EgressPolicyPayload, EgressPolicyService, ReferenceEgressPolicyRepository
+
+
+class RecordingSourceUploadService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def register_pdf(self, **values: object) -> SourceUploadResult:
+        self.calls.append(values)
+        return SourceUploadResult(
+            source_id="src-001",
+            source_version_id="source-version-001",
+            object_id="0" * 32,
+            digest_sha256="a" * 64,
+            byte_size=23,
+            status="accepted",
+            replayed=False,
+        )
+
+
+class RecordingDocumentSubmissionService:
+    def __init__(self) -> None:
+        self.submissions: list[tuple[object, str, str]] = []
+        self.status_notebook_ids: list[str] = []
+
+    def submit(self, context, source_version_id: str, *, notebook_id: str):  # type: ignore[no-untyped-def]
+        self.submissions.append((context, source_version_id, notebook_id))
+        return DocumentProcessingStatus(
+            "run-001", "src-001", source_version_id,
+            "vision_llm_understanding", "processing", "pending", None,
+        )
+
+    def get_status(self, context, processing_run_id: str, *, notebook_id: str):  # type: ignore[no-untyped-def]
+        self.status_notebook_ids.append(notebook_id)
+        return DocumentProcessingStatus(
+            processing_run_id, "src-001", "source-version-001",
+            "vision_llm_understanding", "processing", "leased", None,
+        )
+
+    def reprocess(self, context, source_id, source_version_id, *, notebook_id, idempotency_key, authorization_snapshot):  # type: ignore[no-untyped-def]
+        self.submissions.append((context, source_version_id, notebook_id))
+        assert source_id == "src-001" and idempotency_key == "retry-001"
+        assert authorization_snapshot["acl_version"] >= 1
+        return {"processing_run_id": "run-retry-001", "source_id": source_id,
+                "source_version_id": source_version_id, "retry_of_processing_run_id": "run-001",
+                "processing_state": "vision_llm_understanding", "source_state": "processing",
+                "job_state": "pending", "replayed": False}
+
+
+class ExistingNotebookService:
+    def get(self, context, notebook_id):  # type: ignore[no-untyped-def]
+        if notebook_id != "notebook-001":
+            raise AssertionError(notebook_id)
+        return object()
+
+    def require_selected_bindings(self, context, notebook_id, required):  # type: ignore[no-untyped-def]
+        if notebook_id != "notebook-001" or required != (("source", "src-001", "source-version-001"),):
+            raise AssertionError((notebook_id, required))
+        return object()
+
+class SourceUploadRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registered_xlsx_bytes_keep_existing_upload_and_queue_boundary(self) -> None:
+        from test_xlsx_source import parts, zipped
+        raw = zipped(parts())
+        mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        with self._authenticated():
+            response = await self.client.post('/api/v1/workspaces/workspace-001/sources', content=raw,
+                cookies={WEB_SESSION_COOKIE: 'opaque-session'}, headers={'Content-Type': mime,
+                'X-Source-Filename': 'qa.xlsx', 'X-Notebook-Id': 'notebook-001', 'Idempotency-Key': 'xlsx-upload-001'})
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(len(self.uploads.calls), 1)
+        self.assertEqual(self.uploads.calls[0]['content'], raw)
+        self.assertEqual(self.uploads.calls[0]['content_type'], mime)
+        self.assertEqual(len(self.processing.submissions), 1)
+        self.assertEqual(self.processing.submissions[0][1:], ('source-version-001', 'notebook-001'))
+
+    async def test_registered_docx_original_keeps_existing_auth_storage_queue_boundary(self) -> None:
+        from test_docx_source import docx_bytes, paragraph
+        raw = docx_bytes(paragraph('한😀글'))
+        mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        with self._authenticated():
+            response = await self.client.post('/api/v1/workspaces/workspace-001/sources', content=raw,
+                cookies={WEB_SESSION_COOKIE: 'opaque-session'}, headers={'Content-Type': mime,
+                'X-Source-Filename': 'qa.docx', 'X-Notebook-Id': 'notebook-001', 'Idempotency-Key': 'docx-upload-001'})
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(len(self.uploads.calls), 1)
+        self.assertEqual(self.uploads.calls[0]['content'], raw)
+        self.assertEqual(self.uploads.calls[0]['content_type'], mime)
+        self.assertEqual(self.processing.submissions[0][1:], ('source-version-001', 'notebook-001'))
+
+    async def test_ooxml_security_rejection_precedes_storage_and_processing_submission(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", b"A" * 200000)
+        encrypted = bytearray(buffer.getvalue())
+        struct.pack_into("<H", encrypted, 6, 1)
+        struct.pack_into("<H", encrypted, encrypted.index(b"PK\x01\x02") + 8, 1)
+        # The existing HTTP safe-error mapper exposes corruption, but masks
+        # encryption/bomb internals. Exact internal codes are tested at ingest.
+        for content, code, public_code in (
+            (buffer.getvalue()[:-22], "CORRUPTED_SOURCE", "CORRUPTED_SOURCE"),
+            (bytes(encrypted), "ENCRYPTED_SOURCE", "INVALID_REQUEST"),
+            (buffer.getvalue(), "COMPRESSION_BOMB", "INVALID_REQUEST"),
+        ):
+            with self.subTest(code=code), self._authenticated():
+                response = await self.client.post(
+                    "/api/v1/workspaces/workspace-001/sources", content=content,
+                    cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                    headers={"Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                             "X-Source-Filename": "source.docx", "X-Notebook-Id": "notebook-001",
+                             "Idempotency-Key": f"upload-{code}"},
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["code"], public_code)
+                self.assertEqual(self.uploads.calls, [])
+                self.assertEqual(self.processing.submissions, [])
+
+    async def test_source_reprocessing_rejects_unbound_notebook_and_unknown_attributes(self) -> None:
+        from daon2_user_api.notebook import NotebookError
+        body = {"kind": "processing_run", "attributes": {"workspace_id": "workspace-001", "notebook_id": "notebook-001", "source_version_id": "source-version-001"}}
+        with self._authenticated(), patch.object(self.dependencies.notebook_service, "require_selected_bindings", side_effect=NotebookError("NOTEBOOK_BINDING_NOT_FOUND", 404)):
+            response = await self.client.post("/api/v1/sources/src-001/processing-runs", json=body,
+                headers={"Cookie": f"{WEB_SESSION_COOKIE}=opaque-session", "Idempotency-Key": "retry-001"})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.processing.submissions, [])
+        body["attributes"]["tenant_id"] = "other-tenant"
+        with self._authenticated():
+            response = await self.client.post("/api/v1/sources/src-001/processing-runs", json=body,
+                headers={"Cookie": f"{WEB_SESSION_COOKIE}=opaque-session", "Idempotency-Key": "retry-001"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(self.processing.submissions, [])
+
+    async def test_source_reprocessing_uses_declared_resource_contract_and_verified_scope(self) -> None:
+        with self._authenticated():
+            response = await self.client.post(
+                "/api/v1/sources/src-001/processing-runs", headers={"Cookie": f"{WEB_SESSION_COOKIE}=opaque-session", "Idempotency-Key": "retry-001"},
+                json={"kind": "processing_run", "attributes": {"workspace_id": "workspace-001", "notebook_id": "notebook-001", "source_version_id": "source-version-001"}},
+            )
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["data"]["id"], "run-retry-001")
+        self.assertEqual(response.json()["data"]["attributes"]["retry_of_processing_run_id"], "run-001")
+        self.assertIn("ETag", response.headers)
+        context = self.processing.submissions[0][0]
+        self.assertEqual((context.tenant_id, context.actor_id), ("tenant-001", "user-001"))
+
+    async def test_source_reprocessing_rejects_unauthenticated_and_cross_workspace(self) -> None:
+        body = {"kind": "processing_run", "attributes": {"workspace_id": "other-workspace", "notebook_id": "notebook-001", "source_version_id": "source-version-001"}}
+        response = await self.client.post("/api/v1/sources/src-001/processing-runs", json=body, headers={"Idempotency-Key": "retry-001"})
+        self.assertEqual(response.status_code, 401)
+        with self._authenticated():
+            response = await self.client.post("/api/v1/sources/src-001/processing-runs", json=body, headers={"Cookie": f"{WEB_SESSION_COOKIE}=opaque-session", "Idempotency-Key": "retry-001"})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.processing.submissions, [])
+
+    async def asyncSetUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        db_path = Path(self.directory.name) / "runtime.sqlite3"
+        self.audit = AuditEventStore()
+        self.identity, self.identity_repository, _, self.clock = create_service(
+            db_path, audit_store=self.audit
+        )
+        self.authorization_repository = SqliteAuthorizationRepository(db_path)
+        self.authorization = AuthorizationService(
+            repository=self.authorization_repository,
+            audit_store=self.audit,
+            clock=self.clock,
+            identity_service=self.identity,
+        )
+        self.principal = IdentityPrincipal("user-001", "session-001", "device-001", "tenant-001")
+        self.authorization_repository.bootstrap_workspace(
+            tenant_id="tenant-001",
+            workspace_id="workspace-001",
+            owner_user_id="user-001",
+            owner_role=Role.PERSONAL_OWNER,
+            workspace_kind="personal",
+            data_area="cloud_sync",
+            cost_limit_cents=1000,
+            now=self.clock(),
+        )
+        self.uploads = RecordingSourceUploadService()
+        self.processing = RecordingDocumentSubmissionService()
+        policy_repository = ReferenceEgressPolicyRepository()
+        policy_context = EgressPolicyContext("tenant-001", "tenant-001", "workspace-001", "user-001", TRACE_ID, POLICY_VERSION)
+        for scope in ("organization", "workspace"):
+            policy_repository.seed(policy_context, scope_type=scope, payload=EgressPolicyPayload.deny_external())
+        self.settings = RuntimeSettings.for_test(
+            database_path=db_path, policy_version=POLICY_VERSION
+        )
+        self.dependencies = RuntimeDependencies(
+            settings=self.settings,
+            identity_service=self.identity,
+            authorization_service=self.authorization,
+            audit_store=self.audit,
+            identity_repository=self.identity_repository,
+            authorization_repository=self.authorization_repository,
+            source_upload_service=self.uploads,
+            document_processing_service=self.processing,
+            notebook_service=ExistingNotebookService(),  # type: ignore[arg-type]
+            egress_policy_service=EgressPolicyService(policy_repository),
+        )
+        self.app = create_app(self.dependencies)
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://127.0.0.1"
+        )
+
+    async def asyncTearDown(self) -> None:
+        await self.client.aclose()
+        self.dependencies.close()
+        self.directory.cleanup()
+
+    def _authenticated(self):  # type: ignore[no-untyped-def]
+        return patch.object(
+            self.identity,
+            "describe_access",
+            return_value=identity_session_view(self.principal),
+        )
+
+    async def test_pdf_upload_requires_authentication(self) -> None:
+        response = await self.client.post(
+            "/api/v1/workspaces/workspace-001/sources",
+            content=b"%PDF-1.7\nsmall fixture",
+            headers={
+                "Content-Type": "application/pdf",
+                "X-Source-Filename": "fixture.pdf",
+                "X-Notebook-Id": "notebook-001",
+                "Idempotency-Key": "upload-001",
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(self.uploads.calls, [])
+
+    async def test_authenticated_pdf_upload_passes_verified_scope_to_service(self) -> None:
+        with self.assertLogs("daon2_user_api.runtime", level="INFO") as captured:
+            with self._authenticated():
+                response = await self.client.post(
+                    "/api/v1/workspaces/workspace-001/sources",
+                    content=b"%PDF-1.7\nsmall fixture",
+                    cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                    headers={
+                        "Content-Type": "application/pdf",
+                        "X-Source-Filename": "fixture.pdf",
+                        "X-Notebook-Id": "notebook-001",
+                        "Idempotency-Key": "upload-001",
+                        "X-Trace-Id": TRACE_ID,
+                    },
+                )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["data"]["source_id"], "src-001")
+        self.assertEqual(response.json()["data"]["processing_run_id"], "run-001")
+        self.assertEqual(response.json()["data"]["processing_state"], "vision_llm_understanding")
+        self.assertEqual(
+            set(response.json()["data"]),
+            {
+                "source_id", "source_version_id", "object_id", "digest_sha256",
+                "byte_size", "status", "replayed", "processing_run_id",
+                "processing_state", "job_state",
+            },
+        )
+        self.assertNotIn("deletion_policy", response.json()["data"])
+        self.assertNotIn("content_type", response.json()["data"])
+        self.assertEqual(response.headers["etag"], '"source:src-001:1"')
+        self.assertNotIn("object_key", response.text)
+        call = self.uploads.calls[0]
+        self.assertEqual(call["tenant_id"], "tenant-001")
+        self.assertEqual(call["workspace_id"], "workspace-001")
+        self.assertEqual(call["notebook_id"], "notebook-001")
+        self.assertEqual(call["actor_id"], "user-001")
+        self.assertEqual(call["filename"], "fixture.pdf")
+        context, source_version_id, notebook_id = self.processing.submissions[0]
+        self.assertEqual(context.workspace_id, "workspace-001")
+        self.assertEqual(source_version_id, "source-version-001")
+        self.assertEqual(notebook_id, "notebook-001")
+        self.assertTrue(any("source_upload" in line for line in captured.output))
+        self.assertTrue(any("processing_submit" in line for line in captured.output))
+        self.assertTrue(all("fixture.pdf" not in line for line in captured.output))
+        self.assertTrue(all("object_id" not in line for line in captured.output))
+
+    async def test_authenticated_text_upload_uses_filename_mime_matrix(self) -> None:
+        with self._authenticated():
+            response = await self.client.post(
+                "/api/v1/workspaces/workspace-001/sources",
+                content=b"plain source text",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={
+                    "Content-Type": "text/plain",
+                    "X-Source-Filename": "notes.txt",
+                    "X-Notebook-Id": "notebook-001",
+                    "Idempotency-Key": "upload-text-001",
+                    "X-Trace-Id": TRACE_ID,
+                },
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.uploads.calls[0]["filename"], "notes.txt")
+        self.assertEqual(self.uploads.calls[0]["content_type"], "text/plain")
+
+    async def test_authenticated_markdown_and_csv_upload_use_exact_registered_mime(self) -> None:
+        for filename, mime in (("notes.md", "text/markdown"), ("notes.csv", "text/csv")):
+            with self.subTest(filename=filename), self._authenticated():
+                response = await self.client.post(
+                    "/api/v1/workspaces/workspace-001/sources",
+                    content=b"ORANGE-COMPASS-42,active",
+                    cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                    headers={
+                        "Content-Type": mime,
+                        "X-Source-Filename": filename,
+                        "X-Notebook-Id": "notebook-001",
+                        "Idempotency-Key": f"upload-{filename}",
+                        "X-Trace-Id": TRACE_ID,
+                    },
+                )
+                self.assertEqual(response.status_code, 202)
+                self.assertEqual(self.uploads.calls[-1]["content_type"], mime)
+
+    async def test_upload_rejects_supported_extension_with_wrong_content_type(self) -> None:
+        with self._authenticated():
+            response = await self.client.post(
+                "/api/v1/workspaces/workspace-001/sources",
+                content=b"plain source text",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={
+                    "Content-Type": "application/pdf",
+                    "X-Source-Filename": "notes.txt",
+                    "X-Notebook-Id": "notebook-001",
+                    "Idempotency-Key": "upload-text-mime-mismatch",
+                },
+            )
+
+        self.assertEqual(response.status_code, 415)
+        self.assertEqual(self.uploads.calls, [])
+
+    async def test_processing_status_requires_workspace_access_and_returns_safe_state(self) -> None:
+        with self.assertLogs("daon2_user_api.runtime", level="INFO") as captured:
+            with self._authenticated():
+                response = await self.client.get(
+                    "/api/v1/workspaces/workspace-001/processing-runs/run-001?notebook_id=notebook-001",
+                    cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                    headers={"X-Trace-Id": TRACE_ID},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["job_state"], "leased")
+        self.assertTrue(response.headers["etag"].startswith('"projection-'))
+        self.assertNotIn("lease_owner", response.text)
+        self.assertNotIn("credential", response.text.casefold())
+        self.assertEqual(self.processing.status_notebook_ids, ["notebook-001"])
+        self.assertTrue(any("processing_status" in line for line in captured.output))
+
+    async def test_upload_rejects_mime_mismatch_and_corrupt_pdf_before_service(self) -> None:
+        with self._authenticated():
+            mime = await self.client.post(
+                "/api/v1/workspaces/workspace-001/sources",
+                content=b"%PDF-1.7\nfixture",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={
+                    "Content-Type": "text/plain",
+                    "X-Source-Filename": "fixture.pdf",
+                    "X-Notebook-Id": "notebook-001",
+                    "Idempotency-Key": "upload-mime",
+                },
+            )
+            corrupt = await self.client.post(
+                "/api/v1/workspaces/workspace-001/sources",
+                content=b"not-a-pdf",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={
+                    "Content-Type": "application/pdf",
+                    "X-Source-Filename": "fixture.pdf",
+                    "X-Notebook-Id": "notebook-001",
+                    "Idempotency-Key": "upload-corrupt",
+                },
+            )
+        self.assertEqual(mime.status_code, 415)
+        self.assertEqual(corrupt.status_code, 400)
+        self.assertEqual(self.uploads.calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

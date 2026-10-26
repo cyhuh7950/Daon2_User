@@ -1,0 +1,45 @@
+# Reference-only legacy sources (read-only) and local tool state
+/Backup/
+/.claude/
+
+# Dependencies and build output
+node_modules/
+.next/
+/apps/*/dist/
+/packages/*/dist/
+/apps/desktop/src-tauri/target/
+/apps/desktop/src-tauri/binaries/
+/apps/desktop/src-tauri/gen/
+__pycache__/
+.pytest_cache/
+.pytest-tmp/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets
+.env
+secrets/
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# Generated gate evidence (frozen OpenAPI summaries under docs/03_evidence stay tracked)
+/docs/03_evidence/release_1/R1-M1-04/
+/docs/03_evidence/release_1/R1-M1-05/
+
+# Test artifacts
+.coverage
+coverage/
+.superpowers/
+
+# test bundle leftovers
+/.web-*-output-*/
+/.stage-a-*/
+/.web-final-*/
+/.authoring-wizard-react-*/
+
+# 시험이 임시로 만드는 번들 출력 폴더
+.studio-a11y-*/
+.*-react-*/
+.*-ui-*/

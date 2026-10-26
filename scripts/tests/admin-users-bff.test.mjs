@@ -1,0 +1,236 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createBffProxy } from "../../apps/web/lib/bff-api-proxy.js";
+
+
+test("membership BFF forwards only exact admin routes with same-origin CSRF provenance", async () => {
+  const captured = [];
+  const proxy = createBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL("https://app.example.com"),
+    fetchImpl: async (url, init) => {
+      captured.push({ url: String(url), method: init.method, key: init.headers.get("idempotency-key"),
+        csrfOrigin: init.headers.get("x-daon-csrf-origin"), csrfReferer: init.headers.get("x-daon-csrf-referer") });
+      return Response.json({ data: {}, meta: {} });
+    },
+  });
+  const get = await proxy(new Request("https://app.example.com/bff/api/admin/tenants/tenant-b/users/target/memberships"),
+    ["admin", "tenants", "tenant-b", "users", "target", "memberships"]);
+  const tenants = await proxy(new Request("https://app.example.com/bff/api/admin/tenants"), ["admin", "tenants"]);
+  const patchRequest = (origin, referer) => new Request(
+    "https://app.example.com/bff/api/admin/tenants/tenant-b/workspaces/workspace-b/memberships/target/role",
+    { method: "PATCH", headers: { Origin: origin, "Sec-Fetch-Site": origin === "https://app.example.com" ? "same-origin" : "cross-site",
+      ...(referer ? { Referer: referer } : {}), "Content-Type": "application/json", "Idempotency-Key": "role-key-00000001" },
+      body: JSON.stringify({ role: "editor", expected_version: 1, reason: "ROLE_DUTY_CHANGE" }) },
+  );
+  const patchSegments = ["admin", "tenants", "tenant-b", "workspaces", "workspace-b", "memberships", "target", "role"];
+  assert.equal((await proxy(patchRequest("https://attacker.example", "https://app.example.com/admin/users"), patchSegments)).status, 403);
+  assert.equal((await proxy(patchRequest("https://app.example.com", undefined), patchSegments)).status, 403);
+  const patched = await proxy(patchRequest("https://app.example.com", "https://app.example.com/admin/users"), patchSegments);
+  assert.deepEqual([tenants.status, get.status, patched.status], [200, 200, 200]);
+  assert.deepEqual(captured, [
+    { url: "https://api.example.com/api/v1/admin/tenants/tenant-b/users/target/memberships", method: "GET", key: null, csrfOrigin: null, csrfReferer: null },
+    { url: "https://api.example.com/api/v1/admin/tenants", method: "GET", key: null, csrfOrigin: null, csrfReferer: null },
+    { url: "https://api.example.com/api/v1/admin/tenants/tenant-b/workspaces/workspace-b/memberships/target/role", method: "PATCH", key: "role-key-00000001", csrfOrigin: "https://app.example.com", csrfReferer: "https://app.example.com/admin/users" },
+  ]);
+  assert.equal((await proxy(new Request("https://app.example.com/bff/api/admin/tenants/tenant-b/users/target/memberships", { method: "DELETE", headers: { Origin: "https://app.example.com" } }),
+    ["admin", "tenants", "tenant-b", "users", "target", "memberships"])).status, 405);
+  assert.equal((await proxy(new Request("https://app.example.com/bff/api/admin/tenants/tenant-b/workspaces/workspace-b/memberships/target/approve"),
+    ["admin", "tenants", "tenant-b", "workspaces", "workspace-b", "memberships", "target", "approve"])).status, 404);
+});
+
+
+test("system user BFF maps list and administrator mutations through same-origin routes", async () => {
+  const captured = [];
+  const proxy = createBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL("https://app.example.com"),
+    fetchImpl: async (url, init) => {
+      captured.push({
+        url: String(url),
+        method: init.method,
+        idempotencyKey: init.headers.get("idempotency-key"),
+      });
+      return Response.json({ data: {}, meta: {} });
+    },
+  });
+
+  const listed = await proxy(
+    new Request("https://app.example.com/bff/api/admin/users"),
+    ["admin", "users"],
+  );
+  const changed = await proxy(new Request(
+    "https://app.example.com/bff/api/admin/users/user-001/state",
+    {
+      method: "PATCH",
+      headers: {
+        Origin: "https://app.example.com",
+        "Sec-Fetch-Site": "same-origin",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "admin-state-change-0001",
+      },
+      body: JSON.stringify({ state: "suspended" }),
+    },
+  ), ["admin", "users", "user-001", "state"]);
+  const reset = await proxy(new Request(
+    "https://app.example.com/bff/api/admin/users/user-001/password-reset",
+    {
+      method: "POST",
+      headers: {
+        Origin: "https://app.example.com",
+        "Sec-Fetch-Site": "same-origin",
+        "Idempotency-Key": "admin-reset-user-0001",
+      },
+      body: "{}",
+    },
+  ), ["admin", "users", "user-001", "password-reset"]);
+  const crossOrigin = await proxy(new Request(
+    "https://app.example.com/bff/api/admin/users/user-001/state",
+    {
+      method: "PATCH",
+      headers: {
+        Origin: "https://attacker.example",
+        "Sec-Fetch-Site": "cross-site",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "cross-origin-denied-0001",
+      },
+      body: JSON.stringify({ state: "suspended" }),
+    },
+  ), ["admin", "users", "user-001", "state"]);
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(captured.length, 3);
+  const deleteUser = await proxy(new Request(
+    "https://app.example.com/bff/api/admin/users/user-001",
+    { method: "DELETE", headers: { Origin: "https://app.example.com", "Idempotency-Key": "admin-delete-user-0001" }, body: "{}" },
+  ), ["admin", "users", "user-001"]);
+  const wrongMethod = await proxy(new Request(
+    "https://app.example.com/bff/api/admin/users/user-001/state",
+    { method: "POST", headers: { Origin: "https://app.example.com" } },
+  ), ["admin", "users", "user-001", "state"]);
+
+  assert.deepEqual([listed.status, changed.status, reset.status, deleteUser.status, wrongMethod.status], [200, 200, 200, 200, 405]);
+  assert.deepEqual(captured, [
+    { url: "https://api.example.com/api/v1/admin/users", method: "GET", idempotencyKey: null },
+    {
+      url: "https://api.example.com/api/v1/admin/users/user-001/state",
+      method: "PATCH",
+      idempotencyKey: "admin-state-change-0001",
+    },
+    {
+      url: "https://api.example.com/api/v1/admin/users/user-001/password-reset",
+      method: "POST",
+      idempotencyKey: "admin-reset-user-0001",
+    },
+    {
+      url: "https://api.example.com/api/v1/admin/users/user-001",
+      method: "DELETE",
+      idempotencyKey: "admin-delete-user-0001",
+    },
+  ]);
+});
+
+test("admin delete/reset BFF는 교차 출처 요청을 차단하고 upstream 권한 거부를 전달한다", async () => {
+  const forwarded = [];
+  const proxy = createBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL("https://app.example.com"),
+    fetchImpl: async (url) => { forwarded.push(String(url)); return Response.json({ error: { code: "FORBIDDEN" } }, { status: 403 }); },
+  });
+  const makeRequest = (path, origin) => new Request(`https://app.example.com/bff/api/admin/users/user-001${path}`, {
+    method: path ? "POST" : "DELETE",
+    headers: { Origin: origin, "Sec-Fetch-Site": origin === "https://app.example.com" ? "same-origin" : "cross-site", "Idempotency-Key": "admin-action-user-0001" },
+    body: "{}",
+  });
+  for (const path of ["", "/password-reset"]) {
+    const segments = ["admin", "users", "user-001", ...(path ? ["password-reset"] : [])];
+    assert.equal((await proxy(makeRequest(path, "https://attacker.example"), segments)).status, 403);
+    assert.equal(forwarded.length, path ? 1 : 0);
+    const denied = await proxy(makeRequest(path, "https://app.example.com"), segments);
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, "FORBIDDEN");
+  }
+  assert.deepEqual(forwarded, [
+    "https://api.example.com/api/v1/admin/users/user-001",
+    "https://api.example.com/api/v1/admin/users/user-001/password-reset",
+  ]);
+});
+
+test("authenticated password change BFF validates referer and forwards exact CSRF provenance", async () => {
+  const captured = [];
+  const proxy = createBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL("https://app.example.com"),
+    fetchImpl: async (url, init) => {
+      captured.push({
+        url: String(url),
+        method: init.method,
+        csrfOrigin: init.headers.get("x-daon-csrf-origin"),
+        csrfReferer: init.headers.get("x-daon-csrf-referer"),
+      });
+      return Response.json({ data: { status: "password_changed" }, meta: { trace_id: "trace-1" } });
+    },
+  });
+  const request = (origin, referer, method = "POST") => new Request(
+    "https://app.example.com/bff/api/auth/password/change",
+    {
+      method,
+      headers: {
+        Origin: origin,
+        ...(referer ? { Referer: referer } : {}),
+        "Sec-Fetch-Site": origin === "https://app.example.com" ? "same-origin" : "cross-site",
+        "Content-Type": "application/json",
+      },
+      body: method === "POST" ? JSON.stringify({ current_password: "old password", new_password: "new password value" }) : undefined,
+    },
+  );
+  assert.equal((await proxy(request(
+    "https://app.example.com", "https://app.example.com/password-change?required=1",
+  ), ["auth", "password", "change"])).status, 200);
+  assert.equal((await proxy(request(
+    "https://app.example.com", undefined,
+  ), ["auth", "password", "change"])).status, 403);
+  assert.equal((await proxy(request(
+    "https://app.example.com", "https://attacker.example/password-change",
+  ), ["auth", "password", "change"])).status, 403);
+  assert.equal((await proxy(request(
+    "https://attacker.example", "https://app.example.com/password-change",
+  ), ["auth", "password", "change"])).status, 403);
+  assert.equal((await proxy(request(
+    "https://app.example.com", "https://app.example.com/password-change", "GET",
+  ), ["auth", "password", "change"])).status, 405);
+  assert.deepEqual(captured, [{
+    url: "https://api.example.com/api/v1/auth/password/change",
+    method: "POST",
+    csrfOrigin: "https://app.example.com",
+    csrfReferer: "https://app.example.com/password-change?required=1",
+  }]);
+});
+
+test("user Provider credential BFF keeps personal key mutations same-origin", async () => {
+  const captured = [];
+  const proxy = createBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL("https://app.example.com"),
+    fetchImpl: async (url, init) => {
+      captured.push({ url: String(url), method: init.method });
+      return new Response(null, { status: 204 });
+    },
+  });
+  const listed = await proxy(new Request("https://app.example.com/bff/api/provider-credentials"), ["provider-credentials"]);
+  const replaced = await proxy(new Request(
+    "https://app.example.com/bff/api/provider-credentials/ollama-lan",
+    { method: "PUT", headers: { Origin: "https://app.example.com", "Content-Type": "application/json" }, body: "{}" },
+  ), ["provider-credentials", "ollama-lan"]);
+  const deleted = await proxy(new Request(
+    "https://app.example.com/bff/api/provider-credentials/ollama-lan",
+    { method: "DELETE", headers: { Origin: "https://app.example.com", "Content-Type": "application/json" }, body: "{}" },
+  ), ["provider-credentials", "ollama-lan"]);
+
+  assert.deepEqual([listed.status, replaced.status, deleted.status], [204, 204, 204]);
+  assert.deepEqual(captured, [
+    { url: "https://api.example.com/api/v1/provider-credentials", method: "GET" },
+    { url: "https://api.example.com/api/v1/provider-credentials/ollama-lan", method: "PUT" },
+    { url: "https://api.example.com/api/v1/provider-credentials/ollama-lan", method: "DELETE" },
+  ]);
+});
