@@ -24,3 +24,5 @@ fi
 bash deploy/daon2-user/wsl-migrate.sh
 bash deploy/daon2-user/seed/load-provider-seed.sh
 bash deploy/daon2-user/wsl-deploy.sh "$@"
+# 앱 기동 후 초기 데이터(조직 외부 전송 정책·화면 설정)를 적용한다. 실패해도 배포는 성공으로 둔다.
+bash deploy/daon2-user/seed/apply-initial-data.sh admin || echo "초기 데이터 적용을 건너뜀(앱 기동 후 apply-initial-data.sh 를 다시 실행)"

@@ -19,3 +19,16 @@
 - 갱신: 기준 DB에서 `bash deploy/daon2-user/seed/export-provider-seed.sh [컨테이너] > deploy/daon2-user/seed/provider-seed.sql`
 - 계정·노트북·소스·정책(조직·Workspace 외부 전송 정책)은 시드에 없다. 첫 로그인은 `admin`/`admin`이고, 외부 전송 정책은 화면에서 설정한다(허용 목적지 등).
 
+
+### 초기 데이터 범위(새 설치)
+
+| 항목 | 방식 |
+| --- | --- |
+| Provider | `seed/provider-seed.sql`(연결 12·모델 35, Key 없음). 마이그레이션 직후 자동 적용 |
+| 조직 외부 전송 정책 | `seed/initial_policy.py`: 시드된 차단 정책인 조직·Workspace만 "추가 인증 없이 허용"(external_api·server_internal·local_runtime, 허용 목적지 4곳, 1 MiB, 마스킹·삭제 필수)로 올림. 이미 저장된 정책은 건드리지 않음 |
+| 화면 설정 | `seed/initial_screen.py`: admin의 테마 초기값(기본 system, `SEED_SCREEN_THEME`로 변경). 이미 저장돼 있으면 건드리지 않음 |
+| 라이선스 | 서명된 라이선스는 시드로 만들 수 없다. 개발 단계(`DAON_DEVELOPMENT_STAGE=true`, 이 오버레이가 설정)에서는 라이선스 없이 전 기능 사용. 운영 전환 시 화면에서 라이선스 파일 적용 |
+| 사용자 설명서 | 웹 이미지에 포함(`/manual/daon-user-manual.pdf` 등). 별도 데이터 없음 |
+| admin 계정 | 앱이 첫 기동 때 `admin`/`admin`(첫 로그인 비밀번호 변경)으로 만든다. 시드에 비밀번호·해시를 넣지 않는다 |
+
+적용: `bash deploy/daon2-user/seed/apply-initial-data.sh admin` (`ysna-deploy.sh`가 배포 끝에 자동 실행).
