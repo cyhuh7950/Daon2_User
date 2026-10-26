@@ -11,5 +11,5 @@ docker exec "$API" python /tmp/initial_screen.py "$TENANT" admin
 docker exec "$API" rm -f /tmp/initial_screen.py
 STAGE=$(docker exec "$API" printenv DAON_DEVELOPMENT_STAGE 2>/dev/null || echo unset)
 echo "라이선스: DAON_DEVELOPMENT_STAGE=$STAGE (true 이면 개발 단계로 라이선스 없이 전 기능 사용. 운영에서는 서명된 라이선스를 화면에서 적용)"
-CODE=$(docker exec "$WEB" sh -c 'wget -q -S -O /dev/null http://127.0.0.1:3330/manual/daon-user-manual.pdf 2>&1 | grep -m1 "HTTP/" | awk "{print \$2}"' 2>/dev/null || true)
+CODE=$(docker exec "$WEB" node -e "fetch('http://127.0.0.1:3330/manual/daon-user-manual.pdf').then(r=>console.log(r.status)).catch(()=>console.log('fail'))" 2>/dev/null || true)
 echo "사용자 설명서: /manual/daon-user-manual.pdf → HTTP ${CODE:-확인 못함} (웹 이미지에 포함)"

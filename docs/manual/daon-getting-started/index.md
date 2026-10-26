@@ -122,7 +122,7 @@ Workspace 내부의 멤버 권한 모델과 시스템 관리자 계정 관리는
 
 1. 운영자는 승인된 배포 절차로 현재 API 컨테이너의 서버 콘솔에 접속합니다.
 2. API가 사용하는 것과 같은 Runtime 환경과 데이터베이스 접근 권한이 준비되었는지 확인합니다. 실제 서버 경로, DSN, Secret 값은 명령행·문의 글·보고서에 적지 않습니다.
-3. API 컨테이너에서 프로젝트 명령 `python -m daon_user_api.admin_cli reset-initial-password`를 정확히 한 번 실행합니다.
+3. API 컨테이너에서 프로젝트 명령 `python -m daon2_user_api.admin_cli reset-initial-password`를 정확히 한 번 실행합니다.
 4. 성공하면 `INITIAL_ADMIN_PASSWORD_RESET`이 표시되고 종료 코드는 0입니다. Runtime 실패는 `INITIAL_ADMIN_PASSWORD_RESET_FAILED:<오류 코드>`를 표시하고 종료 코드 1로 끝납니다. 잘못된 인자나 지원하지 않는 옵션은 명령 사용법인 `usage:`를 표시하고 종료 코드 2로 끝납니다. 어느 경우에도 비밀번호·hash·token을 출력하지 않으며, Runtime 실패 원인을 확인하기 전에 반복 실행하지 않습니다.
 5. 성공 시 admin의 기존 Session과 refresh family가 모두 폐기됩니다. 브라우저에서 다시 `admin/admin`으로 로그인한 뒤 `/password-change`에서 즉시 새 비밀번호를 설정합니다.
 
