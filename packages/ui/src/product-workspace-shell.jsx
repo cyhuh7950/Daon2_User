@@ -2011,6 +2011,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               <button type="button" role="menuitem" onClick={() => openModal("organization-policy", settingsButtonRef.current)}><StudioIcon name={ICON_NAMES.policy} size={18} className="menu-icon" /><span><strong>조직 정책</strong><small>읽기 전용</small></span></button>
               <button type="button" role="menuitem" onClick={() => openModal("license", settingsButtonRef.current)}><StudioIcon name={ICON_NAMES.license} size={18} className="menu-icon" /><span><strong>라이선스</strong><small>Edition과 사용 한도</small></span></button>
               <button type="button" role="menuitem" onClick={() => openModal("manual", settingsButtonRef.current)}><StudioIcon name={ICON_NAMES.manual} size={18} className="menu-icon" /><span><strong>사용자 설명서</strong><small>가이드 검색·읽기·다운로드</small></span></button>
+              <a role="menuitem" className="settings-menu-link" href="/settings/tts-engines" onClick={() => setSettingsMenuOpen(false)}><StudioIcon name={ICON_NAMES.model} size={18} className="menu-icon" /><span><strong>음성 엔진</strong><small>오디오·동영상 개요용(관리자)</small></span></a>
               <button type="button" role="menuitem" onClick={() => { setSettingsMenuOpen(false); onLogout?.(); }}><StudioIcon name={ICON_NAMES.logout} size={18} className="menu-icon" /><span><strong>로그아웃</strong><small>현재 세션만 종료</small></span></button>
             </div> : null}
           </div>

@@ -196,6 +196,7 @@ export function NotebookHomeWorkspace({
       "model-connections": "/settings/model-connections",
       "organization-policy": "/settings/organization",
       "user-management": "/admin",
+      "tts-engines": "/settings/tts-engines",
     });
     const route = routes[settingId];
     if (route) window.location.assign(route);

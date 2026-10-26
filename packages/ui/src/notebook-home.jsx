@@ -39,7 +39,7 @@ function SettingsMenu({ onOpenSetting, onLogout, showUserManagement, showOrganiz
       {scopeError && <p className="notebook-scope-error" role="status">{scopeError === "TENANT_SWITCH_UNCERTAIN"
         ? "전환 결과를 확인할 수 없습니다. 본인 세션을 다시 확인한 뒤 전환할 수 있습니다."
         : "조직 범위를 확인할 수 없습니다. 다시 시도해 주세요."}</p>}
-      {[['screen', '화면 설정'], ['license', '라이선스'], ['manual', '사용자 설명서'], ['model-connections', 'LLM 설정'], ...(showOrganizationPolicy ? [['organization-policy', '조직 정책']] : []), ...(showUserManagement ? [['user-management', '사용자 관리']] : [])].map(([id, label]) =>
+      {[['screen', '화면 설정'], ['license', '라이선스'], ['manual', '사용자 설명서'], ['model-connections', 'LLM 설정'], ...(showOrganizationPolicy ? [['organization-policy', '조직 정책']] : []), ...(showUserManagement ? [['user-management', '사용자 관리'], ['tts-engines', '음성 엔진']] : [])].map(([id, label]) =>
         <button key={id} role="menuitem" type="button" onClick={() => { setOpen(false); onOpenSetting?.(id); }}>{label}</button>)}
       <button role="menuitem" type="button" onClick={() => { setOpen(false); onLogout?.(); }}>로그아웃</button>
     </div>}
