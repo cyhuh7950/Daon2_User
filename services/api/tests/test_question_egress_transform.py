@@ -121,6 +121,25 @@ def test_required_masking_accepts_any_general_question_wire() -> None:
     assert transformed["messages"][1]["content"] == "2026년 매출은?"
 
 
+def test_required_masking_accepts_responses_api_input_wire_used_by_omniroute() -> None:
+    authorizer = PostgresQuestionEgressAuthorizer.__new__(PostgresQuestionEgressAuthorizer)
+    authorizer._policy_service = Policy()
+    plain = json.loads(authorizer.prepare_payload(
+        QuestionContext("tenant", "workspace", "actor", "trace", "policy"),
+        canonical_json_bytes({"model": "auto", "input": [
+            {"role": "system", "content": "Answer briefly."}, {"role": "user", "content": "안녕"}],
+            "text": {"format": {"type": "json_schema"}}}),
+    ))
+    assert plain["input"][1]["content"] == "안녕"
+    grounded = {"question": "q", "evidence": [{"chunk_id": "c1", "page": 1, "text": "근거"}]}
+    out = json.loads(authorizer.prepare_payload(
+        QuestionContext("tenant", "workspace", "actor", "trace", "policy"),
+        canonical_json_bytes({"model": "auto", "input": [
+            {"role": "system", "content": "s"}, {"role": "user", "content": json.dumps(grounded, ensure_ascii=False)}]}),
+    ))
+    assert json.loads(out["input"][1]["content"])["evidence"][0]["text"] == "근거"
+
+
 @pytest.mark.parametrize(
     "malformed",
     [

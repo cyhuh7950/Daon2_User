@@ -230,6 +230,9 @@ class PostgresQuestionEgressAuthorizer:
                 raise ValueError
             messages = payload.get("messages")
             if not isinstance(messages, list):
+                # OpenAI Responses 형식(OmniRoute)은 같은 메시지 목록을 `input`에 담는다.
+                messages = payload.get("input")
+            if not isinstance(messages, list):
                 raise ValueError
             user_messages = [
                 item for item in messages
