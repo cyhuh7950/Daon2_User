@@ -2180,3 +2180,27 @@ class ModelSelectionApplicationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OmniRouteResponseShapeTests(unittest.TestCase):
+    def _adapter(self, output_text):
+        from daon2_user_api.question_answering_service import _OmniRouteTextGenerationAdapter
+
+        class T:
+            def post_json(self, **kwargs):
+                return {"output_text": output_text, "usage": {}}
+        selection = ResolvedModel(
+            connection_id="c", provider_code="OMNIROUTE", model_id="auto", capability="text_generation",
+            base_url="https://omniroute.example/v1", credential_version=1, default_version=1, catalog_version=1,
+            provider_kind="external_api", routing_owner="gateway", daon_fallback_allowed=False, _credential=bytearray(b"k"),
+        )
+        return _OmniRouteTextGenerationAdapter(transport=T(), api_key="k"), selection
+
+    def test_general_answer_accepts_plain_text_and_json_and_fenced_json(self):
+        from daon2_user_api.question_answering import GeneralConversationRequest
+        request = GeneralConversationRequest("안녕", "trace-1")
+        for output, expected in (("안녕하세요!", "안녕하세요!"), ('{"answer":"반갑습니다"}', "반갑습니다"),
+                                 ('```json\n{"answer":"네"}\n```', "네")):
+            adapter, selection = self._adapter(output)
+            self.assertEqual(adapter.generate_general(request, selection).answer, expected)
+            selection.release()

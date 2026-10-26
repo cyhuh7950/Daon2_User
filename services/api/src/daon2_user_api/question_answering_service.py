@@ -226,15 +226,30 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
         try:
             value = json.loads(raw) if isinstance(raw, str) else raw
         except json.JSONDecodeError:
-            raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
+            # 라우터가 JSON 스키마를 강제하지 않고 코드 펜스·설명을 덧붙이는 경우: 가장 바깥 JSON 객체만 꺼낸다.
+            start, end = (raw.find("{"), raw.rfind("}")) if isinstance(raw, str) else (-1, -1)
+            try:
+                value = json.loads(raw[start:end + 1]) if 0 <= start < end else None
+            except json.JSONDecodeError:
+                value = None
+            if value is None:
+                raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         if not isinstance(value, dict):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID")
         return cast(dict[str, object], value)
 
     def generate_general(self, request, selection, *, provider_payload=None):  # type: ignore[no-untyped-def]
-        parsed = self._parsed(self._call(
+        response = self._call(
             selection, provider_payload or self.general_provider_payload(request, selection),
-        ))
+        )
+        try:
+            parsed = self._parsed(response)
+        except ValueError:
+            # 일반 대화는 JSON이 아니어도 본문 텍스트 자체를 답으로 쓴다(라우터가 스키마를 강제하지 않는 경우).
+            text = response.get("output_text")
+            if not isinstance(text, str) or not text.strip():
+                raise
+            parsed = {"answer": text}
         if set(parsed) != {"answer"}:
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID")
         answer = str(parsed["answer"]).strip()
