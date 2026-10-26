@@ -198,20 +198,36 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
     def _url(selection: ResolvedModel) -> str:
         return _append_provider_path(selection.base_url, "/v1/responses")
 
+    @staticmethod
+    def _with_json_instruction(messages, schema):  # type: ignore[no-untyped-def]
+        """라우터(auto)는 text.format(JSON 스키마)을 강제하지 않을 수 있어, 같은 요구를 시스템 지시에도 적는다."""
+        instruction = (
+            "\n\nReturn ONLY one JSON object that matches this JSON Schema. No markdown, code fences or text outside the JSON. "
+            "JSON Schema:\n" + canonical_json_bytes(schema).decode("utf-8")
+        )
+        out = [dict(message) for message in messages]
+        for message in out:
+            if message.get("role") == "system" and isinstance(message.get("content"), str):
+                message["content"] += instruction
+                break
+        return out
+
     @classmethod
     def provider_payload(cls, request, selection):  # type: ignore[no-untyped-def]
         chat = super().provider_payload(request, selection)
+        schema = cast(dict[str, object], chat["response_format"])["json_schema"]
         return {
-            "model": selection.model_id, "input": chat["messages"],
-            "text": {"format": cast(dict[str, object], chat["response_format"])["json_schema"]},
+            "model": selection.model_id, "input": cls._with_json_instruction(chat["messages"], schema),
+            "text": {"format": schema},
         }
 
     @classmethod
     def general_provider_payload(cls, request, selection):  # type: ignore[no-untyped-def]
         chat = super().general_provider_payload(request, selection)
+        schema = cast(dict[str, object], chat["response_format"])["json_schema"]
         return {
-            "model": selection.model_id, "input": chat["messages"],
-            "text": {"format": cast(dict[str, object], chat["response_format"])["json_schema"]},
+            "model": selection.model_id, "input": cls._with_json_instruction(chat["messages"], schema),
+            "text": {"format": schema},
         }
 
     def _call(self, selection: ResolvedModel, payload: dict[str, object]) -> dict[str, object]:
