@@ -6,6 +6,7 @@ set -uo pipefail
 cd "$(dirname "$0")/../../.."
 TENANT=${1:-admin}; PG=${2:-daon2_user-postgres-1}; API=${3:-daon2_user-api-1}; WEB=${4:-daon2_user-web-1}
 bash deploy/daon2-user/seed/apply-initial-policy.sh "$TENANT" "$PG" "$API"
+bash deploy/daon2-user/seed/apply-initial-tts.sh "$TENANT" "$PG" "$API"
 docker cp deploy/daon2-user/seed/initial_screen.py "$API":/tmp/initial_screen.py
 docker exec "$API" python /tmp/initial_screen.py "$TENANT" admin
 docker exec "$API" rm -f /tmp/initial_screen.py

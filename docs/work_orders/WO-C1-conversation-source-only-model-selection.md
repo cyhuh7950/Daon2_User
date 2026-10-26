@@ -13,7 +13,8 @@
 
 ## 2. 소스가 제공한 지식으로만 답변
 
-- 서버 실행 경로(`QuestionAnsweringService.ask/_ask_resolved/prepare_authorization`)에서 **소스가 없거나 검색 근거가 없으면 모델을 호출하지 않고** 안내 답변(`NO_KNOWLEDGE_ANSWER`, `NO_EVIDENCE_ANSWER`)만 저장한다. 일반 상담(`general_ungrounded` 모델 호출) 경로를 없앴다. 외부 전송 승인용 payload도 비운다.
+- 서버 실행 경로(`QuestionAnsweringService.ask/_ask_resolved/prepare_authorization`)에서 **소스가 없거나 검색 근거가 없으면 모델을 호출하지 않고** 안내 답변(`NO_KNOWLEDGE_ANSWER`, `NO_EVIDENCE_ANSWER`)만 저장한다. 외부 전송 승인용 payload도 비운다.
+- **일반 대화와 지식 질문의 분리(후속)**: 인사·감사·사용법·정체성처럼 지식이 필요 없는 짧은 질문(`is_chat_question`, 전체 일치 패턴, 80자 이하)만 소스 없이 모델이 대화체로 답한다(사실 질문은 답하지 않도록 프롬프트로 제한). 그 외 질문은 위 규칙을 따른다. 소스가 없을 때의 안내문은 모델 없이 고정 문구로 나간다.
 - 근거가 일부만 있을 때: 근거 프롬프트에 "학습 지식 금지, 확인된 부분만 인용, 확인되지 않은 부분과 필요한 자료를 밝힐 것" 규칙을 넣었다(`question_answering.py`).
 - 실제 스택 확인: 소스 없는 질문과 소스는 있으나 근거가 없는 질문의 Run은 `selected_model_attempt_id`가 비어 있다(모델 미호출). 소스 근거가 있는 질문은 호출 기록이 있다. 안내문에 "서울" 같은 학습 지식이 없다.
 - 한계: 모델이 지시를 어기고 학습 지식으로 답하는지는 프롬프트로만 막는다(코드로 검증할 수 없음). 근거가 일부만 있는 경우의 답변 문구는 모델 출력에 달려 있다.
@@ -36,7 +37,8 @@
 - 실제 호출 적용: `resolve(connection_id, model_id)`로 고른 모델을 쓰고, 수준은 `reasoning_effort`(OmniRoute는 `reasoning.effort`)로 payload에 넣는다. 외부 전송 승인도 같은 모델·payload 기준.
 - 자동 전환 금지: 고른 모델이 막히면 `SELECTED_MODEL_UNAVAILABLE`로 끝낸다. 고른 모델이 실패해도 개인 자격증명·기본 모델로 재시도하지 않는다.
 - 확인: 단위 시험(payload에 모델·수준 반영, 선택 없으면 기본·수준 없음, 막힌 모델 오류·재해석 없음, 호출 실패 시 재시도 없음), 실제 스택(승인 목록 33개 모델, 선택 저장·재로그인 복원, 미확인 수준 409, 승인 목록 밖 모델 409, 임시로 확인한 수준 low/high로 실제 질문 200 — 시험 뒤 원복).
-- 한계: 이 선택은 **질문(대화)**에 적용한다. Studio 생성은 작업공간 기본 모델을 쓴다. 추론 수준을 요청에 실제로 실은 것은 단위 시험으로 확인했고, 제공자 쪽이 수준을 반영했는지는 외부에서 관측할 수 없다. 관리 화면(수준 확인 UI)은 없고 API만 있다.
+- 후속 변경: 추론 수준은 관리자가 손으로 확인하지 않고 **자동 확인**한다(`POST /api/v1/admin/model-reasoning/probe`, `reasoning_probed_at`, 마이그레이션 0080). 일시 오류는 재시도한다. 라우터(OmniRoute 등)는 항상 low/medium/high를 지원하는 것으로 보고 `reasoning_effort`로 넘긴다. Provider 설정 화면에 확인 패널이 있다.
+- 한계: 이 선택은 **질문(대화)**에 적용한다. Studio 생성은 작업공간 기본 모델을 쓴다. 추론 수준을 요청에 실제로 실은 것은 단위 시험으로 확인했고, 제공자 쪽이 수준을 반영했는지는 외부에서 관측할 수 없다.
 
 ## 5. Provider 연결 화면: 저장 방법과 오류 안내
 
@@ -50,4 +52,14 @@
 | 중복 클릭 | 저장·시험 중에는 잠금(ref)으로 두 번째 요청을 막는다 | 연속 클릭 시 요청 1건 시험 |
 
 캡처 화면의 실패(공용·Key 필요 연결, Key 입력 없음)는 저장된 시스템 Key가 없을 때 서버가 `PROVIDER_CREDENTIAL_REQUIRED`로 거부하는 경로와 일치한다(추정 — 실제 코드는 새 화면의 오류 코드로 확인). 저장된 Key가 없으면 저장 전에 이유를 알린다.
+
+후속: 저장과 연결 시험을 분리했다(`skip_verification`, `POST /api/v1/admin/provider-connections/test`). 시험은 저장하지 않고, 시험이 필요한 변경(직접 입력형·라우터의 모델 변경 등)을 시험 없이 저장하려 하면 `PROVIDER_VERIFICATION_REQUIRED`로 거부한다.
+
+## 6. ysna 배포와 OmniRoute 실제 확인 (후속)
+
+- 저장소를 `cyhuh7950/Daon2_User`로 이전(이력 없음)하고 ysna-server에 도메인(`daon2-user.sinsan.kr`, nginx-proxy-manager)으로 배포했다. WSL 데이터를 복제해 마이그레이션 0080까지 적용했다. 배포 절차·오버레이는 `deploy/daon2-user/README.md`.
+- OmniRoute 실제 호출에서 드러난 문제와 수정: Responses 입력(`input` 목록)을 외부 전송 변환기가 못 읽음(`EGRESS_TRANSFORMATION_FAILED`) → `payload["input"]` 인식, 라우터가 JSON 스키마(`text.format`)를 무시함(`TEXT_GENERATION_RESPONSE_INVALID`) → 시스템 메시지에 JSON 지시를 덧붙이고 응답에서 가장 바깥 `{…}`를 추출, 일반 대화는 평문 `output_text` 허용. 질문 실패 코드를 공개 코드로 노출하고 서버 로그에 남긴다.
+- 확인: ysna에서 인사(소스 없음)와 소스 근거 질문("자기부담금은 얼마인가요?" → 답+인용)이 OmniRoute로 동작함. 음성(TTS)은 OmniRoute가 아니라 별도 음성 엔진(supertonic)으로 합성하며, 사용자 확인으로 동작.
+- 새 설치용 초기 데이터: Provider·조직 외부 전송 정책(분류 `internal`)·화면 설정·음성 엔진(Key 없음)·라이선스 안내·사용자 설명서(웹에 포함). 범위와 적용은 `deploy/daon2-user/README.md`.
+- 남은 한계: 모델이 지시를 어기고 평문으로 답하면 인용을 못 뽑는다(그때는 실패 코드가 나온다 — 평문 답에서 `(chunk-N)` 표기를 뽑는 보완은 아직 없음). 관리자 화면은 React 시험과 API로만 확인했고 브라우저로 직접 본 것은 아니다.
 

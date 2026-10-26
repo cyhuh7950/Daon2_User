@@ -27,6 +27,7 @@
 | Provider | `seed/provider-seed.sql`(연결 12·모델 35, Key 없음). 마이그레이션 직후 자동 적용 |
 | 조직 외부 전송 정책 | `seed/initial_policy.py`: 시드된 차단 정책인 조직·Workspace만 "추가 인증 없이 허용"(external_api·server_internal·local_runtime, 허용 목적지 4곳, 1 MiB, 마스킹·삭제 필수)로 올림. 이미 저장된 정책은 건드리지 않음 |
 | 화면 설정 | `seed/initial_screen.py`: admin의 테마 초기값(기본 system, `SEED_SCREEN_THEME`로 변경). 이미 저장돼 있으면 건드리지 않음 |
+| 음성(TTS) 엔진 | `seed/apply-initial-tts.sh`: supertonic 1개(주소·보이스 F1/M1·선택지, 기본 엔진, Key 없음·`unverified`)를 화면 등록 엔진으로 넣음. 배포 설정 파일에 엔진이 있거나 이미 등록된 엔진이 있으면 건드리지 않음. 설치 후 관리자가 설정 → 음성 엔진에서 Key를 넣고 연결 확인 |
 | 라이선스 | 서명된 라이선스는 시드로 만들 수 없다. 개발 단계(`DAON_DEVELOPMENT_STAGE=true`, 이 오버레이가 설정)에서는 라이선스 없이 전 기능 사용. 운영 전환 시 화면에서 라이선스 파일 적용 |
 | 사용자 설명서 | 웹 이미지에 포함(`/manual/daon-user-manual.pdf` 등). 별도 데이터 없음 |
 | admin 계정 | 앱이 첫 기동 때 `admin`/`admin`(첫 로그인 비밀번호 변경)으로 만든다. 시드에 비밀번호·해시를 넣지 않는다 |
