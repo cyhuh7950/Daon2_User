@@ -1,0 +1,79 @@
+# ysna-server 오버레이: daon2_user 전용 PostgreSQL + 개발 단계 시험 설정. 웹은 production 프로파일(HTTPS 도메인)로 둔다.
+# 관리 포트는 127.0.0.1 로만 공개한다. 운영 Compose의 HTTPS 강제는 유지한다.
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.2-pg15@sha256:bd12d6788a617f4147d5a2ae0b56d07921398adabfe5a033bd3f50c245df55a1
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=100"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+    secrets:
+      - db_superuser_password
+    volumes:
+      - daon2_user_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${DAON_DB_ADMIN_HOST_PORT:-5436}:5432"
+    networks:
+      - daon2_user
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    mem_limit: 1g
+    restart: unless-stopped
+
+  api:
+    # WSL 호스트의 로컬 Gateway를 컨테이너에서도 안정적인 이름으로 접근한다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # 개발·WSL QA에서는 인수테스트 전까지 라이선스 없이 모든 기능을 검증한다.
+      DAON_DEVELOPMENT_STAGE: "true"
+      # 개발 단계 기본 외부 전송 정책("추가 인증 없이 허용")의 허용 목적지. 새 Workspace의 시드 차단 정책을 이 값으로 올린다.
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 서버 7.8 GiB 기준 상한(F0-12). 실측: api 150MB, web 60MB, document-worker 40MB, object-storage 110MB.
+    mem_limit: 1g
+    cpus: 2.0
+  studio-v2-worker:
+    environment:
+      DAON_DEVELOPMENT_STAGE: "true"
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+  document-worker:
+    environment:
+      DAON_DEVELOPMENT_STAGE: "true"
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 서버 7.8 GiB 기준 상한(F0-12). 실측: api 150MB, web 60MB, document-worker 40MB, object-storage 110MB.
+    mem_limit: 1536m
+    cpus: 2.0
+  studio-worker:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 서버 7.8 GiB 기준 상한(F0-12). 실측: api 150MB, web 60MB, document-worker 40MB, object-storage 110MB.
+    mem_limit: 256m
+    cpus: 0.5
+  object-storage:
+    # 서버 7.8 GiB 기준 상한(F0-12). 실측: api 150MB, web 60MB, document-worker 40MB, object-storage 110MB.
+    mem_limit: 512m
+    cpus: 1.0
+
+  web:
+    # 서버 7.8 GiB 기준 상한(F0-12). 실측: api 150MB, web 60MB, document-worker 40MB, object-storage 110MB.
+    mem_limit: 512m
+    cpus: 1.0
+
+volumes:
+  daon2_user_postgres_data:
+    name: ${COMPOSE_PROJECT_NAME}_postgres_data
+
+secrets:
+  db_superuser_password:
+    file: ${DAON_DB_SUPERUSER_PASSWORD_FILE:?database superuser password reference required}

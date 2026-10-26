@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 SERVICES=("$@"); [ "${#SERVICES[@]}" -gt 0 ] || SERVICES=(api web studio-v2-worker document-worker studio-worker)
-COMPOSE=(docker compose --env-file .env -f deploy/daon2-user/compose.yaml -f deploy/daon2-user/compose.wsl-dedicated-postgres.yaml)
+COMPOSE=(docker compose --env-file .env -f deploy/daon2-user/compose.yaml -f deploy/daon2-user/${DAON_COMPOSE_OVERLAY:-compose.wsl-dedicated-postgres.yaml})
 PROJECT=${DAON_COMPOSE_PROJECT:-daon2_user}
 
 echo "[1/3] 마이그레이션"
