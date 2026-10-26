@@ -2415,7 +2415,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {egressPolicyPending ? <div className="modal-unavailable" role="status">조직 정책을 불러오고 있습니다.</div> : null}
             {!egressPolicyPending && egressPolicySafeError ? <div className="modal-unavailable" role="alert"><strong>조직 정책을 불러오지 못했습니다.</strong><p>정책은 변경되지 않았습니다.</p><button type="button" onClick={() => void loadEgressPolicy()}>다시 불러오기</button></div> : null}
             {!egressPolicyPending && egressPolicy ? <>
-              <div className="policy-lock-banner"><span aria-hidden="true">⌾</span><div><strong>조직 강제 정책</strong><small>이 Workspace에서는 읽기 전용이며 조직 정책을 완화할 수 없습니다.</small></div></div>
+              <div className="policy-lock-banner"><span aria-hidden="true">⌾</span><div><strong>조직 강제 정책</strong><small>이 Workspace에서는 읽기 전용이며 조직 정책을 완화할 수 없습니다. 정책 변경 권한이 있으면 <a href="/settings/organization">조직 정책 설정</a>에서 바꿉니다.</small></div></div>
               <dl className="organization-policy-grid">
                 <div><dt>정책 모드</dt><dd>{egressModeLabel(egressPolicy.organization_policy)}</dd></div>
                 <div><dt>허용 Provider 종류</dt><dd>{egressPolicy.organization_policy.allowed_provider_kinds.join(", ") || "허용 없음"}</dd></div>

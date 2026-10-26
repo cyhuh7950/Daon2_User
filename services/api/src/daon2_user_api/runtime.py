@@ -3256,7 +3256,17 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "TEXT_PROVIDER_UNAVAILABLE", "TEXT_GENERATION_GROUNDING_INVALID",
             "TEXT_GENERATION_RESPONSE_INVALID", "QUESTION_SOURCE_UNAVAILABLE",
             "EGRESS_POLICY_UNAVAILABLE", "EGRESS_POLICY_STALE", "EGRESS_POLICY_DENIED",
+            "SELECTED_MODEL_UNAVAILABLE", "TEXT_GENERATION_FAILED", "QUESTION_NEW_RUN_REQUIRED",
+            "PROVIDER_CONNECTION_UNAVAILABLE", "PROVIDER_CREDENTIAL_REQUIRED", "PROVIDER_CREDENTIAL_INVALID",
+            "PROVIDER_MODEL_NOT_READY", "PROVIDER_CAPABILITY_UNSUPPORTED", "PROVIDER_EXECUTION_NOT_READY",
+            "WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", "WORKSPACE_MODEL_RESOLUTION_UNAVAILABLE",
+            "TEXT_ADAPTER_CONFIG_INVALID", "EGRESS_DESTINATION_DENIED",
         }
+        # 원인을 서버 로그에 남긴다(화면에는 안전한 코드만 보인다).
+        _runtime_logger.warning(
+            "question_error code=%s status=%s retryable=%s trace_id=%s",
+            error.code, error.status, error.retryable, request.state.trace_id,
+        )
         return _error_response(
             error.status, error.code if error.code in public_codes else "QUESTION_FAILED",
             request.state.trace_id, retryable=error.retryable,
