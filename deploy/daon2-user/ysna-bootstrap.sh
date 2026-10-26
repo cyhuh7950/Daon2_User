@@ -8,7 +8,7 @@ ROOT=$(pwd)
 GATEWAY=${DAON_GATEWAY_URL:?DAON_GATEWAY_URL 이 필요합니다(예: https://daon2-user.sinsan.kr)}
 OLD=${DAON_REFERENCE_ENV:-$HOME/deploy/daon-user/.env}
 mkdir -p secrets && chmod 700 secrets
-gen() { [ -s "secrets/$1" ] || { umask 077; openssl rand -base64 "${2:-32}" | tr -d '\n=' > "secrets/$1"; chmod 600 "secrets/$1"; }; }
+gen() { [ -s "secrets/$1" ] || { umask 077; openssl rand -hex "${2:-32}" > "secrets/$1"; chmod 600 "secrets/$1"; }; }
 for name in db_app_password db_owner_password db_superuser_password object_access_key object_secret_key; do gen "$name" 24; done
 for name in provider_credential_key recovery_manifest_key step_up_token_key; do gen "$name" 48; done
 [ -s secrets/tts_engines.json ] || { umask 077; echo '{"engines": []}' > secrets/tts_engines.json; }
