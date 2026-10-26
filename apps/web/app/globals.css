@@ -285,3 +285,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 :root[data-theme="dark"] { color-scheme: dark; }
 :root[data-theme="dark"] select, :root[data-theme="dark"] select option, :root[data-theme="dark"] select optgroup { background-color: #1f2128; color: #e8eaed; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } :root:not([data-theme="light"]) select, :root:not([data-theme="light"]) select option { background-color: #1f2128; color: #e8eaed; } }
+/* 외부 전송 정책 폼의 체크박스: 이 파일의 .egress-policy-pane label/input 규칙(grid, width 100%)보다 우선한다 */
+.egress-policy-pane form > label.policy-check { display: flex !important; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-height: 32px; }
+.egress-policy-pane form > label.policy-check input[type="checkbox"] { width: 18px !important; height: 18px !important; min-height: 0 !important; flex: 0 0 18px; margin: 0; padding: 0; }
