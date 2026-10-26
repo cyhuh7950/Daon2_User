@@ -20,4 +20,7 @@ if [ "$(docker exec daon2_user-postgres-1 psql -U postgres -qAt -d postgres -c "
   echo "[1/4] DB 최초 생성(부트스트랩)"
   bash deploy/daon2-user/wsl-bootstrap-db.sh
 fi
+# 새 설치 시 Provider 구성 시드(Key 없음)를 적용한다. 이미 연결이 있으면 아무것도 하지 않는다.
+bash deploy/daon2-user/wsl-migrate.sh
+bash deploy/daon2-user/seed/load-provider-seed.sh
 bash deploy/daon2-user/wsl-deploy.sh "$@"

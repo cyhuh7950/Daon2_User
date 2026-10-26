@@ -11,3 +11,11 @@
 - 배포·갱신: `git pull && bash deploy/daon2-user/ysna-deploy.sh` (uv가 없어 Docker로 alembic 실행, 마이그레이션 head까지)
 - 웹은 호스트 3340 → 컨테이너 3330. nginx-proxy-manager 전달 대상은 `daon2-user-web`:`3330`(Docker 별칭, 컨테이너 포트).
 - 첫 로그인: `admin` / `admin` (첫 로그인에서 비밀번호 변경).
+
+## 새 설치용 초기 데이터(seed)
+
+- `deploy/daon2-user/seed/provider-seed.sql`: Provider 연결 12개·허용 모델 35개·그 모델의 카탈로그 행(Key·암호문·확인 상태 없음, 모두 `unverified`). 설치 후 관리자가 각 Provider에 Key를 넣고 연결 시험을 한다.
+- 적용: `bash deploy/daon2-user/seed/load-provider-seed.sh` (연결이 하나라도 있으면 건너뜀). `ysna-deploy.sh`가 마이그레이션 직후 자동 실행한다.
+- 갱신: 기준 DB에서 `bash deploy/daon2-user/seed/export-provider-seed.sh [컨테이너] > deploy/daon2-user/seed/provider-seed.sql`
+- 계정·노트북·소스·정책(조직·Workspace 외부 전송 정책)은 시드에 없다. 첫 로그인은 `admin`/`admin`이고, 외부 전송 정책은 화면에서 설정한다(허용 목적지 등).
+
