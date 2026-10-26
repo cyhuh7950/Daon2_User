@@ -552,7 +552,7 @@ Notebook Workspace에서는 조직의 외부 전송 정책을 읽기 전용으�
 | 허용 Provider 종류 | `external_api,server_internal,local_runtime` |
 | 허용 목적지 | `media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr` |
 | 최대 전송 bytes | 1048576 |
-| 분류 | restricted |
+| 분류 | internal(질문 전송은 internal로 판정되므로 정책 분류와 같아야 외부 전송이 통과합니다) |
 | 마스킹·삭제 처리 필수 | 체크 |
 
 직접 설정할 때는 `1. 조직 정책`과 `2. Workspace 정책` 두 탭을 모두 같은 값으로 저장해야 최종 정책이 열립니다. Provider 종류와 목적지는 쉼표로 구분하고 오타(예: `external_api`의 첫 글자 누락)가 있으면 `EGRESS_POLICY_PAYLOAD_INVALID`로 저장되지 않습니다.

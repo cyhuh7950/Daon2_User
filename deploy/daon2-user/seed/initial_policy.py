@@ -3,7 +3,7 @@
   python3 initial_policy.py <tenant_id> <workspace_id>...   (보통 apply-initial-policy.sh 가 DB에서 찾아 넘긴다)
 
 시드된 차단 정책(egress-backfill-policy:)인 범위만 올린다. 누가 한 번이라도 저장한 정책은 건드리지 않는다(멱등).
-값은 환경변수로 바꿀 수 있다: SEED_EGRESS_DESTINATIONS(쉼표), SEED_EGRESS_MAX_BYTES, SEED_EGRESS_KINDS(쉼표), SEED_EGRESS_CLASSIFICATION.
+값은 환경변수로 바꿀 수 있다: SEED_EGRESS_DESTINATIONS(쉼표), SEED_EGRESS_MAX_BYTES, SEED_EGRESS_KINDS(쉼표), SEED_EGRESS_CLASSIFICATION(기본 internal: 질문 전송은 internal로 판정되어 정책 분류와 같아야 통과한다).
 정책은 서비스 계층(create_and_activate)으로 적용해 불변 이력·바인딩·감사 구조를 그대로 따른다.
 """
 import os
@@ -24,7 +24,7 @@ def initial_payload() -> EgressPolicyPayload:
         allowed_provider_kinds=split(os.environ.get("SEED_EGRESS_KINDS", "external_api,server_internal,local_runtime")),
         allowed_destinations=split(os.environ.get(
             "SEED_EGRESS_DESTINATIONS", "media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr")),
-        classification=os.environ.get("SEED_EGRESS_CLASSIFICATION", "restricted"),
+        classification=os.environ.get("SEED_EGRESS_CLASSIFICATION", "internal"),
         max_bytes=int(os.environ.get("SEED_EGRESS_MAX_BYTES", "1048576")),
         masking_required=True, redaction_required=True, required_approver="none")
 
@@ -52,7 +52,8 @@ if __name__ == "__main__":
         os._exit(0)
     store = PostgresCloudStore(os.environ["DAON_CLOUD_DATABASE_DSN"])
     service = EgressPolicyService(PostgresEgressPolicyRepository(store), development_default=None)
-    for workspace, scope, result in apply(service, tenant, workspaces, initial_payload()):
+    force = os.environ.get("SEED_FORCE") == "1"  # 이미 저장된 정책도 이 값으로 새 Version을 만든다(운영자 명시 실행)
+    for workspace, scope, result in apply(service, tenant, workspaces, initial_payload(), seeded_prefix="" if force else SEEDED):
         print(workspace, scope, "초기 정책 적용" if result == "applied" else "이미 저장된 정책이 있어 건드리지 않음")
     context = EgressPolicyContext(tenant, tenant, workspaces[-1], "seed-initial-policy", "trace-seed-initial-policy", "policy-seed-initial")
     effective = service.get_effective(context)
