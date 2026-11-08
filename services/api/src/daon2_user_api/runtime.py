@@ -5219,6 +5219,10 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             register_authoring_routes(app, dependencies, authoring_service, _studio_v2_license_check)
 
     if dependencies.cloud_store is not None:
+        from .knowledge_package_import import PostgresKnowledgePackageImporter
+        from .knowledge_package_import_routes import register_knowledge_package_import_routes
+        register_knowledge_package_import_routes(app, dependencies, PostgresKnowledgePackageImporter(dependencies.cloud_store))
+    if dependencies.cloud_store is not None:
         from .model_selection import ModelSelectionService, register_model_selection_routes
         model_selection_service = ModelSelectionService(dependencies.cloud_store)
         register_model_selection_routes(
