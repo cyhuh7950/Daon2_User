@@ -155,6 +155,20 @@ test("Notebook context Adapter는 Notebook API의 최신 Source 목록을 유지
   assert.equal(emptyCalls, 1);
 });
 
+test("Notebook별 해석기가 없는 Adapter는 지식 연결이 없는 Notebook에도 작업공간 승인 지식을 보여준다", async () => {
+  const packages = [{ package_id: "package-one" }, { package_id: "package-two" }];
+  const adapter = createNotebookContextWorkspaceAdapter({ listKnowledgePackages: async () => packages }, {
+    ...EXISTING_CONTEXT, knowledge_context_ids: [],
+  });
+  assert.deepEqual((await adapter.listKnowledgePackages()).map((item) => item.package_id), ["package-one", "package-two"]);
+});
+
+test("Notebook별 해석기가 없는 Adapter는 질문으로 지식 연결이 생긴 뒤에도 승인 지식 목록을 유지한다", async () => {
+  const packages = [{ package_id: "package-one" }, { package_id: "package-two" }];
+  const adapter = createNotebookContextWorkspaceAdapter({ listKnowledgePackages: async () => packages }, EXISTING_CONTEXT);
+  assert.deepEqual((await adapter.listKnowledgePackages()).map((item) => item.package_id), ["package-one", "package-two"]);
+});
+
 test("대화가 없거나 여러 thread인 Notebook도 Source 질문 컨텍스트를 차단하지 않는다", async () => {
   const base = {
     listSources: async () => [{ source_id: "source-bound", source_version_id: "source-version-bound" }],
@@ -220,6 +234,7 @@ test("실제 ProductWorkspaceShell은 selected Notebook Adapter의 보존 Source
     assert.match(container.textContent, /보존\.pdf/u);
     assert.match(container.textContent, /보존된 대화/u);
     assert.match(container.textContent, /보존된 보고서/u);
+    assert.match(container.textContent, /package-bound/u);
     assert.doesNotMatch(container.textContent, /source-other|package-other|studio-output-other/u);
     assert.equal(productListOptions?.notebookId, "notebook-existing");
     assert.equal(findElements(container, (node) => node.getAttribute?.("data-layout") === "source-conversation-studio").length, 1);
