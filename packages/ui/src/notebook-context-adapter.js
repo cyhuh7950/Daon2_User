@@ -164,6 +164,14 @@ export function createNotebookContextWorkspaceAdapter(baseAdapter, inputContext)
   };
 
   const listKnowledgePackages = async (options) => {
+    if (typeof baseAdapter.resolveKnowledgeContext !== "function" && typeof baseAdapter.listKnowledgePackages === "function") {
+      // Without a per-Notebook resolver the list is the Workspace catalog the
+      // server already authorized. A binding is created only when a package is
+      // selected for a question, so it cannot be a precondition for listing.
+      const values = await baseAdapter.listKnowledgePackages(options);
+      if (!Array.isArray(values)) throw new Error("NOTEBOOK_CONTEXT_KNOWLEDGE_INVALID");
+      return values;
+    }
     if (!context.knowledge_context_ids.length) return [];
     if (typeof baseAdapter.resolveKnowledgeContext !== "function" || typeof baseAdapter.listKnowledgePackages !== "function") {
       throw new Error("NOTEBOOK_CONTEXT_KNOWLEDGE_UNAVAILABLE");

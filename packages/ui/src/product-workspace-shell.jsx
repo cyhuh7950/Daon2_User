@@ -2056,7 +2056,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               {knowledgePackages.map((item) => (
                 <li className="source-list-row knowledge-list-row" key={item.packageId}>
                   <button type="button" aria-pressed={selectedKnowledgeId === item.packageId} onClick={() => { cancelQuestionRequest(); reportIdempotencyRef.current = null; setViewState((current) => ({ ...current, answer: null, answerIntent: null })); setSelectedKnowledgeId((current) => current === item.packageId ? null : item.packageId); }}>
-                    <span className="source-file-icon knowledge-icon" aria-hidden="true">K</span><span className="source-row-copy"><strong>{item.producerLabel} · {item.producerVersion}</strong><small>{item.authorityLabel} · {item.registrationLabel}</small></span><span className={`source-ready-dot ${selectedKnowledgeId === item.packageId ? "is-ready" : ""}`} aria-hidden="true" />
+                    <span className="source-file-icon knowledge-icon" aria-hidden="true">K</span><span className="source-row-copy"><strong>{item.producerLabel} · {item.producerVersion}</strong><small title={item.packageId}>{item.authorityLabel} · {item.registrationLabel} · {item.packageId}</small></span><span className={`source-ready-dot ${selectedKnowledgeId === item.packageId ? "is-ready" : ""}`} aria-hidden="true" />
                   </button>
                 </li>
               ))}
