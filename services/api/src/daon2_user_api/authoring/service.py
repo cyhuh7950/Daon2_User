@@ -111,7 +111,7 @@ class AuthoringService:
         template = self._registry.get(current["template_id"], context.tenant_id, current.get("template_version"))
         return [current["inputs"][template.source_input]["source_version_id"]] if template.source_input and template.source_input in current["inputs"] else []
 
-    def control(self, context: StudioContext, output_id: str, action: str, expected_revision: int | None) -> dict[str, Any]:
+    def control(self, context: StudioContext, output_id: str, action: str, expected_revision: int | None, unit_key: str | None = None) -> dict[str, Any]:
         """pause는 작업 중에도 받는다. 진행 중인 소목차까지 쓰고 멈춘다. resume은 다음 미완료 소목차부터 잇는다."""
         _, _, current = self._studio.latest_content(context, output_id)
         if current.get("mode") != "agent":
@@ -124,6 +124,10 @@ class AuthoringService:
         if action == "resume" and expected_revision is not None:
             result = self._studio.authoring_apply(context, output_id, expected_revision, S.resume, enqueue_step="generate", source_version_ids=self._versions(context, current))
             return {"output_id": output_id, **result}
+        if action == "reopen" and expected_revision is not None:
+            return {"output_id": output_id, **self._studio.authoring_apply(context, output_id, expected_revision, S.reopen)}
+        if action == "redo" and expected_revision is not None and unit_key:
+            return {"output_id": output_id, **self._studio.authoring_apply(context, output_id, expected_revision, lambda content: S.redo_unit(content, unit_key))}
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
 
     def edit_unit(self, context: StudioContext, output_id: str, expected_revision: int, key: str, paragraphs: Sequence[str]) -> dict[str, Any]:

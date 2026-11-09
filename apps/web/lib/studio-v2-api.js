@@ -336,8 +336,9 @@ export async function reviewAuthoringSession(workspaceId, outputId, { notebookId
   return data;
 }
 
-export async function controlAuthoringSession(workspaceId, outputId, { notebookId, action, expectedRevision, signal, fetchImpl } = {}) {
+export async function controlAuthoringSession(workspaceId, outputId, { notebookId, action, expectedRevision, unitKey, signal, fetchImpl } = {}) {
   const body = { action };
+  if (unitKey) body.unit_key = unitKey;
   if (expectedRevision) body.expected_revision = expectedRevision;
   const { data } = await json(await request("POST", `${base(workspaceId, notebookId)}/authoring/sessions/${outputId}/control`, { body, signal, fetchImpl }), isObject);
   return data;

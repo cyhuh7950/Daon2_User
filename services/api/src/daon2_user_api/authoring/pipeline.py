@@ -364,7 +364,11 @@ class AuthoringPipeline:
         checks: list[dict[str, Any]] = []
         if coverage:
             checks.append({"id": "rfp_requirement_coverage", "title": "요구사항 대응표", "status": "done", "summary": {s: sum(1 for c in coverage if c["status"] == s) for s in ("covered", "partial", "missing")}})
+        checks.append(self.ruleset(ctx, template, document_sections))
         checks.append(evidence_integrity(document_sections, {p.ref for p in pack.passages} | {str(k["ref"]) for k in knowledge}))
+        checks.append(self.terms(ctx, template, document_sections))
+        if template.style == "contract":
+            checks.append(self.law_crosscheck(ctx, template, document_sections, knowledge))
         warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]
         open_items = list(dict.fromkeys(item for unit in session["units"] for item in unit["open_items"]))
         final = transition(session, "completed")
@@ -584,6 +588,8 @@ class AuthoringPipeline:
             return {**base, "status": "skipped", "reason": error.code}
 
     def _connector_of_kind(self, ctx: GenerationContext, kind: str) -> str | None:
+        if self._connectors is None:
+            return None
         for item in self._connectors.list(self._connector_ctx(ctx)):
             if item["kind"] == kind and item["status"] != "disabled":
                 return item["connector_id"]

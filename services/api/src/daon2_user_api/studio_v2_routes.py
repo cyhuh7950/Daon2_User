@@ -378,8 +378,9 @@ class AnswersBody(_Strict):
 
 
 class ControlBody(_Strict):
-    action: str = Field(pattern="^(pause|resume)$")
+    action: str = Field(pattern="^(pause|resume|reopen|redo)$")
     expected_revision: int | None = Field(default=None, ge=1)
+    unit_key: str | None = Field(default=None, max_length=128)
 
 
 class UnitEditBody(_Strict):
@@ -476,7 +477,7 @@ def register_authoring_routes(app: FastAPI, dependencies: Any, authoring: Any, e
     async def authoring_control(id: str, notebook_id: str, output_id: str, body: ControlBody, request: Request) -> JSONResponse:
         _require_query_keys(request, frozenset())
         ctx = _ctx(request, id, notebook_id, Action.EDIT)
-        data = await asyncio.to_thread(authoring.control, ctx, _out(output_id), body.action, body.expected_revision)
+        data = await asyncio.to_thread(authoring.control, ctx, _out(output_id), body.action, body.expected_revision, body.unit_key)
         return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
 
     @app.put(base + "/sessions/{output_id}/units/{unit_key}", status_code=202)
