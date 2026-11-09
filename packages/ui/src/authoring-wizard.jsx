@@ -8,8 +8,8 @@ import "./studio-panel.css";
 
 const STATE_LABEL = { collecting: msg("authoring.state.collecting"), analyzing: msg("authoring.state.analyzing"), review: msg("authoring.state.review"), generating: msg("authoring.state.generating"), completed: msg("authoring.state.completed"), failed: msg("authoring.state.failed"), cancelled: msg("authoring.state.cancelled") };
 const STEPS = ["collecting", "analyzing", "review", "generating", "completed"];
-const UNIT_LABEL = { pending: msg("authoring.unit.pending"), done: msg("authoring.unit.done"), needs_review: msg("authoring.unit.needs_review"), failed: msg("authoring.unit.failed") };
-const REASON_LABEL = { user: msg("authoring.reason.user"), needs_review: msg("authoring.reason.needs_review"), unit_failed: msg("authoring.reason.unit_failed") };
+const UNIT_LABEL = { pending: msg("authoring.unit.pending"), done: msg("authoring.unit.done"), needs_review: msg("authoring.unit.needs_review"), failed: msg("authoring.unit.failed"), material_review: msg("authoring.unit.material_review") };
+const REASON_LABEL = { user: msg("authoring.reason.user"), needs_review: msg("authoring.reason.needs_review"), unit_failed: msg("authoring.reason.unit_failed"), material_review: msg("authoring.reason.material_review") };
 const PAGE_CHOICES = [1, 5, 10, 20];
 const STATUS_LABEL = { covered: msg("authoring.coverage.covered"), partial: msg("authoring.coverage.partial"), missing: msg("authoring.coverage.missing") };
 const POLL_MS = 3000;
@@ -116,7 +116,8 @@ function Review({ session, onConfirm, busy }) {
         <td><button type="button" className="studio-icon-button" aria-label={msg("authoring.review.req.delete", { id: r.id })} onClick={() => setRequirements((list) => list.filter((_, j) => j !== i))}><StudioIcon name="delete" size={18} /></button></td></tr>)}</tbody></table></div>
     <button type="button" className="studio-btn" onClick={() => setRequirements((list) => [...list, { id: `REQ-${String(list.length + 1).padStart(3, "0")}-N`, text: msg("authoring.review.req.new"), mandatory: true, category: "", refs: [] }])}>{msg("authoring.review.req.add")}</button></>}
     <h3>{msg("authoring.review.plan")}</h3>
-    <ol>{sections.map((s, i) => <li key={s.key}><strong>{s.title}</strong> {(session.units ?? []).some((unit) => unit.section_key === s.key) && <ul>{session.units.filter((unit) => unit.section_key === s.key).map((unit) => <li key={unit.key}>{unit.title} <small>{msg("authoring.unit.target", { count: unit.target_chars })}</small></li>)}</ul>} {baseOnly ? null : <small>{msg("authoring.review.plan.requirements", { count: s.requirement_ids.length })}</small>}
+    {session.analysis === "free_outline" && <p><small>{msg("authoring.outline.free")}</small></p>}
+    <ol>{sections.map((s, i) => <li key={s.key}><strong>{s.title}</strong> {(session.units ?? []).some((unit) => unit.section_key === s.key) && <ul>{session.units.filter((unit) => unit.section_key === s.key).map((unit) => <li key={unit.key}>{unit.title} <small>{msg("authoring.unit.target", { count: unit.target_chars })}{unit.title !== s.title && session.analysis !== "free_outline" ? ` · ${msg("authoring.outline.added")}` : ""}</small></li>)}</ul>} {baseOnly ? null : <small>{msg("authoring.review.plan.requirements", { count: s.requirement_ids.length })}</small>}
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.up", { title: s.title })} disabled={i === 0} onClick={() => move(i, -1)}><StudioIcon name="chevron_down" size={16} style={{ transform: "rotate(180deg)" }} /></button>
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.down", { title: s.title })} disabled={i === sections.length - 1} onClick={() => move(i, 1)}><StudioIcon name="chevron_down" size={16} /></button>
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.delete", { title: s.title })} disabled={sections.length <= 1} onClick={() => setSections((list) => list.filter((_, j) => j !== i))}><StudioIcon name="delete" size={16} /></button></li>)}</ol>
@@ -165,7 +166,17 @@ function Result({ document, formats = ["docx", "pptx"], onDownload }) {
 }
 
 /** 소목차 진행 현황과 사람 개입(일시 정지, 본문 수정, 구조 변경, 이어서 작성). */
-function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onRedo }) {
+function MaterialChoice({ unit, busy, onApply }) {
+  const [kept, setKept] = useState(() => unit.material.map((item) => item.ref));
+  const toggle = (ref) => setKept((list) => list.includes(ref) ? list.filter((value) => value !== ref) : [...list, ref]);
+  if (!unit.material.length) return <p><small>{msg("authoring.material.none")}</small></p>;
+  return <div>
+    <ul>{unit.material.map((item) => <li key={item.ref}><label><input type="checkbox" checked={kept.includes(item.ref)} onChange={() => toggle(item.ref)} /> {msg("authoring.material.item", { heading: item.heading, page: item.page })}</label> <small>{item.text}</small></li>)}</ul>
+    <button type="button" className="studio-btn" disabled={busy} onClick={() => onApply(unit.key, kept)}>{msg("authoring.material.apply")}</button>
+  </div>;
+}
+
+function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onRedo, onMaterial }) {
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState("");
   const [titles, setTitles] = useState({});
@@ -190,6 +201,7 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
     <ol>{units.map((unit) => <li key={unit.key}>
       {paused ? <input aria-label={msg("authoring.unit.title", { title: unit.title })} value={titles[unit.key] ?? unit.title} maxLength={120} onChange={(event) => { const value = event.target.value; setImpact(null); setTitles((old) => ({ ...old, [unit.key]: value })); }} /> : <strong>{unit.title}</strong>}
       {" "}<small>{UNIT_LABEL[unit.status] ?? unit.status}{unit.locked ? ` · ${msg("authoring.unit.locked")}` : ""}</small>
+      {paused && unit.status === "material_review" && <MaterialChoice unit={unit} busy={busy} onApply={onMaterial} />}
       {paused && unit.paragraphs?.length > 0 && editing !== unit.key && <>
         {unit.paragraphs.map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}
         <button type="button" className="studio-btn" disabled={busy} onClick={() => { setEditing(unit.key); setDraft(unit.paragraphs.map((paragraph) => paragraph.text).join("\n\n")); }}>{msg("authoring.unit.edit")}</button>
@@ -218,6 +230,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
   const [busy, setBusy] = useState(false);
   const [templates, setTemplates] = useState(null);
   const [targetPages, setTargetPages] = useState("");
+  const [confirmMaterial, setConfirmMaterial] = useState(false);
   const timer = useRef(null);
   const fail = useCallback((e) => { setError(e?.code ?? "STUDIO_REQUEST_FAILED"); setBusy(false); }, []);
 
@@ -235,7 +248,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
 
   const start = async (templateId) => {
     setBusy(true);
-    try { const created = await authoring.createSession({ templateId, ...(targetPages ? { targetPages: Number(targetPages) } : {}) }); setId(created.output_id); setSession(created); onChanged?.(); } catch (e) { fail(e); }
+    try { const created = await authoring.createSession({ templateId, ...(targetPages ? { targetPages: Number(targetPages) } : {}), ...(confirmMaterial ? { confirmMaterial: true } : {}) }); setId(created.output_id); setSession(created); onChanged?.(); } catch (e) { fail(e); }
     setBusy(false);
   };
   const submit = async (answers, skipRemaining) => {
@@ -257,6 +270,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
   };
   const pause = () => act(() => authoring.control(id, { action: "pause" }));
   const resume = () => act(() => authoring.control(id, { action: "resume", expectedRevision: session.revision_no }));
+  const applyMaterial = (unitKey, materialRefs) => act(async () => { const saved = await authoring.control(id, { action: "material", expectedRevision: session.revision_no, unitKey, materialRefs }); return authoring.control(id, { action: "resume", expectedRevision: saved.revision_no }); });
   const redoUnit = (unitKey) => act(() => authoring.control(id, { action: "redo", expectedRevision: session.revision_no, unitKey }));
   const reopen = () => act(() => authoring.control(id, { action: "reopen", expectedRevision: session.revision_no }));
   const editUnit = (key, paragraphs) => act(() => authoring.editUnit(id, key, { expectedRevision: session.revision_no, paragraphs }));
@@ -281,6 +295,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
     {error && <p className="studio-alert" role="alert">{studioErrorMessage(error)}</p>}
     <div className="studio-detail__body">
       {!id && <label>{msg("authoring.pages")} <select value={targetPages} onChange={(event) => setTargetPages(event.target.value)}><option value="">{msg("authoring.pages.any")}</option>{PAGE_CHOICES.map((count) => <option key={count} value={count}>{msg("authoring.pages.value", { count })}</option>)}</select></label>}
+      {!id && <label><input type="checkbox" checked={confirmMaterial} onChange={(event) => setConfirmMaterial(event.target.checked)} /> {msg("authoring.material.confirm")}</label>}
       {!id && (templates === null ? <p role="status">…</p> : <div role="list" aria-label={msg("authoring.templates")}>{templates.map((t) => <div key={t.template_id} role="listitem" className="studio-card">
         <div className="studio-card__main"><span className="studio-card__text"><span className="studio-card__title">{t.title}</span><span className="studio-card__subtitle">{t.description}</span></span></div>
         <button type="button" className="studio-btn studio-btn--primary" disabled={busy} onClick={() => start(t.template_id)}>{msg("authoring.start")}</button></div>)}</div>)}
@@ -289,7 +304,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
         <StepBar state={session.state} />
         {session.state === "collecting" && <Questions session={session} sources={sources} adapter={authoring} busy={busy} onSubmit={submit} />}
         {(session.state === "analyzing" || session.state === "generating") && <p role="status"><StudioIcon name="spinner" size={18} /> {session.state === "analyzing" ? (session.analysis === "base_document" ? msg("authoring.wait.base") : msg("authoring.wait.rfp")) : msg("authoring.wait.generating")}</p>}
-        {session.mode === "agent" && (session.state === "generating" || session.state === "paused") && session.units?.length > 0 && <UnitProgress session={session} busy={busy} onPause={pause} onResume={resume} onEdit={editUnit} onOutline={changeOutline} onRedo={redoUnit} />}
+        {session.mode === "agent" && (session.state === "generating" || session.state === "paused") && session.units?.length > 0 && <UnitProgress session={session} busy={busy} onPause={pause} onResume={resume} onEdit={editUnit} onOutline={changeOutline} onRedo={redoUnit} onMaterial={applyMaterial} />}
         {session.mode === "agent" && session.state === "completed" && <button type="button" className="studio-btn" disabled={busy} onClick={reopen}>{msg("authoring.reopen")}</button>}
         {session.state === "review" && <Review session={session} busy={busy} onConfirm={confirm} />}
         {session.state === "completed" && session.document && <Result document={session.document} formats={session.output_choices ?? ["docx", "pptx"]} onDownload={download} />}

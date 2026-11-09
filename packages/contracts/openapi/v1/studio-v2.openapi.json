@@ -3153,6 +3153,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          },
+          "confirm_material": {
+            "type": "boolean"
           }
         }
       },
@@ -3169,7 +3172,8 @@
               "pause",
               "resume",
               "reopen",
-              "redo"
+              "redo",
+              "material"
             ]
           },
           "expected_revision": {
@@ -3179,6 +3183,13 @@
           "unit_key": {
             "type": "string",
             "maxLength": 128
+          },
+          "material_refs": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

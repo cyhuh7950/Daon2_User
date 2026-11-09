@@ -18,9 +18,23 @@ export function Refs({ refs = [], evidence = [], onOpen }) {
 const Unverified = ({ warnings, path }) => warnings?.some((w) => w.code === "UNVERIFIED_CLAIM" && w.path === path)
   ? <span className="studio-warning">{msg("studio.evidence.unverified")}</span> : null;
 
-export function ReportViewer({ content, evidence, onOpenEvidence }) {
+/** 보고서 구성을 사람이 확인하고 고친 뒤 본문 작성을 요청한다(WO-K4 §4.5). */
+function OutlineReview({ body, onConfirm }) {
+  const [sections, setSections] = useState(body.outline_review);
+  const update = (index, heading) => setSections((list) => list.map((item, i) => i === index ? { ...item, heading } : item));
+  const valid = sections.every((item) => item.heading.trim());
+  return <article className="studio-report">
+    {body.title && <h2 style={{ fontSize: 18 }}>{body.title}</h2>}
+    <p>{msg("viewer.outline.help")}</p>
+    <ol>{sections.map((item, index) => <li key={index}><input aria-label={msg("viewer.outline.heading", { n: index + 1 })} maxLength={120} style={{ width: "100%" }} value={item.heading} onChange={(event) => update(index, event.target.value)} /><small>{item.purpose}</small></li>)}</ol>
+    <button type="button" className="studio-btn studio-btn--primary" disabled={!valid || !onConfirm} onClick={() => onConfirm(JSON.stringify({ title: body.title, summary: body.summary, sections }))}>{msg("viewer.outline.confirm")}</button>
+  </article>;
+}
+
+export function ReportViewer({ content, evidence, onOpenEvidence, onConfirmOutline }) {
   const body = content.body ?? {};
   const warnings = content.warnings ?? [];
+  if (body.outline_review?.length) return <OutlineReview body={body} onConfirm={onConfirmOutline} />;
   return <article className="studio-report">
     {body.title && <h2 style={{ fontSize: 18 }}>{body.title}</h2>}
     {body.summary && <p>{body.summary}</p>}
@@ -432,12 +446,12 @@ export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, on
   </div>;
 }
 
-export function StudioViewer({ output, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
+export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
   const content = output.revision?.content;
   if (!content) return <p>{msg("studio.card.generating")}</p>;
   const common = { content, evidence: output.evidence ?? [], onOpenEvidence };
   switch (output.type_id) {
-    case "report": return <ReportViewer {...common} />;
+    case "report": return <ReportViewer {...common} onConfirmOutline={onConfirmOutline} />;
     case "data_table": return <TableViewer {...common} />;
     case "mind_map": return <MindMapViewer {...common} onAskAboutNode={onAskAboutNode} />;
     case "flashcards": return <FlashcardsViewer {...common} onAttempt={(payload) => onAttempt?.("flashcard", payload)} />;

@@ -242,7 +242,7 @@ class AuthoringPipeline:
         requests = parse_plan(json.dumps(data, ensure_ascii=False), target)
         return requests or fallback  # 문서를 만들려면 자료가 필요하므로 빈 계획이어도 찾아 본다
 
-    def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
+    def _gather_unit(self, ctx: GenerationContext, unit: Mapping[str, Any], knowledge: list[dict[str, Any]]) -> list[dict[str, Any]]:
         target = self._evidence.prepare(ctx.context) if self._evidence is not None else None
         found = run_planned(self._evidence, target, self._plan_unit(ctx, unit, target), default_requests(target, f"{unit['title']} {unit['purpose']}"), limit=evidence_limit(unit["target_chars"])) if target is not None else ()
         by_block = {(row["connector_id"], row["version_id"], row["block_id"]): row for row in knowledge}
@@ -254,6 +254,14 @@ class AuthoringPipeline:
                 row = by_block[key] = knowledge_row(item, f"K{len(knowledge) + 1}")
                 knowledge.append(row)
             material.append(row)
+        return material
+
+    def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
+        if unit.get("material_approved"):
+            kept = {item["ref"] for item in unit.get("material", [])}
+            material = [row for row in knowledge if row["ref"] in kept]
+        else:
+            material = self._gather_unit(ctx, unit, knowledge)
         done = [other for other in session["units"] if other["status"] in ("done", "needs_review") and other["key"] != unit["key"]]
         inputs = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         requirements = {r["id"]: r for r in session["requirements"]}
@@ -324,15 +332,19 @@ class AuthoringPipeline:
             ctx.progress(5 + int(85 * index / total), f"소목차 작성 {index + 1}/{total}: {unit['title']}")
             knowledge = copy.deepcopy(current.get("knowledge") or [])
             try:
-                result = self._write_unit(ctx, current, template, unit, pack, knowledge)
-                provider = result.pop("provider")
+                if current.get("confirm_material") and not unit.get("material_approved"):
+                    rows = self._gather_unit(ctx, unit, knowledge)
+                    result = {"status": "material_review", "material": [{"ref": r["ref"], "heading": r["heading"], "page": r["page"], "text": r["text"][:300]} for r in rows], "error_code": None}
+                else:
+                    result = self._write_unit(ctx, current, template, unit, pack, knowledge)
+                    provider = result.pop("provider")
             except (ExternalEvidenceError, StudioError) as error:
                 result = {"status": "failed", "error_code": getattr(error, "code", "STUDIO_JOB_PROCESSING_FAILED")}
             current = self._save_unit(ctx, current, unit["key"], result, knowledge)
             if current.get("pause_requested"):
                 return self._paused(current, "user")
-            if result["status"] == "needs_review":
-                return self._paused(current, "needs_review")
+            if result["status"] in ("needs_review", "material_review"):
+                return self._paused(current, result["status"])
         if any(unit["status"] == "failed" for unit in current["units"]):
             return self._paused(current, "unit_failed")
         return self._finish_units(ctx, current, template, pack, provider)

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Mapping
 
 from .authoring.agent import UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM
-from .question_external_evidence import ExternalEvidence, ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
+from .question_external_evidence import EXTERNAL_LIMIT, ExternalEvidence, ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .studio_context_builder import ContextPack, Passage
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import GenerationContext
 from .studio_workspace import StudioError
+
+
+MAX_UNITS = 5
+UNIT_EVIDENCE_LIMIT = 3
+UNITS_SCHEMA = {"type": "object", "properties": {"units": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}}}, "required": ["units"]}
 
 
 def _key(ref: Any) -> tuple[Any, Any, Any]:
@@ -32,13 +37,29 @@ class StudioKnowledge:
     def __init__(self, llm: StudioTextGenerator, finder: Any) -> None:
         self._llm, self._finder = llm, finder
 
-    def extend(self, ctx: GenerationContext, question: str, pack: ContextPack) -> tuple[ContextPack, tuple[Passage, ...]]:
+    def plan_units(self, ctx: GenerationContext, label: str, focus: str) -> tuple[str, ...]:
+        """이번 산출물을 어떤 단위로 구성할지 LLM에 묻는다. 지식을 고르지 않았거나 답을 못 받으면 단위 없이 진행한다."""
+        try:
+            if self._finder.prepare(ctx.context) is None:
+                return ()
+        except ExternalEvidenceError:
+            return ()
+        prompt = StudioPrompt(system="산출물 구성 도구입니다. 산출물을 이루는 주제 단위를 정합니다. JSON 객체 하나만 출력합니다.", user=f"[산출물] {label}\n[주제] {focus or '선택한 지식 전체'}\n주제 단위를 3~5개 정하세요.",
+                              json_schema=UNITS_SCHEMA, max_output_tokens=300, prompt_version="studio-knowledge-units-v1", schema_name="studio_knowledge_units")
+        try:
+            rows = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data.get("units")
+        except (StudioError, ValueError, KeyError, TypeError):
+            return ()
+        titles = [str(row["title"]).strip()[:80] for row in rows if isinstance(row, Mapping) and str(row.get("title") or "").strip()] if isinstance(rows, list) else []
+        return tuple(titles[:MAX_UNITS])
+
+    def extend(self, ctx: GenerationContext, question: str, pack: ContextPack, *, limit: int = EXTERNAL_LIMIT) -> tuple[ContextPack, tuple[Passage, ...]]:
         """(새 구간까지 합친 묶음, 이번 질문에 맞는 구간). 같은 근거는 라벨 하나를 계속 쓴다."""
         try:
             target = self._finder.prepare(ctx.context)
             if target is None:
                 return pack, ()
-            found = run_planned(self._finder, target, self._requests(ctx, question, target), default_requests(target, question))
+            found = run_planned(self._finder, target, self._requests(ctx, question, target), default_requests(target, question), limit=limit)
         except ExternalEvidenceError as error:
             raise StudioError("PROVIDER_UNAVAILABLE", 503) from error
         known = {_key(p.external_ref): p for p in pack.passages if p.external_ref}

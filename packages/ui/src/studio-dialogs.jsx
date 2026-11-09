@@ -56,6 +56,7 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
   const [difficulty, setDifficulty] = useState(String(initial.difficulty ?? ""));
   const [length, setLength] = useState(String(initial.length ?? ""));
   const [custom, setCustom] = useState(String(initial.custom_instruction ?? ""));
+  const [confirmOutline, setConfirmOutline] = useState(initial.confirm_outline === "yes");
   const [engine, setEngine] = useState(String(initial.engine ?? ""));
   const [voiceA, setVoiceA] = useState(String(initial.voice_a ?? ""));
   const [voiceB, setVoiceB] = useState(String(initial.voice_b ?? ""));
@@ -71,12 +72,14 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
     if (voiceA) settings.voice_a = voiceA;
     if (voiceB) settings.voice_b = voiceB;
     if (format === "custom" && custom.trim()) settings.custom_instruction = custom.trim();
+    if (confirmOutline) settings.confirm_outline = "yes";
     onSubmit({ formatId: format || undefined, settings });
   };
   const countRule = properties.count;
   return <Modal labelledBy="studio-settings-title" onClose={onCancel}>
     <form onSubmit={submit}>
       <h2 id="studio-settings-title">{msg("studio.dialog.settings.title", { type: typeLabel })}</h2>
+      {properties.confirm_outline && <label><input type="checkbox" checked={confirmOutline} onChange={(event) => setConfirmOutline(event.target.checked)} /> {msg("studio.dialog.settings.confirm_outline")}</label>}
       {(type?.presets ?? []).length > 0 && <>
         <label htmlFor="studio-format">{msg("studio.dialog.settings.format")}</label>
         <select id="studio-format" value={format} onChange={(event) => setFormat(event.target.value)}>
