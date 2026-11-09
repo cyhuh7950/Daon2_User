@@ -369,6 +369,8 @@ const SOURCE_ERROR_HINTS = Object.freeze({
   PROVIDER_CONNECTION_UNAVAILABLE: "기본 모델 연결을 사용할 수 없습니다. 모델 연결 상태를 확인하세요.",
   PROVIDER_MODEL_NOT_READY: "기본 모델이 아직 준비되지 않았습니다. 모델 연결에서 모델 상태를 확인하세요.",
   PROVIDER_CAPABILITY_UNSUPPORTED: "기본 모델이 이 작업을 지원하지 않습니다. 다른 모델을 지정하세요.",
+  KNOWLEDGE_EVIDENCE_UNAVAILABLE: "Daon 승인 지식을 가져오지 못해 답변을 만들지 않았습니다. 잠시 후 다시 시도해 주세요.",
+  KNOWLEDGE_CONNECTOR_NOT_CONFIGURED: "Daon2-RAG 연결이 준비되지 않아 답변을 만들지 않았습니다. 관리자에게 지식 연결 확인을 요청해 주세요.",
   EGRESS_POLICY_DENIED: "외부 전송 정책이 이 모델로의 전송을 허용하지 않습니다. 외부 전송 정책을 확인하세요.",
   EGRESS_POLICY_UNAVAILABLE: "외부 전송 정책을 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
   EGRESS_MAX_BYTES_EXCEEDED: "자료가 외부 전송 정책의 최대 크기를 넘습니다.",
@@ -605,7 +607,7 @@ export function projectSafeQuestionAnswer(answer, workspaceId, citationUrl, sele
             && citation.context_item_id === source.sourceId)
           : citation.origin === "daon_knowledge"
             ? citation.context_item_id === selectedKnowledgeId
-          : false
+          : citation.origin === "mcp_daon_rag"
       );
     if (!validCitation) throw new Error("QUESTION_RESPONSE_INVALID");
     let contentUrl;

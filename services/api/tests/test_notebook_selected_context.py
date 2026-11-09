@@ -65,6 +65,8 @@ class _ReadStore:
 
     def execute(self, query, params=()):
         assert query.lstrip().split()[0] == "SELECT", "projection must never mutate history"
+        if "question_external_citations" in query:
+            return _ReadRows([])
         self.calls.append(tuple(params))
         return _ReadRows(self.responses[len(self.calls) - 1])
 

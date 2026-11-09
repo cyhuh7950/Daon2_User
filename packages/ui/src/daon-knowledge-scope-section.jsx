@@ -6,6 +6,7 @@ const ERROR_TEXT = {
   KNOWLEDGE_CONNECTOR_NOT_CONFIGURED: "Daon2-RAG 연결이 준비되지 않았습니다. 관리자에게 지식 연결 확인을 요청해 주세요.",
   KNOWLEDGE_SERVER_UNAVAILABLE: "지식 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.",
   CONNECTOR_EGRESS_DENIED: "외부 전송 정책에서 허용되지 않은 서버입니다. 관리자에게 문의해 주세요.",
+  KNOWLEDGE_SCOPE_SELECTION_INVALID: "업무 패키지는 최대 8개까지 선택할 수 있습니다.",
   KNOWLEDGE_SCOPE_NOT_AVAILABLE: "더 이상 사용할 수 없는 업무 패키지가 있습니다. 목록을 다시 열어 주세요.",
 };
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";

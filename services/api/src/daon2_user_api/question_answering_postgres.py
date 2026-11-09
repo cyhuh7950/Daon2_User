@@ -83,6 +83,9 @@ class CitationContent:
     media_type: str
 
 
+EXTERNAL_RAG_ORIGIN = "mcp_daon_rag"
+
+
 @dataclass(frozen=True, slots=True)
 class StoredCitation:
     citation_id: str
@@ -476,6 +479,33 @@ class PostgresQuestionAnsweringRepository:
             raise QuestionRepositoryError("QUESTION_SOURCE_UNAVAILABLE", status=404)
         return cast(tuple[object, ...], row)
 
+    @staticmethod
+    def _external_citations(connection, context: QuestionContext, run_result_ids: list[str]) -> dict[str, tuple[StoredCitation, ...]]:
+        rows = connection.execute(
+            "SELECT run_result_id,citation_id,document_id,document_version_id,block_id,page,work_package_id FROM question_external_citations "
+            "WHERE tenant_id=%s AND workspace_id=%s AND run_result_id=ANY(%s) ORDER BY citation_id",
+            (context.tenant_id, context.workspace_id, run_result_ids)).fetchall()
+        grouped: dict[str, list[StoredCitation]] = {}
+        for row in rows:
+            grouped.setdefault(str(row[0]), []).append(StoredCitation(
+                str(row[1]), str(row[2]), str(row[3]), str(row[4]), int(row[5]), EXTERNAL_RAG_ORIGIN, str(row[6]), {"kind": "section", "value": str(row[4])}))
+        return {key: tuple(value) for key, value in grouped.items()}
+
+    def _read_external_citation(self, context: QuestionContext, citation_id: str) -> tuple[CitationContent, dict[str, str]]:
+        try:
+            with self._cloud_store._transaction(self._cloud_context(context, "citation.read")) as connection:
+                row = connection.execute(
+                    "SELECT project_name,work_package_name,document_name,page,body,block_id,document_id,document_version_id FROM question_external_citations "
+                    "WHERE tenant_id=%s AND workspace_id=%s AND citation_id=%s AND notebook_id=%s",
+                    (context.tenant_id, context.workspace_id, citation_id, context.notebook_id)).fetchone()
+        except CloudDatabaseError as error:
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=503, retryable=error.retryable) from None
+        if row is None:
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=404)
+        heading = f"프로젝트: {row[0]}\n업무 패키지: {row[1]}\n문서: {row[2] or row[6]}\n페이지: {row[3]}\n\n"
+        return (CitationContent(str(row[6]), str(row[7]), "approved-knowledge.txt", (heading + str(row[4])).encode("utf-8"), "text/plain"),
+                {"kind": "section", "value": str(row[5])})
+
     def load_completed(
         self, context: QuestionContext, run_id: str,
     ) -> StoredQuestionAnswer | None:
@@ -512,6 +542,8 @@ class PostgresQuestionAnsweringRepository:
                     + " ORDER BY c.record_id",
                     params,
                 ).fetchall()
+                external = (self._external_citations(connection, context, [str(rows[0][0])])
+                            if rows and context.notebook_id is not None else {})
         except CloudDatabaseError as error:
             raise QuestionRepositoryError(
                 "QUESTION_DATABASE_UNAVAILABLE", status=503, retryable=error.retryable,
@@ -545,7 +577,7 @@ class PostgresQuestionAnsweringRepository:
             )
             return StoredQuestionAnswer(
                 run_id, str(rows[0][0]), str(result_payload["answer"]),
-                bool(result_payload["insufficient"]), citations,
+                bool(result_payload["insufficient"]), (*citations, *external.get(str(rows[0][0]), ())),
                 str(rows[0][4]) if rows[0][4] is not None else None,
                 cast(Mapping[str, object], rows[0][5]) if rows[0][5] is not None else None,
             )
@@ -899,6 +931,8 @@ class PostgresQuestionAnsweringRepository:
             raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=422)
         if not _SAFE_ID.fullmatch(citation_id):
             raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=404)
+        if citation_id.startswith("extcit-"):
+            return self._read_external_citation(context, citation_id)
         try:
             with self._cloud_store._transaction(
                 self._cloud_context(context, "citation.read"),
@@ -1204,12 +1238,12 @@ class PostgresQuestionAnsweringRepository:
             raise QuestionRepositoryError('QUESTION_DATABASE_UNAVAILABLE',status=503)
         revision=rows[0][0]
         if revision in {'0062','0063','0064','0066','0067','0068','0069','0070'}:return
-        if revision not in {'0071','0072','0073','0074','0075','0076','0077','0078','0079','0080','0081'}:
+        if revision not in {'0071','0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
             raise QuestionRepositoryError('QUESTION_DATABASE_UNAVAILABLE',status=503)
         try:
             receipt=None if result is None else result.price_card_receipt
             if receipt is not None:
-                if (revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081'} or selection.provider_code!='UPSTAGE'
+                if (revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'} or selection.provider_code!='UPSTAGE'
                     or selection.base_url!='https://api.upstage.ai/v1' or selection.model_id!='solar-pro4'
                     or receipt.provider_connection_id!=selection.connection_id or receipt.basis!='price_card'
                     or model_attempt_id is None):raise ValueError('RUN_COST_RECEIPT_BINDING_INVALID')
@@ -1479,7 +1513,10 @@ class PostgresQuestionAnsweringRepository:
         context_sources: tuple[object, ...] | None = None,
         request_fingerprint: str | None = None,
         access_source_version_ids: tuple[str, ...] = (),
+        external_citations: tuple[object, ...] = (),
     ) -> StoredQuestionAnswer:
+        if external_citations and context.notebook_id is None:
+            raise QuestionRepositoryError("QUESTION_RESULT_INVALID")
         if (
             not _SAFE_ID.fullmatch(run_id) or not question.strip()
             or request_fingerprint is not None
@@ -1565,6 +1602,11 @@ class PostgresQuestionAnsweringRepository:
                 },
             )
             for chunk_id in result.cited_chunk_ids
+        )
+        external_rows = tuple(
+            (StoredCitation(self._opaque_id("extcit", run_result_id, item.chunk.chunk_id), item.document_id, item.document_version_id, item.block_id, item.page,
+                            EXTERNAL_RAG_ORIGIN, item.work_package_id, {"kind": "section", "value": item.block_id}), item)
+            for item in external_citations
         )
         try:
             with self._cloud_store._transaction(
@@ -1727,6 +1769,14 @@ class PostgresQuestionAnsweringRepository:
                         }),
                     }, extra_columns=("run_result_id", "source_version_id", "evidence_span_id"),
                         extra_values=(run_result_id, citation.source_version_id, citation.evidence_span_id))
+                for citation, item in external_rows:
+                    connection.execute(
+                        "INSERT INTO question_external_citations(tenant_id,workspace_id,notebook_id,citation_id,run_result_id,connector_id,project_id,project_name,"
+                        "work_package_id,work_package_name,document_id,document_version_id,understanding_run_id,block_id,page,document_name,body,body_sha256,created_by) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                        (context.tenant_id, context.workspace_id, context.notebook_id, citation.citation_id, run_result_id, item.connector_id, item.project_id, item.project_name,
+                         item.work_package_id, item.work_package_name, item.document_id, item.document_version_id, item.understanding_run_id, item.block_id, item.page,
+                         item.document_name, item.text, hashlib.sha256(item.text.encode("utf-8")).hexdigest(), context.actor_id))
                 self._transition(connection, context, run_id, version, "completed")
                 if provider_called:
                     self._record_run_cost(connection,context,run_id,selection,result=result,model_attempt_id=attempt_id)
@@ -1778,6 +1828,6 @@ class PostgresQuestionAnsweringRepository:
                 "QUESTION_DATABASE_UNAVAILABLE", status=503, retryable=error.retryable,
             ) from None
         return StoredQuestionAnswer(
-            run_id, run_result_id, result.answer, result.insufficient, citations,
+            run_id, run_result_id, result.answer, result.insufficient, (*citations, *(row[0] for row in external_rows)),
             selection.provider_kind, replay_egress_scope,
         )

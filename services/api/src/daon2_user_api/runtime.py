@@ -543,7 +543,7 @@ def _build_run_cost_sessions(store,settings):
     if not policies:return None
     if store is None:raise ValueError('RUN_COST_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
         raise ValueError('RUN_COST_PROTECTED_STORAGE_REQUIRED')
     return RunCostSessionFactory(OperationsRunCostRepository(store),policies=policies,evidence=evidence,
         clock=lambda:datetime.now(timezone.utc))
@@ -553,7 +553,7 @@ def _build_host_capacity_collector(store,settings):
     if settings.operations_host_capacity_enabled is not True:return None
     if store is None:raise ValueError('HOST_CAPACITY_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
         raise ValueError('HOST_CAPACITY_PROTECTED_STORAGE_REQUIRED')
     from .operations_host_capacity import HostCapacityCollector
     from .operations_telemetry_postgres import PostgresHostCapacityRepository
@@ -893,7 +893,7 @@ def _build_document_readiness_runtime(cloud_store, settings):
     if cloud_store is None or not configured.scopes:
         return None
     status = cloud_store.readiness()
-    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081"}:
+    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082"}:
         raise ValueError("DOCUMENT_READINESS_SCHEMA_REQUIRED")
     from .document_readiness_postgres import PostgresDocumentReadinessRepository
     from .workspace_model_defaults import read_document_readiness_policy
@@ -1727,7 +1727,7 @@ def _notification_dispatch_tick(
     if cloud is None or getattr(cloud, '_notification_inbox_enabled', False) is not True:
         return after
     ready = cloud.readiness()  # 정확히 지원하는 revision과 모든 기존 보호를 함께 검사한다.
-    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081'}:
+    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
         raise NotificationError('DATABASE_UNAVAILABLE', 503)
     if stop.is_set():
         return after
@@ -2447,7 +2447,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         if cloud is None or not getattr(cloud, '_notification_inbox_enabled', False):
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         ready = cloud.readiness()
-        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081'}:
+        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         try:
             workspaces = dependencies.identity_service.notification_workspace_ids(
@@ -3249,6 +3249,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "TEXT_MODEL_NOT_SELECTED", "TEXT_MODEL_UNAVAILABLE",
             "TEXT_PROVIDER_UNAVAILABLE", "TEXT_GENERATION_GROUNDING_INVALID",
             "TEXT_GENERATION_RESPONSE_INVALID", "QUESTION_SOURCE_UNAVAILABLE",
+            "KNOWLEDGE_EVIDENCE_UNAVAILABLE", "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED",
             "EGRESS_POLICY_UNAVAILABLE", "EGRESS_POLICY_STALE", "EGRESS_POLICY_DENIED",
             "SELECTED_MODEL_UNAVAILABLE", "TEXT_GENERATION_FAILED", "QUESTION_NEW_RUN_REQUIRED",
             "PROVIDER_CONNECTION_UNAVAILABLE", "PROVIDER_CREDENTIAL_REQUIRED", "PROVIDER_CREDENTIAL_INVALID",
@@ -4868,11 +4869,11 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         intent = classify_question_intent(question)
         if intent not in _QUESTION_MODES:
             raise QuestionAnsweringError("QUESTION_RESPONSE_INVALID", status=500)
-        has_source_context = context_mode != "general_ungrounded"
+        citations = tuple(getattr(stored, "citations", ()))
+        has_source_context = context_mode != "general_ungrounded" or any(getattr(item, "origin", "") == "mcp_daon_rag" for item in citations)
         mode = intent
         if has_source_context and intent == "work_support":
             mode = "explicit_source_lookup"
-        citations = tuple(getattr(stored, "citations", ()))
         insufficient = bool(getattr(stored, "insufficient", False))
         if insufficient and not has_source_context:
             # 소스가 제공한 지식이 없어 모델을 호출하지 않았다. 일반 상담이 아니라 소스 추가 안내다.
@@ -5172,7 +5173,12 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     if knowledge_connector_service is not None:
         register_knowledge_connector_routes(app, dependencies, knowledge_connector_service)
         from .knowledge_scope_service import KnowledgeScopeService, register_knowledge_scope_routes
-        register_knowledge_scope_routes(app, dependencies, KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service))
+        knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service)
+        register_knowledge_scope_routes(app, dependencies, knowledge_scope_service)
+        # Daon2-RAG 검색의 승인 기준이 확인되기 전에는 켜지 않는다(WO-K3 E1).
+        if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") == "true" and hasattr(question_answering_service, "set_external_evidence"):
+            from .question_external_evidence import NotebookKnowledgeEvidence
+            question_answering_service.set_external_evidence(NotebookKnowledgeEvidence(knowledge_scope_service, knowledge_connector_service).search)
     if studio_v2_service is not None:
         def _studio_v2_license_check(principal, workspace_id, request):  # type: ignore[no-untyped-def]
             if license_enforcement_enabled:
