@@ -124,6 +124,14 @@ class RunnerTests(unittest.TestCase):
                 run(FakeLlm(), repo)
             self.assertEqual(caught.exception.code, "STUDIO_VERSION_CONFLICT")
 
+    def test_unfinished_document_fails_without_llm_or_retry(self):
+        session = {"mode": "agent", "state": "paused", "units": []}
+        llm = FakeLlm()
+        with self.assertRaises(StudioError) as caught:
+            ChatEditRunner(llm, FakeRepo(content=session)).run(CTX, OID, "svt-1", "authored_document", cancel_check=lambda: None)
+        self.assertEqual((caught.exception.code, caught.exception.status), ("CHAT_EDIT_UNSUPPORTED", 409))
+        self.assertEqual(llm.prompts, [])
+
     def test_finished_turn_is_not_rerun(self):
         repo = FakeRepo()
         repo.state = "ready"

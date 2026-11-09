@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from psycopg.types.json import Jsonb
 
-from .studio_chat_edit import CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes
+from .studio_chat_edit import AUTHORED_TYPE, CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes, authored_known_refs
 from .studio_v2_queue import CHAT_EDIT_MODE
 from .studio_workspace import StudioContext, StudioError
 
@@ -109,10 +109,31 @@ class StudioV2EditTurnsMixin:
             current = int(row[8])
             if current != int(turn["base_revision"]):
                 raise StudioError("CHAT_EDIT_STALE", 409)
-            number = self._apply_turn_content(connection, context, output_id, str(row[1]), current, turn)
+            if row[1] == AUTHORED_TYPE:
+                number = self._apply_authored_turn(connection, context, output_id, current, list(row[7] or []), turn)
+            else:
+                number = self._apply_turn_content(connection, context, output_id, str(row[1]), current, turn)
             connection.execute("UPDATE studio_v2_edit_turns SET state='applied',applied_revision=%s,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND turn_id=%s",
                                (number, context.tenant_id, context.workspace_id, turn_id))
             return number
+
+    def _apply_authored_turn(self, connection, context: StudioContext, output_id: str, current: int, versions: list[str], turn: Mapping[str, Any]) -> int:  # type: ignore[no-untyped-def]
+        """문서는 세션에 반영한 뒤 기존 재개 경로로 근거·용어 점검을 다시 돌린다(WO-K5 §6)."""
+        from .authoring import session as authoring_session
+        evidence = turn["new_evidence_json"]
+
+        def mutate(content: Mapping[str, Any]) -> dict[str, Any]:
+            known = authored_known_refs(content) | {str(row["ref"]) for row in evidence}
+            try:
+                updated = apply_changes(AUTHORED_TYPE, content, turn["changes_json"], known)
+            except ChatEditInvalid:
+                raise StudioError("CHAT_EDIT_INVALID", 422) from None
+            updated["knowledge"] = [*(updated.get("knowledge") or []), *evidence]
+            return authoring_session.resume(authoring_session.reopen(updated))
+
+        result = self.authoring_apply(context, output_id, current, mutate, enqueue_step="generate", source_version_ids=versions, connection=connection,  # type: ignore[attr-defined]
+                                      generated_with={"edited_by": "llm_chat", "change_reason": str(turn["instruction"])[:200]})
+        return int(result["revision_no"])
 
     def _apply_turn_content(self, connection, context: StudioContext, output_id: str, type_id: str, current: int, turn: Mapping[str, Any]) -> int:  # type: ignore[no-untyped-def]
         scope = (context.tenant_id, context.workspace_id, output_id, current)

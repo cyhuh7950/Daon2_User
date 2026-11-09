@@ -13,10 +13,15 @@ from typing import Any, Mapping, Sequence
 from .studio_user_edit import validate_user_edit
 from .studio_workspace import StudioError
 
-CHAT_EDIT_TYPES = frozenset({"report"})
+CHAT_EDIT_TYPES = frozenset({"report", "slides", "flashcards", "quiz", "authored_document"})
+AUTHORED_TYPE = "authored_document"
+MAX_PARAGRAPHS = 40
+MAX_PARAGRAPH_CHARS = 4000
+MAX_UNIT_TITLE_CHARS = 120
 MAX_PIECE_CHARS = 60_000
 
-_OPS = {"text": {"replace"}, "block": {"replace", "insert_after", "delete"}, "section": {"replace", "insert_after", "delete"}}
+_LIST_OPS = {"replace", "insert_after", "delete"}
+_OPS = {"text": {"replace"}, "block": _LIST_OPS, "section": _LIST_OPS, "item": _LIST_OPS, "paragraph": _LIST_OPS}
 
 
 class ChatEditInvalid(ValueError):
@@ -47,7 +52,30 @@ def _flatten_report(content: Mapping[str, Any]) -> list[Piece]:
     return pieces
 
 
-_FLATTEN = {"report": _flatten_report}
+def _flatten_slides(content: Mapping[str, Any]) -> list[Piece]:
+    body = _body(content)
+    return [Piece("title", "text", {"text": body.get("title", "")}), *(Piece(f"s{n}", "item", slide) for n, slide in enumerate(body.get("slides", []), 1))]
+
+
+def _flatten_cards(content: Mapping[str, Any]) -> list[Piece]:
+    return [Piece(f"c{n}", "item", card) for n, card in enumerate(_body(content).get("cards", []), 1)]
+
+
+def _flatten_quiz(content: Mapping[str, Any]) -> list[Piece]:
+    return [Piece(f"q{n}", "item", question) for n, question in enumerate(_body(content).get("questions", []), 1)]
+
+
+def _flatten_authored(content: Mapping[str, Any]) -> list[Piece]:
+    if not isinstance(content, Mapping) or content.get("mode") != "agent" or content.get("state") != "completed":
+        raise ChatEditInvalid("완성된 문서만 대화로 수정할 수 있습니다.")
+    pieces: list[Piece] = []
+    for unit in content.get("units", []):
+        pieces.append(Piece(f"{unit['key']}.title", "text", {"text": unit.get("title", "")}))
+        pieces.extend(Piece(f"{unit['key']}.p{n}", "paragraph", paragraph) for n, paragraph in enumerate(unit.get("paragraphs", []), 1))
+    return pieces
+
+
+_FLATTEN = {"report": _flatten_report, "slides": _flatten_slides, "flashcards": _flatten_cards, "quiz": _flatten_quiz, AUTHORED_TYPE: _flatten_authored}
 
 
 def flatten(type_id: str, content: Mapping[str, Any]) -> list[Piece]:
@@ -75,6 +103,15 @@ def piece_text(content: Mapping[str, Any]) -> str:
         return "\n".join([str(content.get("heading", "")), *(piece_text(block) for block in content["blocks"])])
     if "items" in content:
         return "\n".join(str(item) for item in content["items"])
+    if "front" in content:
+        return "\n".join(str(content[key]) for key in ("front", "back", "hint") if content.get(key))
+    if "q" in content:
+        options = (("✓ " if index == content.get("answer_index") else "") + str(option) for index, option in enumerate(content.get("options", [])))
+        return "\n".join(line for line in (str(content.get("q", "")), *options, str(content.get("explanation", ""))) if line)
+    if "bullets" in content or "layout" in content:
+        table = content.get("table") if content.get("layout") == "table" else None
+        rows = [" | ".join(str(cell) for cell in row) for row in (table or {}).get("rows", [])]
+        return "\n".join(line for line in (str(content.get("title", "")), *(str(item) for item in content.get("bullets", [])), *rows, str(content.get("notes", ""))) if line)
     if "rows" in content:
         return "\n".join(" | ".join(str(cell) for cell in row) for row in content["rows"])
     return str(content.get("text", ""))
@@ -152,13 +189,72 @@ def _report_size(body: Mapping[str, Any]) -> tuple[int, int]:
     return len(sections), sum(len(section.get("blocks", [])) for section in sections)
 
 
-_MERGE = {"report": _merge_report}
-_SIZE = {"report": _report_size}
+def _merge_slides(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    body = _body(content)
+    return {**body, "title": _text(body.get("title"), by_id.get("title")), "slides": _merge_list(body.get("slides", []), "s", by_id)}
+
+
+def _merge_cards(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    body = _body(content)
+    return {**body, "cards": _merge_list(body.get("cards", []), "c", by_id)}
+
+
+def _merge_quiz(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    body = _body(content)
+    return {**body, "questions": _merge_list(body.get("questions", []), "q", by_id)}
+
+
+_MERGE = {"report": _merge_report, "slides": _merge_slides, "flashcards": _merge_cards, "quiz": _merge_quiz}
+_SIZE = {"report": _report_size, "slides": lambda body: len(body.get("slides", [])), "flashcards": lambda body: len(body.get("cards", [])), "quiz": lambda body: len(body.get("questions", []))}
+
+
+def authored_known_refs(content: Mapping[str, Any]) -> set[str]:
+    """문서에서 쓸 수 있는 근거 번호: 모은 자료와 이미 문단에 붙은 번호."""
+    known = {str(row["ref"]) for row in content.get("knowledge") or [] if isinstance(row, Mapping) and row.get("ref")}
+    return known | {str(ref) for unit in content.get("units", []) for paragraph in unit.get("paragraphs", []) for ref in paragraph.get("refs", [])}
+
+
+def _paragraph(change: Mapping[str, Any], known_refs: set[str]) -> dict[str, Any]:
+    item = change["content"]
+    text = item.get("text")
+    if item.get("type", "paragraph") != "paragraph" or not isinstance(text, str) or not text.strip() or len(text.strip()) > MAX_PARAGRAPH_CHARS:
+        raise ChatEditInvalid(f"{change['id']} 조각은 {MAX_PARAGRAPH_CHARS}자 이하의 문단이어야 합니다.")
+    refs = item.get("refs") if isinstance(item.get("refs"), list) else []
+    return {"text": text.strip(), "refs": [ref for ref in dict.fromkeys(refs) if isinstance(ref, str) and ref in known_refs], "origin": "chat"}
+
+
+def _apply_authored(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]], known_refs: set[str]) -> dict[str, Any]:
+    updated = copy.deepcopy(dict(content))
+    for unit in updated["units"]:
+        prefix = f"{unit['key']}."
+        if not any(piece_id.startswith(prefix) for piece_id in by_id):
+            continue
+        title = by_id.get(f"{prefix}title")
+        if title is not None:
+            value = title["content"].get("text")
+            if not isinstance(value, str) or not value.strip() or len(value.strip()) > MAX_UNIT_TITLE_CHARS:
+                raise ChatEditInvalid(f"{title['id']} 조각의 제목이 올바르지 않습니다.")
+            unit["title"] = value.strip()
+        paragraphs: list[dict[str, Any]] = []
+        for number, paragraph in enumerate(unit["paragraphs"], 1):
+            change = by_id.get(f"{prefix}p{number}")
+            if change is None or change["op"] == "insert_after":
+                paragraphs.append(paragraph)
+            elif change["op"] == "replace":
+                paragraphs.append(_paragraph(change, known_refs))
+            if change is not None and change["op"] == "insert_after":
+                paragraphs.append(_paragraph(change, known_refs))
+        if not paragraphs or len(paragraphs) > MAX_PARAGRAPHS:
+            raise ChatEditInvalid(f"{unit['key']} 소목차에는 문단이 1개 이상 {MAX_PARAGRAPHS}개 이하여야 합니다.")
+        unit.update({"paragraphs": paragraphs, "status": "done", "locked": True, "error_code": None, "summary": " ".join(p["text"] for p in paragraphs)[:300]})
+    return updated
 
 
 def apply_changes(type_id: str, content: Mapping[str, Any], changes: Sequence[Mapping[str, Any]], known_refs: set[str]) -> dict[str, Any]:
     """수정안을 끼워 새 내용을 돌려준다. 원본은 바꾸지 않는다. 저장 규칙을 어기면 ChatEditInvalid."""
     by_id = _index(type_id, content, changes)
+    if type_id == AUTHORED_TYPE:
+        return _apply_authored(content, by_id, known_refs)
     merged = copy.deepcopy(_MERGE[type_id](content, by_id))
     try:
         cleaned = validate_user_edit(type_id, merged, known_refs, _body(content))

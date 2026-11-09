@@ -197,6 +197,84 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "CHAT_EDIT_STATE_INVALID")
 
 
+SESSION = {"mode": "agent", "state": "completed", "knowledge": [{"ref": "K1"}], "pause_requested": False, "pause_reason": None, "units": [
+    {"key": "s1__u1", "title": "제목", "status": "done", "locked": False, "error_code": None, "summary": "", "paragraphs": [{"text": "가", "refs": ["K1"], "origin": "llm"}]}]}
+AUTHORED_CHANGE = {"op": "replace", "id": "s1__u1.p1", "content": {"text": "고침", "refs": ["K2"]}, "reason": "", "before_text": "가", "after_text": "고침"}
+
+
+class AuthoredRepo(Repo):
+    def __init__(self, **kwargs):  # type: ignore[no-untyped-def]
+        super().__init__(type_id="authored_document", **kwargs)
+        self.row = (*self.row[:7], ["sv-1"], self.row[8])
+        self.applied = []
+
+    def authoring_apply(self, context, output_id, expected_revision, mutate, *, enqueue_step=None, source_version_ids=(), connection=None, generated_with=None):  # type: ignore[no-untyped-def]
+        import copy
+        content = mutate(copy.deepcopy(SESSION))
+        self.applied.append({"expected": expected_revision, "content": content, "step": enqueue_step, "versions": list(source_version_ids), "connection": connection, "generated_with": generated_with})
+        return {"output_id": output_id, "revision_no": expected_revision + 1, "state": content["state"], "queued": True}
+
+
+class AuthoredApplyTests(unittest.TestCase):
+    def apply(self, **over):  # type: ignore[no-untyped-def]
+        repo = AuthoredRepo(turns=[turn(changes_json=[AUTHORED_CHANGE], new_evidence_json=[{"ref": "K2", "text": "새 자료"}], **over)])
+        return repo, repo.apply_edit_turn(CTX, OID, "svt-1")
+
+    def test_authored_apply_enqueues_generate_step(self):
+        repo, number = self.apply()
+        applied = repo.applied[0]
+        self.assertEqual(number, 4)
+        self.assertEqual((applied["expected"], applied["step"], applied["versions"]), (3, "generate", ["sv-1"]))
+        self.assertIsNotNone(applied["connection"])
+        self.assertEqual(applied["content"]["state"], "generating")
+        self.assertTrue(repo.updates("state='applied'"))
+
+    def test_authored_records_origin(self):
+        repo, _ = self.apply(instruction="가" * 300)
+        self.assertEqual(repo.applied[0]["generated_with"]["edited_by"], "llm_chat")
+        self.assertEqual(len(repo.applied[0]["generated_with"]["change_reason"]), 200)
+
+    def test_authored_new_knowledge_is_kept(self):
+        repo, _ = self.apply()
+        content = repo.applied[0]["content"]
+        self.assertEqual([row["ref"] for row in content["knowledge"]], ["K1", "K2"])
+        self.assertEqual(content["units"][0]["paragraphs"][0]["refs"], ["K2"])
+
+    def test_authored_invalid_changes_keep_turn_ready(self):
+        repo = AuthoredRepo(turns=[turn(changes_json=[{"op": "delete", "id": "s9.p1"}])])
+        with self.assertRaises(StudioError) as caught:
+            repo.apply_edit_turn(CTX, OID, "svt-1")
+        self.assertEqual(caught.exception.code, "CHAT_EDIT_INVALID")
+        self.assertFalse(repo.updates("state='applied'"))
+
+
+class AuthoringApplyConnectionTests(unittest.TestCase):
+    def test_uses_given_connection_and_records_origin(self):
+        from daon2_user_api.studio_v2_postgres import PostgresStudioV2Repository
+
+        class NoDb(PostgresStudioV2Repository):
+            def __init__(self):  # type: ignore[no-untyped-def]
+                self.revisions, self.jobs = [], []
+                self._cloud_store = None  # 연결을 받았으면 새 트랜잭션을 열면 안 된다
+
+            def _owned_output(self, connection, context, output_id, *, lock=False):  # type: ignore[no-untyped-def]
+                return (OID, "authored_document", None, "제목", "completed", None, {}, [], 3)
+
+            def add_revision(self, context, output_id, revision_type, content, **kwargs):  # type: ignore[no-untyped-def]
+                self.revisions.append(kwargs)
+                return 4
+
+            def _insert_job(self, *args):  # type: ignore[no-untyped-def]
+                self.jobs.append(args)
+
+        repo = NoDb()
+        connection = SimpleNamespace(execute=lambda sql, params=(): SimpleNamespace(fetchone=lambda: ({"state": "paused"},)))
+        result = repo.authoring_apply(CTX, OID, 3, lambda content: {**content, "state": "generating"}, enqueue_step="generate", source_version_ids=[], connection=connection, generated_with={"edited_by": "llm_chat"})
+        self.assertEqual((result["revision_no"], len(repo.jobs)), (4, 1))
+        self.assertEqual(repo.revisions[0]["generated_with"], {"edited_by": "llm_chat"})
+        self.assertIs(repo.revisions[0]["connection"], connection)
+
+
 class CancelTests(unittest.TestCase):
     def test_output_cancel_leaves_chat_edit_jobs_alone(self):
         import inspect

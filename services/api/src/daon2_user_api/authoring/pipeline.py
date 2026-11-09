@@ -371,11 +371,14 @@ class AuthoringPipeline:
         lookup = getattr(self._evidence, "concepts", None)
         if not callable(lookup):
             return {**base, "status": "skipped", "reason": "connector_not_registered"}
-        target = self._evidence.prepare(ctx.context)
-        if target is None or target.daon2_connector_id is None:
-            return {**base, "status": "skipped", "reason": "connector_not_registered"}
-        queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
-        concepts = lookup(target, queries)
+        try:
+            target = self._evidence.prepare(ctx.context)
+            if target is None or target.daon2_connector_id is None:
+                return {**base, "status": "skipped", "reason": "connector_not_registered"}
+            queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
+            concepts = lookup(target, queries)
+        except ExternalEvidenceError:  # 점검을 못 해도 작성된 문서를 실패로 만들지 않는다
+            return {**base, "status": "skipped", "reason": "knowledge_unavailable"}
         return term_consistency(sections, concepts) if concepts else {**base, "status": "skipped", "reason": "no_approved_concepts"}
 
     def _finish_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate, pack: ContextPack, provider: tuple[str, str, str]) -> GenerationResult:

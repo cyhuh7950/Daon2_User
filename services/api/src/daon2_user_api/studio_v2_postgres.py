@@ -491,30 +491,32 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         return {"output_id": output_id, "replayed": False}
 
     def authoring_apply(self, context: StudioContext, output_id: str, expected_revision: int, mutate, *, enqueue_step: str | None = None,  # type: ignore[no-untyped-def]
-                        source_version_ids: Sequence[str] = ()) -> dict[str, object]:
+                        source_version_ids: Sequence[str] = (), connection=None, generated_with: Mapping[str, object] | None = None) -> dict[str, object]:
         """세션 최신 리비전을 읽어 mutate(content)로 새 리비전을 쌓고, 필요하면 같은 트랜잭션에서 작업을 등록한다."""
         notebook_id = self._require_notebook(context)
-        with self._cloud_store._transaction(self._cloud(context, "studio.v2.write")) as connection:
-            row = self._owned_output(connection, context, output_id, lock=True)
-            if row[1] != "authored_document":
-                raise StudioError("RESOURCE_UNAVAILABLE", 404)
-            if row[4] in _ACTIVE:
-                raise StudioError("STUDIO_VERSION_CONFLICT", 409)
-            if int(row[8]) != expected_revision:
-                raise StudioError("STUDIO_VERSION_CONFLICT", 409)
-            current = connection.execute(
-                "SELECT content_json FROM studio_v2_revisions WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s",
-                (context.tenant_id, context.workspace_id, output_id, expected_revision)).fetchone()
-            import copy as _copy
-            content = mutate(_copy.deepcopy(current[0]))
-            if enqueue_step is not None and source_version_ids:
-                self.require_scope(connection, context, list(source_version_ids))
-            number = self.add_revision(context, output_id, "user_edit", content, connection=connection)
-            if enqueue_step is not None:
-                connection.execute("UPDATE studio_v2_outputs SET status='queued',error_code=NULL,source_version_ids=%s,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s",
-                                   (list(source_version_ids), context.tenant_id, context.workspace_id, output_id))
-                self._insert_job(connection, context, output_id, opaque("svj", output_id, f"authoring-{number}"), "authoring", "authored_document", None,
-                                 {"step": enqueue_step}, list(source_version_ids), notebook_id)
+        if connection is None:
+            with self._cloud_store._transaction(self._cloud(context, "studio.v2.write")) as inner:
+                return self.authoring_apply(context, output_id, expected_revision, mutate, enqueue_step=enqueue_step, source_version_ids=source_version_ids, connection=inner, generated_with=generated_with)
+        row = self._owned_output(connection, context, output_id, lock=True)
+        if row[1] != "authored_document":
+            raise StudioError("RESOURCE_UNAVAILABLE", 404)
+        if row[4] in _ACTIVE:
+            raise StudioError("STUDIO_VERSION_CONFLICT", 409)
+        if int(row[8]) != expected_revision:
+            raise StudioError("STUDIO_VERSION_CONFLICT", 409)
+        current = connection.execute(
+            "SELECT content_json FROM studio_v2_revisions WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s",
+            (context.tenant_id, context.workspace_id, output_id, expected_revision)).fetchone()
+        import copy as _copy
+        content = mutate(_copy.deepcopy(current[0]))
+        if enqueue_step is not None and source_version_ids:
+            self.require_scope(connection, context, list(source_version_ids))
+        number = self.add_revision(context, output_id, "user_edit", content, generated_with=generated_with, connection=connection)
+        if enqueue_step is not None:
+            connection.execute("UPDATE studio_v2_outputs SET status='queued',error_code=NULL,source_version_ids=%s,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s",
+                               (list(source_version_ids), context.tenant_id, context.workspace_id, output_id))
+            self._insert_job(connection, context, output_id, opaque("svj", output_id, f"authoring-{number}"), "authoring", "authored_document", None,
+                             {"step": enqueue_step}, list(source_version_ids), notebook_id)
         return {"output_id": output_id, "revision_no": number, "state": content.get("state"), "queued": enqueue_step is not None}
 
     def authoring_merge(self, context: StudioContext, output_id: str, mutate) -> dict[str, object]:  # type: ignore[no-untyped-def]
