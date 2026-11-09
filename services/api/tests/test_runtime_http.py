@@ -972,8 +972,16 @@ class RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["meta"]["workspace_id"], "workspace-001")
         self.assertEqual(
             {item["connector_id"] for item in payload["data"]["connectors"]},
-            {"mcp-open-law-go-kr", "daon-approved-knowledge"},
+            {"mcp-open-law-go-kr"},
         )
+
+    async def test_connector_register_rejects_removed_approved_knowledge_kind(self) -> None:
+        auth = {"cookie": f"{WEB_SESSION_COOKIE}={self.web.access_token}"}
+        response = await self.client.post(
+            "/api/v1/workspaces/workspace-001/connectors", headers=auth,
+            json={"kind": "daon_approved_knowledge", "name": "Daon 승인 지식"},
+        )
+        self.assertEqual(response.json()["error"]["code"], "CONNECTOR_KIND_UNSUPPORTED")
 
     async def test_source_upload_rejects_invalid_pdf_and_cross_scope_before_write(self) -> None:
         auth = {
