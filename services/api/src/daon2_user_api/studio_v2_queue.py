@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb  # noqa: F401  (호출부가 request_json �
 from .cloud_storage import CloudAccessContext
 
 WORKER_CAPABILITY = "studio_v2.worker"
+CHAT_EDIT_MODE = "chat_edit"  # 대화 수정 작업. 큐만 쓰고 자료 상태는 바꾸지 않는다(WO-K5 §5.4)
 _WORKER_SCOPE = CloudAccessContext("system", "system", "studio-v2-worker", WORKER_CAPABILITY)
 
 
@@ -45,6 +46,10 @@ class PostgresStudioV2Queue:
         self._global_limit = global_concurrency
 
     @staticmethod
+    def _holds_output(job: StudioV2Job) -> bool:
+        return job.request_json.get("mode") != CHAT_EDIT_MODE
+
+    @staticmethod
     def _scope(job: StudioV2Job) -> CloudAccessContext:
         return CloudAccessContext(job.tenant_id, job.workspace_id, job.actor_id, "studio.v2.write")
 
@@ -76,9 +81,10 @@ class PostgresStudioV2Queue:
                 (job.tenant_id, job.workspace_id, job.job_id, job.version, worker_id)).fetchone()
             if row is None:
                 raise StudioV2QueueError("STUDIO_JOB_LEASE_LOST")
-            connection.execute(
-                "UPDATE studio_v2_outputs SET status='generating',error_code=NULL,updated_at=now() "
-                "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s", (job.tenant_id, job.workspace_id, job.output_id))
+            if self._holds_output(job):
+                connection.execute(
+                    "UPDATE studio_v2_outputs SET status='generating',error_code=NULL,updated_at=now() "
+                    "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s", (job.tenant_id, job.workspace_id, job.output_id))
         return StudioV2Job(job.tenant_id, job.workspace_id, job.job_id, job.output_id, job.actor_id, job.attempt,
                            job.max_attempts, int(row[0]), job.request_json)
 
@@ -109,9 +115,10 @@ class PostgresStudioV2Queue:
                 (error_code, float(delay), job.tenant_id, job.workspace_id, job.job_id, worker_id)).fetchone()
             if row is None:
                 raise StudioV2QueueError("STUDIO_JOB_LEASE_LOST")
-            connection.execute(
-                "UPDATE studio_v2_outputs SET status='queued',updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s",
-                (job.tenant_id, job.workspace_id, job.output_id))
+            if self._holds_output(job):
+                connection.execute(
+                    "UPDATE studio_v2_outputs SET status='queued',updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s",
+                    (job.tenant_id, job.workspace_id, job.output_id))
         return True
 
     def finish(self, job: StudioV2Job, worker_id: str, *, state: str, error_code: str | None = None) -> None:
@@ -125,7 +132,8 @@ class PostgresStudioV2Queue:
                 (state, error_code, state, job.tenant_id, job.workspace_id, job.job_id, worker_id)).fetchone()
             if row is None:
                 raise StudioV2QueueError("STUDIO_JOB_LEASE_LOST")
-            self._sync_output(connection, job.tenant_id, job.workspace_id, job.output_id, state, error_code)
+            if self._holds_output(job):
+                self._sync_output(connection, job.tenant_id, job.workspace_id, job.output_id, state, error_code)
 
     @staticmethod
     def _sync_output(connection, tenant_id: str, workspace_id: str, output_id: str, state: str, error_code: str | None) -> None:
@@ -143,11 +151,16 @@ class PostgresStudioV2Queue:
                 "lease_owner=NULL,lease_until=NULL,safe_error_code=CASE WHEN cancel_requested THEN NULL ELSE 'STUDIO_DEAD_LETTER' END,"
                 "completed_at=now(),version=version+1,updated_at=now() "
                 "WHERE state IN ('leased','generating') AND lease_until<now() AND (attempt>=max_attempts OR cancel_requested) "
-                "RETURNING tenant_id,workspace_id,output_id,owner_actor_id,state,safe_error_code").fetchall()
-        for tenant, workspace, output, actor, state, code in rows:
+                "RETURNING tenant_id,workspace_id,output_id,owner_actor_id,state,safe_error_code,request_json->>'mode',job_id").fetchall()
+        for tenant, workspace, output, actor, state, code, mode, job_id in rows:
             scope = CloudAccessContext(str(tenant), str(workspace), str(actor), "studio.v2.write")
             with self._cloud_store._transaction(scope) as connection:
-                self._sync_output(connection, str(tenant), str(workspace), str(output), str(state), code)
+                if mode == CHAT_EDIT_MODE:
+                    connection.execute(
+                        "UPDATE studio_v2_edit_turns SET state='failed',error_code=%s,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s "
+                        "AND job_id=%s AND state IN ('queued','working')", (code or "STUDIO_JOB_CANCELLED", str(tenant), str(workspace), str(job_id)))
+                else:
+                    self._sync_output(connection, str(tenant), str(workspace), str(output), str(state), code)
         return len(rows)
 
     def close(self) -> None:  # 풀은 cloud_store가 소유한다.
