@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 from psycopg.types.json import Jsonb
 
 from .cloud_storage import CloudAccessContext
+from .studio_v2_edit_turns import StudioV2EditTurnsMixin
 from .studio_v2_types import STUDIO_V2_TYPES, is_available, validate_settings
 from .studio_workspace import StudioContext, StudioError
 from .studio_workspace_postgres import PostgresStudioWorkspaceRepository
@@ -79,7 +80,7 @@ def _item(row: Sequence[object]) -> dict[str, object]:
             "created_at": _iso(row[8]), "updated_at": _iso(row[9]), "stale": bool(row[10])}
 
 
-class PostgresStudioV2Repository:
+class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
     def __init__(self, cloud_store, *, clock=None) -> None:  # type: ignore[no-untyped-def]
         self._cloud_store = cloud_store
         self._scope = PostgresStudioWorkspaceRepository(None)
@@ -434,6 +435,18 @@ class PostgresStudioV2Repository:
             raise StudioError("RESOURCE_UNAVAILABLE", 404)
         return {"content": bytes(row[0]), "content_type": str(row[1]), "duration_ms": row[2], "sha256": str(row[3]), "revision_no": int(row[4])}
 
+    def _copy_lineage(self, connection, context: StudioContext, output_id: str, number: int, current: int) -> None:
+        """직전 리비전의 근거·소스 연결을 새 리비전으로 잇는다."""
+        params = (context.tenant_id, context.workspace_id, output_id, number, context.tenant_id, context.workspace_id, output_id, current)
+        connection.execute(
+            "INSERT INTO studio_v2_evidence(tenant_id,workspace_id,output_id,revision_no,ref_id,source_version_id,evidence_span_id,locator_kind,locator_value,"
+            "quote_sha256,origin,external_ref) SELECT %s,%s,%s,%s,ref_id,source_version_id,evidence_span_id,locator_kind,locator_value,quote_sha256,origin,external_ref "
+            "FROM studio_v2_evidence WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s ON CONFLICT DO NOTHING", params)
+        connection.execute(
+            "INSERT INTO studio_v2_sources(tenant_id,workspace_id,output_id,revision_no,source_version_id,source_id,content_digest_sha256) "
+            "SELECT %s,%s,%s,%s,source_version_id,source_id,content_digest_sha256 FROM studio_v2_sources "
+            "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s ON CONFLICT DO NOTHING", params)
+
     def save_user_edit(self, context: StudioContext, output_id: str, content: Mapping[str, object], change_reason: str | None = None) -> int:
         """사용자 편집을 새 리비전으로 저장한다. 본문은 유형별 규칙으로 정리하고, 근거(evidence)·소스 연결은 직전 리비전에서 이어 받는다."""
         from .studio_user_edit import validate_user_edit
@@ -457,15 +470,7 @@ class PostgresStudioV2Repository:
             new_content = {**dict(previous[0]), "body": body}
             number = self.add_revision(context, output_id, "user_edit", new_content, warnings=[],
                                        generated_with={"edited_by": "user", "change_reason": (change_reason or "")[:200]}, connection=connection)
-            params = (context.tenant_id, context.workspace_id, output_id, number, context.tenant_id, context.workspace_id, output_id, current)
-            connection.execute(
-                "INSERT INTO studio_v2_evidence(tenant_id,workspace_id,output_id,revision_no,ref_id,source_version_id,evidence_span_id,locator_kind,locator_value,"
-                "quote_sha256,origin,external_ref) SELECT %s,%s,%s,%s,ref_id,source_version_id,evidence_span_id,locator_kind,locator_value,quote_sha256,origin,external_ref "
-                "FROM studio_v2_evidence WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s ON CONFLICT DO NOTHING", params)
-            connection.execute(
-                "INSERT INTO studio_v2_sources(tenant_id,workspace_id,output_id,revision_no,source_version_id,source_id,content_digest_sha256) "
-                "SELECT %s,%s,%s,%s,source_version_id,source_id,content_digest_sha256 FROM studio_v2_sources "
-                "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s ON CONFLICT DO NOTHING", params)
+            self._copy_lineage(connection, context, output_id, number, current)
             return number
 
     # -- 작성(Authoring) 세션: 세션 상태는 불변 리비전으로 쌓는다 ----------------------------------
