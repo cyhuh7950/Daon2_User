@@ -6,6 +6,7 @@ import json
 from typing import Any, Callable, Mapping
 
 from .studio_context_builder import ContextPack, build_pack
+from .studio_knowledge import UNIT_EVIDENCE_LIMIT
 from .studio_source_reader import StudioSourceReader
 from .studio_workspace import StudioError
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
@@ -53,6 +54,7 @@ class _Base:
     max_tokens = 3000
     prompt_version = "studio-v1"
     _knowledge = None
+    unit_knowledge = True
 
     def set_knowledge(self, knowledge: object) -> None:
         self._knowledge = knowledge
@@ -70,7 +72,13 @@ class _Base:
         if self._knowledge is None:
             return pack
         names = ", ".join(s.filename for s in sources[:5]) or "없음"
-        pack, _ = self._knowledge.extend(ctx, f"{STUDIO_LABELS.get(self.type_id, self.type_id)} 작성. 주제: {focus or '선택한 지식 전체'}. 소스: {names}", pack)
+        label = STUDIO_LABELS.get(self.type_id, self.type_id)
+        units = self._knowledge.plan_units(ctx, label, focus) if self.unit_knowledge else ()
+        if units:  # 구성 단위마다 필요한 자료를 묻는다(WO-K4 §5). 요청이 커지지 않게 단위당 근거 수를 줄인다.
+            for unit in units:
+                pack, _ = self._knowledge.extend(ctx, f"{label}의 구성 단위 작성: {unit}. 주제: {focus or '선택한 지식 전체'}", pack, limit=UNIT_EVIDENCE_LIMIT)
+        else:
+            pack, _ = self._knowledge.extend(ctx, f"{label} 작성. 주제: {focus or '선택한 지식 전체'}. 소스: {names}", pack)
         if not pack.passages:
             raise StudioError("STUDIO_NO_READY_SOURCE", 409)
         return pack
@@ -101,6 +109,7 @@ class _Base:
 
 class ReportGenerator(_Base):
     type_id = "report"
+    unit_knowledge = False  # 보고서는 섹션마다 따로 묻는다
     OUTLINE = {"type": "object", "properties": {"title": {"type": "string"}, "summary": {"type": "string"},
                "sections": {"type": "array", "items": {"type": "object", "properties": {
                    "heading": {"type": "string"}, "purpose": {"type": "string"}, "refs": _REFS}, "required": ["heading", "refs"]}}},
@@ -113,13 +122,18 @@ class ReportGenerator(_Base):
         pack = self._pack(ctx)
         preset = ctx.format_id or "summary"
         ctx.progress(10, "개요 작성")
-        outline = self._ask(ctx, f"형식: {PRESET_GUIDES.get(preset, preset)}. 소스를 바탕으로 보고서 개요를 JSON으로 만드세요. "
+        confirmed = self._confirmed_outline(ctx)
+        outline = confirmed or self._ask(ctx, f"형식: {PRESET_GUIDES.get(preset, preset)}. 소스를 바탕으로 보고서 개요를 JSON으로 만드세요. "
                                  "sections는 3~6개이며 각 섹션에 참고할 구간 라벨 refs를 지정합니다. title과 한 문단 summary도 작성합니다.",
                             self.OUTLINE, pack, tokens=1200)
         sections_in = [s for s in V.as_list(outline.get("sections"), 8) if isinstance(s, Mapping) and V.text_field(s.get("heading"), 120)]
         if not sections_in:
             from .studio_workspace import StudioError
             raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        if confirmed is None and ctx.settings.get("confirm_outline") == "yes":
+            # 사람이 구성을 확인하도록 여기서 멈춘다(WO-K4 §4.5). 확정하면 confirmed_outline으로 다시 만든다.
+            review = [{"heading": V.text_field(s.get("heading"), 120), "purpose": V.text_field(s.get("purpose"), 200)} for s in sections_in]
+            return self._finish(ctx, pack, {"title": V.text_field(outline.get("title"), 200), "summary": V.text_field(outline.get("summary"), 800), "sections": [], "outline_review": review}, [], [])
         assembled: list[dict[str, Any]] = []
         for index, section in enumerate(sections_in):
             ctx.progress(15 + int(75 * index / len(sections_in)), f"섹션 작성 {index + 1}/{len(sections_in)}")
@@ -138,6 +152,20 @@ class ReportGenerator(_Base):
             assembled.append({"heading": section.get("heading"), "blocks": blocks})
         body, warnings, used = V.validate_report({"title": outline.get("title"), "summary": outline.get("summary"), "sections": assembled}, pack)
         return self._finish(ctx, pack, body, warnings, used)
+
+
+    @staticmethod
+    def _confirmed_outline(ctx: GenerationContext) -> Mapping[str, Any] | None:
+        raw = ctx.settings.get("confirmed_outline")
+        if not isinstance(raw, str) or not raw:
+            return None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            raise StudioError("STUDIO_INPUT_INVALID", 400) from None
+        if not isinstance(data, Mapping) or not isinstance(data.get("sections"), list):
+            raise StudioError("STUDIO_INPUT_INVALID", 400)
+        return {**data, "sections": [{**s, "refs": []} for s in data["sections"] if isinstance(s, Mapping)]}
 
 
 class DataTableGenerator(_Base):

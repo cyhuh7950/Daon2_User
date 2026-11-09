@@ -141,7 +141,7 @@ function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onEr
         setOutput(await studio.getOutput(outputId));  // 서버가 정리한 본문·새 리비전 번호로 다시 읽는다
         setEditing(false);
       }} />}
-      {output && !editing && <StudioViewer output={output} onOpenEvidence={(ref) => onOpenEvidence(output, ref)} onAskAboutNode={onAskAboutNode}
+      {output && !editing && <StudioViewer output={output} onConfirmOutline={async (confirmed_outline) => { await studio.regenerateOutput(outputId, { settings: { confirm_outline: "no", confirmed_outline } }); setOutput(await studio.getOutput(outputId)); }} onOpenEvidence={(ref) => onOpenEvidence(output, ref)} onAskAboutNode={onAskAboutNode}
         onLoadImage={loadImage} onLoadAudio={loadAudio} onLoadVideo={loadVideo} onLoadCaptions={loadCaptions}
         onAttempt={(kind, payload) => studio.recordLearningAttempt?.(outputId, { revisionNo: output.current_revision, kind, payload }).catch(() => {})}
         onSaveMemo={async (content) => { const saved = await studio.createRevision(outputId, { content }); setOutput((o) => ({ ...o, current_revision: saved.revision_no })); }} />}

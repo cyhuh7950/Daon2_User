@@ -34,7 +34,8 @@ def _t(type_id, export_formats, *, presets=(), default_format=None, schema=None,
 STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
     t.type_id: t for t in (
         _t("report", ("docx", "pdf", "md"), presets=("summary", "briefing", "blog", "study_guide", "custom"),
-           default_format="summary", schema={"custom_instruction": {"type": "string", "maxLength": 1000}}),
+           default_format="summary", schema={"custom_instruction": {"type": "string", "maxLength": 1000}, "confirm_outline": {"type": "string", "enum": ["no", "yes"]},
+                   "confirmed_outline": {"type": "string", "maxLength": 4000, "hidden": True}}),
         _t("data_table", ("xlsx", "csv", "pdf")),
         _t("mind_map", ("svg", "png", "json")),
         _t("flashcards", ("csv", "json", "pdf"),

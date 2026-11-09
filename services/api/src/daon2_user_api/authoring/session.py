@@ -51,12 +51,12 @@ def requests_for(questions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]
     return [{"request": mapping[q["kind"]], "key": q["key"]} for q in questions if q["kind"] in mapping]
 
 
-def new_session(template: AuthoringTemplate, *, request_text: str | None = None, mode: str = "legacy", target_pages: int | None = None) -> dict[str, Any]:
+def new_session(template: AuthoringTemplate, *, request_text: str | None = None, mode: str = "legacy", target_pages: int | None = None, confirm_material: bool = False) -> dict[str, Any]:
     session: dict[str, Any] = {"schema": SESSION_SCHEMA, "template_id": template.template_id, "template_version": template.version, "analysis": template.analysis, "style": template.style, "output_choices": list(template.output["formats"]), "state": "collecting",
                                "request_text": (request_text or "")[:500], "inputs": {}, "assumptions": [], "pending_questions": [], "requests": [],
                                "requirements": [], "plan": None, "output_formats": list(template.output["default"]), "error_code": None}
     if mode == "agent":
-        session.update({"mode": "agent", "target_pages": target_pages, "units": [], "knowledge": [], "pause_requested": False, "pause_reason": None})
+        session.update({"mode": "agent", "target_pages": target_pages, "confirm_material": confirm_material, "units": [], "knowledge": [], "pause_requested": False, "pause_reason": None})
     session["pending_questions"] = pending(template, session)
     session["requests"] = requests_for(session["pending_questions"])
     return session
@@ -141,8 +141,23 @@ def resume(session: Mapping[str, Any]) -> dict[str, Any]:
     for unit in updated["units"]:
         if unit["status"] == "needs_review":
             unit["status"] = "done"
+        elif unit["status"] == "material_review":
+            unit.update({"status": "pending", "material_approved": True})
         elif unit["status"] == "failed":
             unit.update({"status": "pending", "error_code": None})
+    return updated
+
+
+def set_material(session: Mapping[str, Any], key: str, refs: Sequence[str]) -> dict[str, Any]:
+    """사람이 확인한 자료만 남긴다. 목록에 없는 자료는 넣을 수 없다."""
+    if session["state"] != "paused":
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+    updated = copy.deepcopy(dict(session))
+    unit = updated["units"][_unit_index(updated, key)]
+    known = {item["ref"] for item in unit.get("material", [])}
+    if unit["status"] != "material_review" or not set(refs) <= known:
+        raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+    unit["material"] = [item for item in unit["material"] if item["ref"] in set(refs)]
     return updated
 
 

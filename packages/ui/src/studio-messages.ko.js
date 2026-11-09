@@ -59,6 +59,7 @@ export const STUDIO_MESSAGES = Object.freeze({
   "studio.back": "목록으로",
   "studio.evidence.label": "근거 {n}: {name} {where}",
   "studio.evidence.unverified": "근거 미확인",
+  "studio.dialog.settings.confirm_outline": "작성 전에 구성 확인",
   "studio.dialog.settings.title": "{type} 설정",
   "studio.dialog.settings.focus": "포커스 지시문",
   "studio.dialog.settings.focus.hint": "비워 두면 소스 전체를 요약합니다. 최대 500자.",

@@ -1,6 +1,7 @@
 """스튜디오의 승인 지식 사용(WO-K4 4단계): 자료 계획, 근거 표시, 보고서 섹션별 검색."""
 from __future__ import annotations
 
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ def evidence(block="b1", text="평가 배점은 기술 90점이다."):
 
 class Finder:
     def __init__(self, found=None, packages=True, error=None):
-        self.found, self.packages, self.error, self.runs = found, packages, error, []
+        self.found, self.packages, self.error, self.runs, self.limits = found, packages, error, [], []
 
     def prepare(self, context):
         if not self.packages:
@@ -31,6 +32,7 @@ class Finder:
 
     def run(self, target, requests, limit=5):
         self.runs.append(tuple(requests))
+        self.limits.append(limit)
         if self.error:
             raise self.error
         return self.found if self.found is not None else (evidence(f"b{len(self.runs)}", f"근거 {len(self.runs)}번 본문 내용"),)
@@ -55,7 +57,9 @@ class LLM:
     def generate(self, context, prompt, cancel_check=None):
         self.prompts.append(prompt)
         name = prompt.schema_name
-        if name == "authoring_unit_plan":
+        if name == "studio_knowledge_units":
+            data = {"units": []}
+        elif name == "authoring_unit_plan":
             data = {"requests": [{"knowledge": "rag", "package": "P1", "query": "평가 기준"}]}
         elif "개요" in prompt.user:
             data = {"title": "제목", "summary": "요약", "sections": [{"heading": "첫 섹션", "purpose": "가", "refs": []}, {"heading": "둘째 섹션", "purpose": "나", "refs": []}]}
@@ -167,6 +171,47 @@ class StudioKnowledgeTests(unittest.TestCase):
         pack = generator._pack(job("flashcards", versions=()))  # noqa: SLF001
         self.assertEqual(len(pack.passages), 1)
         self.assertEqual(len(finder.runs), 2)
+
+    def test_each_planned_unit_gets_its_own_material(self):
+        finder, llm = Finder(), LLM()
+        original = llm.generate
+
+        def generate(context, prompt, cancel_check=None):
+            if prompt.schema_name == "studio_knowledge_units":
+                llm.prompts.append(prompt)
+                return SimpleNamespace(data={"units": [{"title": "평가 기준"}, {"title": "추진 일정"}, {"title": "수행 조직"}]})
+            return original(context, prompt, cancel_check)
+
+        llm.generate = generate
+        generator = FlashcardsGenerator(Reader(), llm)
+        generator.set_knowledge(StudioKnowledge(llm, finder))
+        pack = generator._pack(job("flashcards"))  # noqa: SLF001
+        self.assertEqual(len(finder.runs), 3)
+        self.assertEqual(finder.limits, [3, 3, 3])
+        self.assertEqual(len(pack.passages), 4)
+        plans = [p.user for p in llm.prompts if p.schema_name == "authoring_unit_plan"]
+        self.assertIn("평가 기준", plans[0])
+        self.assertIn("수행 조직", plans[2])
+
+    def test_report_can_stop_for_outline_confirmation(self):
+        generator, llm = report(Finder())
+        result = generator.generate(job("report", settings={"confirm_outline": "yes"}))
+        self.assertEqual([item["heading"] for item in result.content["body"]["outline_review"]], ["첫 섹션", "둘째 섹션"])
+        self.assertEqual(result.content["body"]["sections"], [])
+        self.assertEqual([p for p in llm.prompts if "본문을 작성하세요" in p.user], [])
+
+    def test_confirmed_outline_is_used_without_asking_again(self):
+        generator, llm = report(Finder())
+        outline = json.dumps({"title": "확정 제목", "sections": [{"heading": "사람이 정한 섹션", "purpose": "목적"}]}, ensure_ascii=False)
+        result = generator.generate(job("report", settings={"confirm_outline": "no", "confirmed_outline": outline}))
+        self.assertEqual(result.content["body"]["title"], "확정 제목")
+        self.assertEqual([s["heading"] for s in result.content["body"]["sections"]], ["사람이 정한 섹션"])
+        self.assertEqual([p for p in llm.prompts if "개요를 JSON" in p.user], [])
+
+    def test_report_settings_accept_the_confirmation_options(self):
+        from daon2_user_api.studio_v2_types import validate_settings
+        _, settings = validate_settings("report", "summary", {"confirm_outline": "yes", "confirmed_outline": "{}"})
+        self.assertEqual(settings["confirm_outline"], "yes")
 
     def test_search_failure_is_a_retryable_error(self):
         generator, _ = report(Finder(error=ExternalEvidenceError("KNOWLEDGE_EVIDENCE_UNAVAILABLE", 503, True)))

@@ -342,6 +342,42 @@ class InterventionTests(Base):
         with self.assertRaises(AuthoringError):
             S.reopen({"state": "completed", "mode": "legacy"})
 
+    def material_session(self):
+        session = S.new_session(GENERAL, request_text="AI 제안서", mode="agent", target_pages=1, confirm_material=True)
+        session = S.apply_answers(GENERAL, session, [{"key": "document_goal", "value": "AI 제안"}], skip_remaining=True)
+        self.store = Store(S.transition(self.pipeline().analyze(job("analyze"), session), "generating"))
+
+    def test_material_can_be_confirmed_before_writing(self):
+        self.material_session()
+        result = self.run_job()
+        unit = result.content["units"][0]
+        self.assertEqual((result.content["state"], result.content["pause_reason"], unit["status"]), ("paused", "material_review", "material_review"))
+        self.assertEqual([item["heading"] for item in unit["material"]], ["제안요청서.pdf"])
+        self.assertEqual([p for p in self.llm.prompts if p.schema_name == "authoring_unit"], [])
+
+    def test_confirmed_material_is_used_without_searching_again(self):
+        self.material_session()
+        self.run_job()
+        searches = len(self.finder.runs)
+        self.store.session = S.resume(self.store.session)
+        self.run_job()
+        self.assertEqual(self.store.session["units"][0]["status"], "done")
+        self.assertEqual(len(self.finder.runs), searches + 1)
+        self.assertIn("평가 기준은 기술 90점과", [p for p in self.llm.prompts if p.schema_name == "authoring_unit"][0].user)
+
+    def test_person_can_drop_material(self):
+        self.material_session()
+        self.run_job()
+        key = self.store.session["units"][0]["key"]
+        updated = S.set_material(self.store.session, key, [])
+        self.assertEqual(updated["units"][0]["material"], [])
+
+    def test_material_outside_the_list_is_refused(self):
+        self.material_session()
+        self.run_job()
+        with self.assertRaises(AuthoringError):
+            S.set_material(self.store.session, self.store.session["units"][0]["key"], ["K99"])
+
     def test_paused_session_only_moves_through_allowed_states(self):
         session = S.transition(self.generating(), "paused")
         self.assertEqual(S.transition(session, "generating")["state"], "generating")

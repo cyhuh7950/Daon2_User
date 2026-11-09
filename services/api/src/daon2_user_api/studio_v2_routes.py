@@ -369,6 +369,7 @@ class SessionCreateBody(_Strict):
     template_id: str | None = Field(default=None, max_length=64)
     request_text: str | None = Field(default=None, max_length=500)
     target_pages: int | None = Field(default=None, ge=1, le=100)
+    confirm_material: bool = False
 
 
 class AnswersBody(_Strict):
@@ -378,9 +379,10 @@ class AnswersBody(_Strict):
 
 
 class ControlBody(_Strict):
-    action: str = Field(pattern="^(pause|resume|reopen|redo)$")
+    action: str = Field(pattern="^(pause|resume|reopen|redo|material)$")
     expected_revision: int | None = Field(default=None, ge=1)
     unit_key: str | None = Field(default=None, max_length=128)
+    material_refs: list[str] | None = Field(default=None, max_length=40)
 
 
 class UnitEditBody(_Strict):
@@ -452,7 +454,7 @@ def register_authoring_routes(app: FastAPI, dependencies: Any, authoring: Any, e
             raise HTTPException(status_code=400)
         if enqueue_license_check is not None:
             await asyncio.to_thread(enqueue_license_check, _principal(request, dependencies), id, request)
-        data = await asyncio.to_thread(authoring.create, ctx, body.template_id, body.request_text, idempotency_key, body.target_pages)
+        data = await asyncio.to_thread(authoring.create, ctx, body.template_id, body.request_text, idempotency_key, body.target_pages, body.confirm_material)
         return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=201 if data.get("created") else 200)
 
     @app.get(base + "/sessions/{output_id}")
@@ -477,7 +479,7 @@ def register_authoring_routes(app: FastAPI, dependencies: Any, authoring: Any, e
     async def authoring_control(id: str, notebook_id: str, output_id: str, body: ControlBody, request: Request) -> JSONResponse:
         _require_query_keys(request, frozenset())
         ctx = _ctx(request, id, notebook_id, Action.EDIT)
-        data = await asyncio.to_thread(authoring.control, ctx, _out(output_id), body.action, body.expected_revision, body.unit_key)
+        data = await asyncio.to_thread(authoring.control, ctx, _out(output_id), body.action, body.expected_revision, body.unit_key, body.material_refs)
         return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
 
     @app.put(base + "/sessions/{output_id}/units/{unit_key}", status_code=202)
