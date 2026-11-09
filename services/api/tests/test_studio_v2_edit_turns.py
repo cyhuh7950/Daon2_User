@@ -75,6 +75,9 @@ class Repo(StudioV2EditTurnsMixin):
         self.revisions.append((revision_type, content, kwargs))
         return self.row[8] + 1
 
+    def require_scope(self, connection, context, versions):  # type: ignore[no-untyped-def]
+        return None
+
     def _copy_lineage(self, connection, context, output_id, number, current):  # type: ignore[no-untyped-def]
         self.lineage.append((number, current))
 
@@ -129,6 +132,18 @@ class MaterialScopeTests(unittest.TestCase):
         repo = Repo()
         repo.row = (*repo.row[:7], ["sv-1"], repo.row[8])
         self.assertEqual(repo.chat_material_scope(CTX, OID), {"versions": ["sv-1"], "refs": {"S1"}})
+
+
+    def test_scope_drops_versions_outside_the_users_scope(self):
+        repo = Repo()
+        repo.row = (*repo.row[:7], ["sv-ok", "sv-removed"], repo.row[8])
+
+        def require_scope(connection, context, versions):  # type: ignore[no-untyped-def]
+            if "sv-removed" in versions:
+                raise StudioError("NOTEBOOK_SCOPE_MISMATCH", 409)
+
+        repo.require_scope = require_scope
+        self.assertEqual(repo.chat_material_scope(CTX, OID)["versions"], ["sv-ok"])
 
 
 class ResultTests(unittest.TestCase):

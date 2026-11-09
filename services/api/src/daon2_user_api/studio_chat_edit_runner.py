@@ -6,11 +6,12 @@ import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Sequence
 
-from .authoring.agent import knowledge_row
+from .authoring.agent import knowledge_row, next_knowledge_ref
 from .question_external_evidence import ExternalEvidenceError
 from .studio_chat_edit import AUTHORED_TYPE, MAX_PIECE_CHARS, ChatEditInvalid, Piece, apply_changes, describe_changes, flatten, piece_text, pieces_size, render_pieces
 from .studio_context_builder import ContextPack, build_pack
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
+from .studio_v2_generation import StudioCancelled
 from .studio_workspace import StudioContext, StudioError
 
 HISTORY_TURNS = 6
@@ -43,6 +44,11 @@ NOT_FOUND = "[찾은 자료]\n자료를 찾지 못했습니다."
 class _Material:
     text: str = ""
     rows: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+
+
+def _data(text: str) -> str:
+    """자료 글이 프롬프트의 태그 경계를 닫지 못하게 한다."""
+    return text.replace("</", r"<\/").replace('"', "'")
 
 
 def _used_refs(changes: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -108,7 +114,9 @@ class ChatEditRunner:
             if authored:
                 return self._authored_material(context, instruction, content, cancel_check)
             return self._studio_material(context, instruction, versions, ready, scope["refs"], cancel_check)
-        except (ExternalEvidenceError, StudioError):
+        except StudioCancelled:
+            raise
+        except Exception:  # noqa: BLE001  찾기 실패로 대화를 끊지 않는다(WO-K5 §7)
             return _Material(NOT_FOUND)
 
     def _needs_material(self, context: StudioContext, instruction: str, pieces: Sequence[Piece], cancel_check: Callable[[], None]) -> bool:
@@ -122,14 +130,23 @@ class ChatEditRunner:
 
     def _studio_material(self, context: StudioContext, instruction: str, versions: Sequence[str], ready: bool, refs: set[str], cancel_check: Callable[[], None]) -> _Material:
         first = 1 + max((int(match.group(1)) for match in (re.fullmatch(r"S(\d+)", ref) for ref in refs) if match), default=0)
-        sources = self._reader.read(context, versions) if versions else ()
-        pack = build_pack(sources, budget_chars=SOURCE_BUDGET_CHARS, focus=instruction)
-        pack = ContextPack(tuple(replace(passage, ref=f"S{first + index}") for index, passage in enumerate(pack.passages)), pack.truncated, pack.total_sections)
+        pack = ContextPack((), False, 0)
+        try:  # 한쪽을 못 찾아도 다른 쪽 자료는 쓴다
+            sources = self._reader.read(context, versions) if versions else ()
+            built = build_pack(sources, budget_chars=SOURCE_BUDGET_CHARS, focus=instruction)
+            pack = ContextPack(tuple(replace(passage, ref=f"S{first + index}") for index, passage in enumerate(built.passages)), built.truncated, built.total_sections)
+        except StudioError:
+            pass
         if ready:
-            pack, _ = self._knowledge.extend_if_requested(context, instruction, pack, first_number=first, cancel_check=cancel_check)
+            try:
+                pack, _ = self._knowledge.extend_if_requested(context, instruction, pack, first_number=first, cancel_check=cancel_check)
+            except (ExternalEvidenceError, StudioError):
+                pass
         if not pack.passages:
             return _Material(NOT_FOUND)
-        return _Material(f"[찾은 자료]\n{pack.render()}", {row["ref_id"]: row for row in pack.evidence_rows([passage.ref for passage in pack.passages])})
+        rows = {row["ref_id"]: row for row in pack.evidence_rows([passage.ref for passage in pack.passages])}
+        shown = ContextPack(tuple(replace(passage, text=_data(passage.text), filename=_data(passage.filename)) for passage in pack.passages), pack.truncated, pack.total_sections)
+        return _Material(f"[찾은 자료]\n{shown.render()}", rows)
 
     def _authored_material(self, context: StudioContext, instruction: str, content: Mapping[str, Any], cancel_check: Callable[[], None]) -> _Material:
         from .authoring.pipeline import render_knowledge
@@ -141,11 +158,12 @@ class ChatEditRunner:
             key = (item.connector_id, item.document_version_id, item.block_id)
             row = by_block.get(key)
             if row is None:
-                row = by_block[key] = knowledge_row(item, f"K{len(knowledge) + 1}")
+                row = by_block[key] = knowledge_row(item, next_knowledge_ref(knowledge))
                 knowledge.append(row)
                 new_rows[row["ref"]] = row
             material.append(row)
-        return _Material(f"[찾은 자료]\n{render_knowledge(material)}", new_rows) if material else _Material(NOT_FOUND)
+        shown = [{**row, "heading": _data(str(row.get("heading", ""))), "text": _data(str(row.get("text", "")))} for row in material]
+        return _Material(f"[찾은 자료]\n{render_knowledge(shown)}", new_rows) if material else _Material(NOT_FOUND)
 
     def _answer(self, context: StudioContext, prompt: StudioPrompt, type_id: str, content: Mapping[str, Any], cancel_check: Callable[[], None]) -> tuple[str, list[Mapping[str, Any]]]:
         """형식이 틀리면 사유를 알려 1회만 다시 묻는다."""

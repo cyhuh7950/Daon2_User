@@ -105,6 +105,15 @@ class StudioKnowledgeTests(unittest.TestCase):
         StudioKnowledge(llm, finder).extend(job, "질문", ContextPack((), False, 0))
         self.assertEqual(len(finder.runs), 1)
 
+    def test_available_is_false_on_unexpected_errors(self):
+        finder = Finder()
+
+        def broken(context):
+            raise RuntimeError("db")
+
+        finder.prepare = broken
+        self.assertFalse(StudioKnowledge(LLM(), finder).available(CTX))
+
     def test_available_follows_the_selection(self):
         self.assertTrue(StudioKnowledge(LLM(), Finder()).available(CTX))
         self.assertFalse(StudioKnowledge(LLM(), Finder(packages=False)).available(CTX))

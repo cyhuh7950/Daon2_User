@@ -81,7 +81,16 @@ class StudioV2EditTurnsMixin:
             row = self._owned_output(connection, context, output_id)  # type: ignore[attr-defined]
             refs = connection.execute("SELECT ref_id FROM studio_v2_evidence WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s",
                                       (context.tenant_id, context.workspace_id, output_id, row[8])).fetchall()
-        return {"versions": list(row[7] or []), "refs": {str(ref[0]) for ref in refs}}
+            versions = [version for version in row[7] or [] if self._in_scope(connection, context, version)]
+        return {"versions": versions, "refs": {str(ref[0]) for ref in refs}}
+
+    def _in_scope(self, connection, context: StudioContext, version: str) -> bool:  # type: ignore[no-untyped-def]
+        """노트북에서 빠졌거나 이 사용자에게 열람이 막힌 Source는 찾지 않는다."""
+        try:
+            self.require_scope(connection, context, [version])  # type: ignore[attr-defined]
+        except StudioError:
+            return False
+        return True
 
     def edit_turn_for_job(self, context: StudioContext, turn_id: str) -> dict[str, Any]:
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:  # type: ignore[attr-defined]

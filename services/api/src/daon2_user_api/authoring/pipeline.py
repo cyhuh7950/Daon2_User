@@ -18,7 +18,7 @@ from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
 from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
-from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
+from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
 from .rfp import extract_requirements
@@ -251,7 +251,7 @@ class AuthoringPipeline:
             key = (item.connector_id, item.document_version_id, item.block_id)
             row = by_block.get(key)
             if row is None:
-                row = by_block[key] = knowledge_row(item, f"K{len(knowledge) + 1}")
+                row = by_block[key] = knowledge_row(item, next_knowledge_ref(knowledge))
                 knowledge.append(row)
             material.append(row)
         return material

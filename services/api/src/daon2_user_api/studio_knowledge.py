@@ -56,7 +56,7 @@ class StudioKnowledge:
     def available(self, context: StudioContext) -> bool:
         try:
             return self._finder.prepare(context) is not None
-        except ExternalEvidenceError:
+        except Exception:  # noqa: BLE001  지식 조회 장애가 자료가 필요 없는 수정까지 막지 않는다
             return False
 
     def find_requested(self, context: StudioContext, question: str, *, limit: int = EXTERNAL_LIMIT, cancel_check: Callable[[], None] | None = None) -> tuple[ExternalEvidence, ...]:
