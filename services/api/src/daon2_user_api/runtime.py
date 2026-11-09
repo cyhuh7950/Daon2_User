@@ -1986,6 +1986,7 @@ def _dataclass_json(value: object) -> dict[str, object]:
     return {
         item.name: _enum_json(getattr(value, item.name))
         for item in fields(value)  # type: ignore[arg-type]
+        if not (item.metadata.get("omit_none") and getattr(value, item.name) is None)
     }
 
 

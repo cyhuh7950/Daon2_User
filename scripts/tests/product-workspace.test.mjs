@@ -2318,3 +2318,59 @@ test("마인드맵 노드의 '이 개념으로 질문'은 입력창을 채우고
     assert.equal(calls[1].knowledgeContext.resources.length, 3);
   } finally { await workspace.cleanup(); }
 });
+
+test("승인 지식 답변은 근거 사용으로 표시되고 본문 형식과 문서명이 보이며 Enter로 전송된다", async () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const output = await mkdtemp(path.join(root, ".workspace-approved-answer-react-"));
+  const dom = installMinimalDom();
+  let reactRoot;
+  try {
+    const { build } = await import("vite");
+    const { createElement, act } = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    await build({ configFile: false, logLevel: "silent", root, build: {
+      outDir: output, emptyOutDir: false,
+      lib: { entry: path.join(root, "packages/ui/src/product-workspace-shell.jsx"), formats: ["es"], fileName: "approved-answer" },
+      rollupOptions: { external: ["react", "react-dom", "react-dom/client"] },
+    } });
+    const entry = (await readdir(output)).find((name) => name.startsWith("approved-answer") && /\.m?js$/u.test(name));
+    const { ProductWorkspaceShell } = await import(`${pathToFileURL(path.join(output, entry)).href}?approved=${Date.now()}`);
+    const calls = [];
+    const citation = { citation_id: "extcit-1", source_id: "doc-1", source_version_id: "ver-1", evidence_span_id: "block-1", page: 3, origin: "mcp_daon_rag", context_item_id: "wp-1", locator: { kind: "section", value: "block-1" }, document_name: "제안요청서.pdf" };
+    const effectAdapter = {
+      ...adapter,
+      async listSources() { return []; },
+      async listStudioOutputs() { return []; },
+      citationUrl: () => "/bff/api/workspaces/workspace-1/citations/extcit-1/content?notebook_id=notebook-1",
+      async askQuestion(input) {
+        calls.push(input);
+        return { run_id: "run-approved", run_result_id: "result-approved", answer: "요약입니다.\n\n- **자격**: 등록 업체\n- 서류 제출", insufficient: false, citations: [citation] };
+      },
+    };
+    const container = dom.document.createElement("div"); dom.document.body.appendChild(container);
+    reactRoot = createRoot(container);
+    await act(async () => { reactRoot.render(createElement(ProductWorkspaceShell, { workspaceId: "workspace-1", adapter: effectAdapter })); await Promise.resolve(); await Promise.resolve(); });
+    const textarea = findElements(container, (node) => node.tagName === "TEXTAREA")[0];
+    const props = () => textarea[Object.keys(textarea).find((key) => key.startsWith("__reactProps$"))];
+    textarea.value = "제안서 작업을 확인해";
+    await act(async () => props().onChange({ currentTarget: textarea, target: textarea }));
+    const key = (overrides) => ({ key: "Enter", shiftKey: false, nativeEvent: { isComposing: false, keyCode: 13 }, preventDefault() {}, ...overrides });
+    await act(async () => props().onKeyDown(key({ nativeEvent: { isComposing: true, keyCode: 229 } })));
+    await act(async () => props().onKeyDown(key({ shiftKey: true })));
+    assert.equal(calls.length, 0);
+    await act(async () => { props().onKeyDown(key()); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    assert.equal(calls.length, 1);
+    assert.doesNotMatch(container.textContent, /근거 미사용/u);
+    assert.match(container.textContent, /승인 지식 사용/u);
+    assert.doesNotMatch(container.textContent, /\*\*/u);
+    const message = findElements(container, (node) => node.tagName === "ARTICLE" && node.getAttribute("class") === "assistant-message")[0];
+    assert.deepEqual(findElements(message, (node) => node.tagName === "STRONG").map((node) => node.textContent), ["자격"]);
+    assert.deepEqual(findElements(message, (node) => node.tagName === "LI").map((node) => node.textContent), ["자격: 등록 업체", "서류 제출"]);
+    const link = findElements(container, (node) => node.tagName === "A" && /제안요청서/u.test(node.textContent))[0];
+    assert.equal(link.textContent, "제안요청서.pdf 3쪽");
+    assert.equal(link.getAttribute("target"), "_blank");
+  } finally {
+    if (reactRoot) await import("react").then(({ act }) => act(async () => reactRoot.unmount()));
+    dom.restore(); await rm(output, { recursive: true, force: true });
+  }
+});

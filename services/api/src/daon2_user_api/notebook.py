@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import RLock
 from typing import Callable, Protocol
@@ -101,6 +101,7 @@ class NotebookConversationCitation:
     origin: str
     context_item_id: str
     locator: dict[str, str]
+    document_name: str | None = field(default=None, metadata={"omit_none": True})
 
 
 @dataclass(frozen=True, slots=True)

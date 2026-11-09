@@ -92,7 +92,7 @@ class NotebookCopyService:
                     "AND run_result_id=ANY(%s) ORDER BY record_id",
                     (context.tenant_id, context.workspace_id, result_ids)).fetchall() if result_ids else []
                 external_rows = connection.execute(
-                    "SELECT run_result_id,citation_id,document_id,document_version_id,block_id,page,work_package_id FROM question_external_citations "
+                    "SELECT run_result_id,citation_id,document_id,document_version_id,block_id,page,work_package_id,document_name FROM question_external_citations "
                     "WHERE tenant_id=%s AND workspace_id=%s AND run_result_id=ANY(%s) ORDER BY citation_id",
                     (context.tenant_id, context.workspace_id, result_ids)).fetchall() if result_ids else []
         except NotebookError:
@@ -109,10 +109,11 @@ class NotebookCopyService:
                 "context_item_id": data.get("context_item_id", data.get("source_version_id")),
                 "locator": data.get("locator") or {"kind": "page", "value": str(data.get("page"))},
             })
-        for result_id, citation_id, document_id, version_id, block_id, page, package_id in external_rows:
+        for result_id, citation_id, document_id, version_id, block_id, page, package_id, document_name in external_rows:
             citations.setdefault(str(result_id), []).append({
                 "citation_id": str(citation_id), "source_id": str(document_id), "source_version_id": str(version_id), "evidence_span_id": str(block_id),
                 "page": int(page), "origin": "mcp_daon_rag", "context_item_id": str(package_id), "locator": {"kind": "section", "value": str(block_id)},
+                **({"document_name": str(document_name)[:1024]} if document_name else {}),
             })
         turns: list[dict[str, Any]] = []
         for run_id, created_at, state, run_json, result_id, result_json, blocked in reversed(rows):

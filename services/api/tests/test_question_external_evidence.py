@@ -577,6 +577,13 @@ class RepositoryTests(unittest.TestCase):
         insert = next(p for s, p in self.store.connection.statements if s.startswith("INSERT INTO question_external_citations"))
         self.assertIn("외부 b1", insert)
         self.assertIn("nb-a", insert)
+        self.assertEqual(citation.document_name, "약관.pdf")
+
+    def test_only_external_citations_show_a_document_name(self):
+        from daon2_user_api.question_answering_postgres import StoredCitation
+        from daon2_user_api.runtime import _dataclass_json
+        self.assertNotIn("document_name", _dataclass_json(StoredCitation("c", "s", "v", "e", 1)))
+        self.assertEqual(_dataclass_json(StoredCitation("c", "s", "v", "e", 1, document_name="약관.pdf"))["document_name"], "약관.pdf")
 
     def test_external_citation_requires_a_notebook(self):
         from dataclasses import replace

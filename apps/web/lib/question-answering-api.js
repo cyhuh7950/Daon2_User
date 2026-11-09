@@ -1,4 +1,5 @@
 import { secureUuid } from "@daon2-user/ui/secure-uuid";
+import { citationKeys, validCitationDocumentName } from "./citation-document-name.js";
 import { parseImageRegion } from "@daon2-user/ui/product-workspace-model";
 import { parseSheetCell } from "./sheet-cell-locator.js";
 import { parseDocxBlock } from "./docx-block-locator.js";
@@ -50,7 +51,8 @@ function isCitationLocator(value) {
 }
 
 function isGroundedCitation(value) {
-  return hasExactKeys(value, ["citation_id", "source_id", "source_version_id", "evidence_span_id", "page", "origin", "context_item_id", "locator"])
+  return hasExactKeys(value, citationKeys(value))
+    && validCitationDocumentName(value)
     && isSafeId(value.citation_id)
     && isSafeId(value.source_id)
     && isSafeId(value.source_version_id)

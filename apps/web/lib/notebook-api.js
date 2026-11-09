@@ -1,5 +1,6 @@
 "use client";
 import { parseImageRegion } from "@daon2-user/ui/product-workspace-model";
+import { citationKeys, validCitationDocumentName } from "./citation-document-name.js";
 import { parseSheetCell } from "./sheet-cell-locator.js";
 import { parseDocxBlock } from "./docx-block-locator.js";
 import { parsePptxBlock } from "./pptx-block-locator.js";
@@ -75,10 +76,10 @@ function validSession(value) {
 }
 
 function validCitation(value) {
-  return exact(value, ["citation_id", "source_id", "source_version_id", "evidence_span_id", "page", "origin", "context_item_id", "locator"])
+  return exact(value, citationKeys(value)) && validCitationDocumentName(value)
     && ["citation_id", "source_id", "source_version_id", "evidence_span_id", "context_item_id"].every((key) => safeId(value[key]))
     && Number.isSafeInteger(value.page) && value.page >= 1
-    && ["raw_source", "daon_knowledge"].includes(value.origin)
+    && ["raw_source", "daon_knowledge", "mcp_daon_rag"].includes(value.origin)
     && exact(value.locator, ["kind", "value"])
     && ["page", "section", "image_region", "sheet_cell", "docx_block", "pptx_block", "audio_segment"].includes(value.locator.kind)
     && typeof value.locator.value === "string" && value.locator.value.length >= 1 && value.locator.value.length <= 255
