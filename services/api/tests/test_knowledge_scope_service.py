@@ -82,6 +82,15 @@ class CatalogTests(unittest.TestCase):
         self.service([{"scopes": [scope()], "next_cursor": None}]).catalog(CTX)
         self.assertIsNone(self.connectors.calls[0][0].owner_tenant_id)
 
+    def test_daon2_connection_is_found_when_verified(self):
+        connectors = _Connectors([], connectors=[{"connector_id": "kc-d", "kind": "daon2", "status": "verified"}])
+        context, connector_id = KnowledgeScopeService(_Store(), connectors).daon2_target(CTX)
+        self.assertEqual((connector_id, context.workspace_id), ("kc-d", "ws-a"))
+
+    def test_daon2_connection_is_optional_and_virtual_is_ignored(self):
+        connectors = _Connectors([], connectors=[{"connector_id": "kc-v", "kind": "daon2", "status": "verified", "virtual": True}])
+        self.assertIsNone(KnowledgeScopeService(_Store(), connectors).daon2_target(CTX))
+
     def test_call_carries_workspace_for_egress_decision(self):
         self.service([{"scopes": [], "next_cursor": None}]).catalog(CTX)
         context = self.connectors.calls[0][0]

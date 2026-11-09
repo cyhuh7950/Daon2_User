@@ -153,6 +153,85 @@ def target(*names):
     return EvidenceTarget(SimpleNamespace(tenant_id="tenant-a"), "kc-rag", packages)
 
 
+def daon2_target(*names):
+    base = target(*names)
+    packages = tuple({**item, "tenant_id": "t-1"} for item in base.packages)
+    return EvidenceTarget(base.connector_context, base.connector_id, packages, "ctx-daon2", "kc-daon2")
+
+
+CONCEPT = {"concept_id": "c1", "label": "보험금 지급", "definition": "지급 절차를 규정한다.", "parents": [{"label": "주계약"}], "children": [{"label": "지급기준표"}], "snapshot_id": "s1", "provenance": "EXPERT_APPROVED"}
+RULE = {"ruleset_id": "r1", "revision": 6, "name": "제외기간 규칙", "purpose": "90일 제외기간을 판단한다", "formal": {"if": [], "then": []}, "published": True, "provenance": "EXPERT_APPROVED"}
+
+
+class _ToolConnectors:
+    def __init__(self, **responses):
+        self.responses, self.calls = responses, []
+
+    def call(self, context, connector_id, tool, arguments):
+        self.calls.append((context, connector_id, tool, dict(arguments)))
+        response = self.responses[tool]
+        if isinstance(response, Exception):
+            raise response
+        return SimpleNamespace(structured=response, is_error=False)
+
+
+class Daon2KnowledgeTests(unittest.TestCase):
+    def finder(self, **responses):
+        self.connectors = _ToolConnectors(**responses)
+        return NotebookKnowledgeEvidence(_Scopes([]), self.connectors)
+
+    def ontology(self, **over):
+        return self.finder(ontology_search_concepts={"concepts": [{"concept_id": "c1", "snapshot_id": "s1", "score": 0.8, "provenance": "EXPERT_APPROVED"}]}, ontology_get_concept={**CONCEPT, **over})
+
+    def test_kinds_are_offered_only_with_a_daon2_connection(self):
+        self.assertNotIn("ontology", build_plan_prompt("질문", (), target("A")))
+        prompt = build_plan_prompt("질문", (), daon2_target("A"))
+        self.assertIn("ontology", prompt)
+        self.assertIn("ruleset", prompt)
+
+    def test_plan_keeps_the_chosen_kind(self):
+        raw = json.dumps({"requests": [{"knowledge": "ontology", "package": "P1", "query": "보험금"}, {"knowledge": "rag", "package": "P1", "query": "기준"}]}, ensure_ascii=False)
+        self.assertEqual(parse_plan(raw, daon2_target("A")), (("P1", "보험금", "ontology"), ("P1", "기준")))
+
+    def test_ontology_request_returns_definition_as_evidence(self):
+        found = self.ontology().run(daon2_target("A"), (("P1", "보험금", "ontology"),))
+        self.assertEqual([c[2] for c in self.connectors.calls], ["ontology_search_concepts", "ontology_get_concept"])
+        self.assertEqual(self.connectors.calls[0][0:2], ("ctx-daon2", "kc-daon2"))
+        self.assertEqual(self.connectors.calls[0][3]["scope"], {"tenant_id": "t-1", "project_id": "p1", "work_package_id": "w1"})
+        item = found[0]
+        self.assertEqual((item.document_name, item.document_id, item.document_version_id, item.block_id, item.connector_id), ("온톨로지 · 보험금 지급", "c1", "s1", "c1", "kc-daon2"))
+        for part in ("보험금 지급", "지급 절차를 규정한다.", "주계약", "지급기준표"):
+            self.assertIn(part, item.text)
+
+    def test_unapproved_concept_is_not_used(self):
+        self.assertEqual(self.ontology(provenance="DRAFT").run(daon2_target("A"), (("P1", "보험금", "ontology"),)), ())
+
+    def test_ruleset_request_returns_rule_as_evidence(self):
+        finder = self.finder(ruleset_list={"rulesets": [{"ruleset_id": "r1", "published": True, "provenance": "EXPERT_APPROVED"}, {"ruleset_id": "r2", "published": False, "provenance": "EXPERT_APPROVED"}]}, ruleset_get=RULE)
+        found = finder.run(daon2_target("A"), (("P1", "제외기간", "ruleset"),))
+        self.assertEqual([c[2] for c in self.connectors.calls], ["ruleset_list", "ruleset_get"])
+        self.assertEqual(found[0].document_name, "규칙 · 제외기간 규칙")
+        self.assertIn("90일 제외기간", found[0].text)
+
+    def test_package_without_ready_knowledge_is_skipped(self):
+        self.assertEqual(self.finder(ontology_search_concepts=McpError("NOT_READY")).run(daon2_target("A"), (("P1", "보험금", "ontology"),)), ())
+
+    def test_real_failure_stops_the_question(self):
+        with self.assertRaises(ExternalEvidenceError):
+            self.finder(ontology_search_concepts=McpError("UPSTREAM_UNAVAILABLE", retryable=True)).run(daon2_target("A"), (("P1", "보험금", "ontology"),))
+
+    def test_calls_stop_at_the_limit(self):
+        concepts = [{"concept_id": f"c{i}", "snapshot_id": "s1", "score": 0.5, "provenance": "EXPERT_APPROVED"} for i in range(3)]
+        finder = self.finder(ontology_search_concepts={"concepts": concepts}, ontology_get_concept=CONCEPT)
+        finder.run(daon2_target("A", "B", "C"), tuple((f"P{i}", f"q{j}", "ontology") for i in (1, 2, 3) for j in (1, 2, 3)))
+        self.assertLessEqual(len(self.connectors.calls), 8)
+
+    def test_evidence_heading_has_no_page_for_ontology(self):
+        found = self.ontology().run(daon2_target("A"), (("P1", "보험금", "ontology"),))
+        text = merge_evidence((), found)[0].text
+        self.assertTrue(text.startswith("[온톨로지 · 보험금 지급] "), text[:30])
+
+
 class PlanTests(unittest.TestCase):
     def test_prompt_has_question_history_and_aliases_but_no_ids(self):
         text = build_plan_prompt("평가 기준은?", (("이전 질문", "이전 답변"),), target("제안서 작업"))

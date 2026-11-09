@@ -87,6 +87,13 @@ class KnowledgeScopeService:
             raise KnowledgeScopeError("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409)
         return connector_context, connector
 
+    def daon2_target(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, str] | None:
+        """온톨로지·규칙을 읽는 실제 Daon2 연결. 없으면 그 지식 종류를 LLM에게 보이지 않는다."""
+        connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version, self._shared_connector_tenant)
+        connector = next((item for item in self._connectors.list(connector_context)
+                          if item["kind"] == "daon2" and item["status"] == "verified" and not item.get("virtual")), None)
+        return None if connector is None else (connector_context, connector["connector_id"])
+
     def _read_approved(self, connector_context: ConnectorContext, connector: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
         found: dict[tuple[str, str], Mapping[str, Any]] = {}
         cursor: str | None = None
