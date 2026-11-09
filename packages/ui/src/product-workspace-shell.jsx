@@ -14,6 +14,7 @@ import { StudioIcon } from "./studio-icon.js";
 import "./studio-icon.css";
 import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
+import { approvedKnowledgeCitationLabel, citationKeys, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -591,7 +592,8 @@ export function projectSafeQuestionAnswer(answer, workspaceId, citationUrl, sele
       && (citation.locator.kind !== "docx_block" || parseDocxBlock(citation.locator.value) !== null)
       && (citation.locator.kind !== "pptx_block" || parsePptxBlock(citation.locator.value) !== null)
       && (citation.locator.kind !== "audio_segment" || parseAudioSegment(citation.locator.value) !== null);
-    const validCitation = hasExactKeys(citation, ["citation_id", "source_id", "source_version_id", "evidence_span_id", "page", "origin", "context_item_id", "locator"])
+    const validCitation = hasExactKeys(citation, citationKeys(citation))
+      && validCitationDocumentName(citation)
       && isSafeDtoId(citation.citation_id)
       && isSafeDtoId(citation.source_id)
       && isSafeDtoId(citation.source_version_id)
@@ -626,6 +628,16 @@ export function projectSafeQuestionAnswer(answer, workspaceId, citationUrl, sele
     return { ...citation, content_url: contentUrl };
   });
   return { ...answer, citations };
+}
+
+function AnswerSegments({ segments }) {
+  return segments.map((part, index) => part.bold ? <strong key={index}>{part.text}</strong> : <span key={index}>{part.text}</span>);
+}
+
+function AnswerText({ text }) {
+  return parseAnswerBlocks(text).map((block, index) => block.type === "list"
+    ? <ul className="answer-list" key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}><AnswerSegments segments={item} /></li>)}</ul>
+    : <p key={index}><AnswerSegments segments={block.segments} /></p>);
 }
 
 // 서버에 저장된 대화(질문·답변·실패)를 대화창 항목으로 바꾼다. 인용 검증은 그 답변이 가진 근거 범위로 한다.
@@ -803,6 +815,12 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [memoSave, setMemoSave] = useState({ pending: false, notice: null, error: null });
   const [questionScopeNotice, setQuestionScopeNotice] = useState(null);
   const questionInputRef = useRef(null);
+  const refocusQuestionRef = useRef(false);
+  useEffect(() => {
+    if (questionPending || !refocusQuestionRef.current) return;
+    refocusQuestionRef.current = false;
+    questionInputRef.current?.focus?.();
+  }, [questionPending]);
   // 마인드맵 노드 질문(S2-05): 이번 한 번의 질문 범위만 노드 근거 Source로 바꾼다. 소스 체크 상태는 바꾸지 않는다.
   const temporaryScopeRef = useRef(null);
   const askAboutNode = ({ label, sourceVersionIds = [] }) => {
@@ -2189,7 +2207,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             if (!turns.length) return <div className="conversation-empty"><span className="conversation-orbit" aria-hidden="true">✦</span><h3>{viewState.selectedSource || selectedKnowledgeId ? "Source에 대해 무엇이든 물어보세요." : "Source를 추가한 뒤 질문하세요."}</h3><p>{viewState.selectedSource || selectedKnowledgeId ? "선택한 Source의 근거와 Citation을 사용해 답합니다." : "답변은 Source가 제공한 지식으로만 만듭니다. Source가 없으면 모델을 호출하지 않습니다."}</p></div>;
             const renderCitations = (answerValue) => (
           <div className="citation-row">{answerValue?.citations?.map((citation) => (
-            <a key={citation.citation_id} href={citation.content_url} onClick={(event) => {
+            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => {
+              if (citation.origin === "mcp_daon_rag") return;
               if(citation.origin==='raw_source' && citation.locator.kind==='section' && /^law-source-[0-9a-f]{32}$/u.test(citation.source_id)){
                 event.preventDefault();lawCitationRequest.current?.abort();const controller=new AbortController();lawCitationRequest.current=controller;
                 const epoch=questionEpochRef.current;setLawCitation({citation,epoch,content:null,error:null});
@@ -2276,7 +2295,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               }).catch((error) => {
                 setViewState((current) => ({ ...current, status: "error", safeError: safeErrorCode(error, "CITATION_RESPONSE_INVALID") }));
               });
-            }}>Citation · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</a>
+            }}>{citation.origin === "mcp_daon_rag" ? approvedKnowledgeCitationLabel(citation) : <>Citation · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
           ))}</div>
             );
             return turns.map((turn, index) => {
@@ -2285,7 +2304,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 {turn.question ? <article className="user-message"><div><span className="message-author">나</span><p>{turn.question}</p></div></article> : null}
                 {turn.pending ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
                 {turn.error ? <div className="inline-alert compact" role="alert">{turn.error === "QUESTION_CANCELLED" ? "질문이 중단되었습니다." : turn.error === "CONVERSATION_TURN_UNAVAILABLE" ? "이 답변은 접근 권한이 바뀌어 표시할 수 없습니다." : turn.error === "SELECTED_MODEL_UNAVAILABLE" ? "선택한 모델을 사용할 수 없어 답변하지 못했습니다. 다른 모델로 자동 전환하지 않습니다. 모델을 다시 고르거나 기본 모델로 되돌려 주세요." : `질문 실행에 실패했습니다. (${turn.error}) 입력을 확인한 뒤 다시 제출해 주세요.`}</div> : null}
-                {turn.answer ? <article className="assistant-message"><div className="assistant-avatar" aria-hidden="true">D</div><div><span className="message-author">Daon</span><p>{turn.answer.answer}</p>
+                {turn.answer ? <article className="assistant-message"><div className="assistant-avatar" aria-hidden="true">D</div><div><span className="message-author">Daon</span><AnswerText text={turn.answer.answer} />
                   <div className="answer-actions" role="group" aria-label="답변 작업">
                     {adapter?.studioV2 ? <button type="button" className="answer-action" disabled={turn.answer.insufficient === true || memoSave.pending} onClick={() => void saveAnswerToMemo(turn.answer)}>메모에 저장</button> : null}
                     <button type="button" className="answer-action" onClick={() => void copyAnswer(turn.answer)}>복사</button>
@@ -2293,7 +2312,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   {last && memoSave.notice ? <p className="context-selection-status" role="status">{memoSave.notice}</p> : null}
                   {last && memoSave.error ? <p className="inline-alert compact" role="alert">{memoSave.error}</p> : null}</div></article> : null}
                 {turn.answer?.insufficient ? <div className="context-selection-status" role="status"><strong>근거 부족</strong>{turn.answer.next_actions?.length ? <ul>{turn.answer.next_actions.map((action, actionIndex) => <li key={actionIndex}>{action}</li>)}</ul> : null}</div> : null}
-                {last && !turn.answer?.insufficient && (viewState.answerIntent === "general_ungrounded" || viewState.answerIntent === "work_support_ungrounded")
+                {!turn.answer?.insufficient && usesApprovedKnowledge(turn.answer) ? <div className="context-selection-status" role="status">승인 지식 사용</div> : null}
+                {last && !turn.answer?.insufficient && !usesApprovedKnowledge(turn.answer) && (viewState.answerIntent === "general_ungrounded" || viewState.answerIntent === "work_support_ungrounded")
                   ? <div className="context-selection-status" role="status">작업 상담 · 근거 미사용</div> : null}
                 {last && !turn.answer?.insufficient && viewState.answerIntent === "work_support_source_backed"
                   ? <div className="context-selection-status" role="status">작업 상담 · Source 사용</div> : null}
@@ -2326,7 +2346,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             </div>}
           </section> : null}</div><form className="conversation-composer" onSubmit={askQuestion}>
             <ModelSelectionBar studio={adapter?.studioV2} disabled={questionPending} />
-            <label><span className="sr-only">질문</span><textarea rows="1" ref={questionInputRef} disabled={questionPending} placeholder={viewState.selectedSource || selectedKnowledgeId ? "선택한 지식과 작업에 대해 질문하세요" : "작업 내용이나 궁금한 점을 질문하세요"} value={question} onChange={(event) => setQuestion(event.currentTarget.value)} /></label>
+            <label><span className="sr-only">질문</span><textarea rows="1" ref={questionInputRef} disabled={questionPending} placeholder={viewState.selectedSource || selectedKnowledgeId ? "선택한 지식과 작업에 대해 질문하세요" : "작업 내용이나 궁금한 점을 질문하세요"} value={question} onChange={(event) => setQuestion(event.currentTarget.value)} onKeyDown={(event) => { if (!shouldSubmitOnEnter(event)) return; refocusQuestionRef.current = true; void askQuestion(event); }} /></label>
             <button className="composer-submit" type="submit" aria-label="질문 실행" disabled={questionPending || !question.trim()}>↑</button>
           </form></div>}
         </SafePane>

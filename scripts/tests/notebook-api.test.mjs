@@ -323,3 +323,23 @@ test("Source 목록은 exact DTO를 유지하고 safe retryable을 보존한다"
     /SOURCE_LIST_RESPONSE_INVALID/u,
   );
 });
+
+test('승인 지식 답변이 저장된 노트북도 다시 열리고 문서명이 유지된다', async () => {
+  const external = { citation_id:'extcit-1', source_id:'doc-1', source_version_id:'ver-1', evidence_span_id:'block-1', page:3,
+    origin:'mcp_daon_rag', context_item_id:'wp-1', locator:{ kind:'section', value:'block-1' }, document_name:'제안요청서.pdf' };
+  const context = (citation) => ({ notebook_id:'notebook-1', sources:[], knowledge_context_ids:[], conversation_thread_ids:['thread-1'], studio_output_ids:[],
+    output_version_ids:[], generation_settings_ids:[], source_deletion_requests:[], conversation:{ conversation_thread_id:'thread-1',
+      answer:{ run_id:'run-selected', run_result_id:'result-1', answer:'저장 답변', insufficient:false, citations:[citation] } } });
+  const load = (citation) => getNotebookContext('workspace-1', 'notebook-1', { fetchImpl: async () => json({ data:context(citation), meta:META }, { headers:{ ETag:'"notebook-binding:1"' } }) });
+  await load(external);
+  const { document_name: _omitted, ...withoutName } = external;
+  await load(withoutName);
+  await assert.rejects(load({ ...external, origin:'mcp_unknown' }), /NOTEBOOK_CONTEXT_INVALID/u);
+  await assert.rejects(load({ ...external, origin:'raw_source' }), /NOTEBOOK_CONTEXT_INVALID/u);
+  await assert.rejects(load({ ...external, document_name:'' }), /NOTEBOOK_CONTEXT_INVALID/u);
+  const projected = projectNotebookSelectedContext(context(external));
+  assert.equal(projected.conversation.answer.citations[0].document_name, '제안요청서.pdf');
+  assert.equal(projectNotebookSelectedContext(context(withoutName)).conversation.answer.citations[0].document_name, undefined);
+  assert.equal('document_name' in projectNotebookSelectedContext(context(withoutName)).conversation.answer.citations[0], false);
+  assert.throws(() => projectNotebookSelectedContext(context({ ...external, origin:'raw_source' })), /NOTEBOOK_CONTEXT_INVALID/u);
+});

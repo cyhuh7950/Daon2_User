@@ -132,3 +132,6 @@
 .adaptive-workspace .conversation-composer > label:not(.model-selection-bar *) { flex: 1 1 200px; }
 .adaptive-workspace .conversation-composer .model-selection-bar { flex: 0 1 auto; flex-wrap: nowrap; }
 .adaptive-workspace .composer-submit { width: 34px; height: 34px; font-size: 15px; }
+.assistant-message ul.answer-list { margin: 3px 0; padding-left: 18px; }
+.assistant-message ul.answer-list li { margin: 2px 0; }
+.citation-row a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

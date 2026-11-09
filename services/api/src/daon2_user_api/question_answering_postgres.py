@@ -9,7 +9,7 @@ from .authorization import Action
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Mapping, cast
 
@@ -96,6 +96,7 @@ class StoredCitation:
     origin: str = "raw_source"
     context_item_id: str = ""
     locator: Mapping[str, str] | None = None
+    document_name: str | None = field(default=None, metadata={"omit_none": True})
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,13 +483,13 @@ class PostgresQuestionAnsweringRepository:
     @staticmethod
     def _external_citations(connection, context: QuestionContext, run_result_ids: list[str]) -> dict[str, tuple[StoredCitation, ...]]:
         rows = connection.execute(
-            "SELECT run_result_id,citation_id,document_id,document_version_id,block_id,page,work_package_id FROM question_external_citations "
+            "SELECT run_result_id,citation_id,document_id,document_version_id,block_id,page,work_package_id,document_name FROM question_external_citations "
             "WHERE tenant_id=%s AND workspace_id=%s AND run_result_id=ANY(%s) ORDER BY citation_id",
             (context.tenant_id, context.workspace_id, run_result_ids)).fetchall()
         grouped: dict[str, list[StoredCitation]] = {}
         for row in rows:
             grouped.setdefault(str(row[0]), []).append(StoredCitation(
-                str(row[1]), str(row[2]), str(row[3]), str(row[4]), int(row[5]), EXTERNAL_RAG_ORIGIN, str(row[6]), {"kind": "section", "value": str(row[4])}))
+                str(row[1]), str(row[2]), str(row[3]), str(row[4]), int(row[5]), EXTERNAL_RAG_ORIGIN, str(row[6]), {"kind": "section", "value": str(row[4])}, str(row[7])[:1024] if row[7] else None))
         return {key: tuple(value) for key, value in grouped.items()}
 
     def _read_external_citation(self, context: QuestionContext, citation_id: str) -> tuple[CitationContent, dict[str, str]]:
@@ -1605,7 +1606,7 @@ class PostgresQuestionAnsweringRepository:
         )
         external_rows = tuple(
             (StoredCitation(self._opaque_id("extcit", run_result_id, item.chunk.chunk_id), item.document_id, item.document_version_id, item.block_id, item.page,
-                            EXTERNAL_RAG_ORIGIN, item.work_package_id, {"kind": "section", "value": item.block_id}), item)
+                            EXTERNAL_RAG_ORIGIN, item.work_package_id, {"kind": "section", "value": item.block_id}, item.document_name[:1024] if item.document_name else None), item)
             for item in external_citations
         )
         try:

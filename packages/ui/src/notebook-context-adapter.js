@@ -1,4 +1,5 @@
 import { parseSheetCell, parseImageRegion } from "./product-workspace-model.js";
+import { citationKeys, validCitationDocumentName } from "./answer-presentation.js";
 import { parseDocxBlock } from "./shared-docx-block.js";
 import { parsePptxBlock } from "./shared-pptx-block.js";
 import { parseAudioSegment } from "./shared-audio-segment.js";
@@ -27,10 +28,10 @@ function safeIds(value) {
 }
 
 function validCitation(value) {
-  return exact(value, ["citation_id", "source_id", "source_version_id", "evidence_span_id", "page", "origin", "context_item_id", "locator"])
+  return exact(value, citationKeys(value)) && validCitationDocumentName(value)
     && ["citation_id", "source_id", "source_version_id", "evidence_span_id", "context_item_id"].every((key) => safeId(value[key]))
     && Number.isSafeInteger(value.page) && value.page >= 1
-    && ["raw_source", "daon_knowledge"].includes(value.origin)
+    && ["raw_source", "daon_knowledge", "mcp_daon_rag"].includes(value.origin)
     && exact(value.locator, ["kind", "value"])
     && ["page", "section", "image_region", "sheet_cell", "docx_block", "pptx_block", "audio_segment"].includes(value.locator.kind)
     && typeof value.locator.value === "string" && value.locator.value.length >= 1
@@ -54,6 +55,7 @@ function projectCitation(value) {
     source_version_id: value.source_version_id, evidence_span_id: value.evidence_span_id,
     page: value.page, origin: value.origin, context_item_id: value.context_item_id,
     locator: Object.freeze({ kind: value.locator.kind, value: value.locator.value }),
+    ...("document_name" in value ? { document_name: value.document_name } : {}),
   });
 }
 

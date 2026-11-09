@@ -270,3 +270,12 @@ test("승인 지식 인용 종류는 질문 응답에서 허용되고 알 수 �
   assert.equal((await answer("mcp_daon_rag")).citations[0].origin, "mcp_daon_rag");
   await assert.rejects(answer("mcp_unknown"));
 });
+
+test("문서명은 승인 지식 인용에만 허용된다", async () => {
+  const answer = (extra) => request(envelope({ ...answerData, citations: [{ ...citation, citation_id: "extcit-1", origin: "mcp_daon_rag", locator: { kind: "section", value: "span-1" }, ...extra }] }));
+  assert.equal((await answer({ document_name: "제안요청서.pdf" })).citations[0].document_name, "제안요청서.pdf");
+  await assert.rejects(answer({ document_name: "" }));
+  await assert.rejects(answer({ document_name: 3 }));
+  await assert.rejects(answer({ document_name: "가".repeat(1025) }));
+  await assert.rejects(answer({ origin: "raw_source", document_name: "제안요청서.pdf" }));
+});

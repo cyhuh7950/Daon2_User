@@ -7048,7 +7048,8 @@
           "source_version_id": { "$ref": "#/components/schemas/OpaqueId" },
           "evidence_span_id": { "$ref": "#/components/schemas/OpaqueId" },
           "page": { "type": "integer", "minimum": 1 },
-          "origin": { "type": "string", "enum": ["raw_source", "daon_knowledge"] },
+          "origin": { "type": "string", "enum": ["raw_source", "daon_knowledge", "mcp_daon_rag"] },
+          "document_name": { "type": "string", "minLength": 1, "maxLength": 1024 },
           "context_item_id": { "$ref": "#/components/schemas/OpaqueId" },
           "locator": { "$ref": "#/components/schemas/CitationLocator" }
         }
