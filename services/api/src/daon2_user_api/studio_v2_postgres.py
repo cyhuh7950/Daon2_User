@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import secrets
 from datetime import datetime, timezone
@@ -95,6 +96,13 @@ class PostgresStudioV2Repository:
             raise StudioError("NOTEBOOK_SCOPE_REQUIRED", 400)
         return context.notebook_id
 
+    @staticmethod
+    def _has_selected_knowledge(connection, context: StudioContext, notebook_id: str | None) -> bool:
+        if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") != "true" or notebook_id is None:
+            return False
+        return connection.execute("SELECT 1 FROM notebook_knowledge_scopes WHERE tenant_id=%s AND workspace_id=%s AND notebook_id=%s LIMIT 1",
+                                  (context.tenant_id, context.workspace_id, notebook_id)).fetchone() is not None
+
     def require_scope(self, connection, context: StudioContext, versions: Sequence[str]) -> None:
         self._scope._require_generation_scope(connection, context, versions)
 
@@ -169,10 +177,13 @@ class PostgresStudioV2Repository:
                     raise StudioError("IDEMPOTENCY_CONFLICT", 409)
                 return {"output_id": existing[0], "job_id": existing[3], "status": existing[1], "replayed": True}
             if spec.requires_llm or requested:
-                versions = list(dict.fromkeys(requested)) if requested else self.ready_source_versions(connection, context)
-                if not versions:
+                has_knowledge = self._has_selected_knowledge(connection, context, notebook_id)
+                # 소스를 하나도 고르지 않고 승인 지식만 고른 경우도 생성할 수 있다(WO-K4 4단계).
+                versions = list(dict.fromkeys(requested)) if requested else ([] if requested is not None and has_knowledge else self.ready_source_versions(connection, context))
+                if not versions and not has_knowledge:
                     raise StudioError("STUDIO_NO_READY_SOURCE", 409)
-                self.require_scope(connection, context, versions)
+                if versions:
+                    self.require_scope(connection, context, versions)
             else:
                 versions = []
             title = f"{TYPE_LABELS.get(str(type_id), str(type_id))} {self._clock().strftime('%Y-%m-%d %H:%M')}"

@@ -328,14 +328,14 @@ export function StudioPanelGate({ studio, fallback = null, ...props }) {
 }
 
 /** 셸용 진입점: 어댑터에 studioV2가 없으면 기존 Studio(fallback)를 그대로 보여준다. */
-export function StudioFallbackGate({ adapter, sources = [], unchecked = new Set(), fallback = null, onAskAboutNode, refreshToken = 0 }) {
+export function StudioFallbackGate({ adapter, sources = [], unchecked = new Set(), fallback = null, onAskAboutNode, refreshToken = 0, knowledgeCount = 0 }) {
   const studio = adapter?.studioV2;
   if (!studio) return fallback;
   const ready = sources.filter((source) => source.ready);
   const checked = ready.filter((source) => !unchecked.has(source.sourceVersionId)).map((source) => source.sourceVersionId);
   const processing = sources.filter((source) => !source.ready && ["processing", "queued", "pending", "uploaded"].includes(source.sourceState)).length;
   return <StudioPanelGate studio={studio} fallback={fallback} onAskAboutNode={onAskAboutNode} refreshToken={refreshToken} sources={sources}
-    checkedSourceVersionIds={checked} sourceStats={{ sourceCount: sources.length, checkedCount: checked.length, readySourceCount: ready.length, processingCount: processing }} />;
+    checkedSourceVersionIds={checked} sourceStats={{ sourceCount: sources.length, checkedCount: checked.length, readySourceCount: ready.length, processingCount: processing, knowledgeCount }} />;
 }
 
 export default StudioPanel;

@@ -12,7 +12,7 @@ const ERROR_TEXT = {
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const keyOf = (projectId, workPackageId) => JSON.stringify([projectId, workPackageId]);
 
-export function DaonKnowledgeScopeSection({ adapter }) {
+export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
   const [items, setItems] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [dialog, setDialog] = useState(null); // { status, projects, chosen: string[], error, pending }
@@ -26,6 +26,8 @@ export function DaonKnowledgeScopeSection({ adapter }) {
     });
     return () => controller.abort();
   }, [adapter]);
+
+  useEffect(() => { onCountChange?.(items.length); }, [items.length, onCountChange]);
 
   const opened = dialog !== null;
   useEffect(() => {

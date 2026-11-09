@@ -871,6 +871,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     return()=>{reconnectRequestRef.current?.controller.abort();reconnectRequestRef.current=null;};
   },[workspaceId,adapter]);
   const [selectedKnowledgeId, setSelectedKnowledgeId] = useState(null);
+  const [knowledgeCount, setKnowledgeCount] = useState(0);
   const [knowledgeSafeError, setKnowledgeSafeError] = useState(null);
   const [operationsStatus, setOperationsStatus] = useState(null);
   const [operationsPending, setOperationsPending] = useState(false);
@@ -2071,7 +2072,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {sourceAddError ? <div className="inline-alert compact" role="alert">Source를 등록하지 못했습니다.{sourceErrorHint(sourceAddError)} ({sourceAddError})</div> : null}
           </section> : null}
           {processing ? <p className="source-inline-state" role="status">처리 중 · 잠시만 기다려 주세요.</p> : null}
-          {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
+          {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} onCountChange={setKnowledgeCount} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
             <div className="source-group-heading"><h3 id="approved-knowledge-title">Daon 승인 지식</h3><span>{knowledgePackages.length}</span></div>
             <ul className="source-list knowledge-list" aria-label="Daon 승인 지식 목록">
               {knowledgePackages.map((item) => (
@@ -2351,7 +2352,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           </form></div>}
         </SafePane>
         <SafePane id="product-pane-studio" title={adapter?.studioV2 && !desktopStudio ? "스튜디오" : "업무 Studio"} description="근거가 확인된 답변으로 보고서를 생성하고 저장 결과를 확인합니다.">
-          {desktopStudio ? desktopStudio : <StudioFallbackGate adapter={adapter} sources={viewState.sources} unchecked={uncheckedSourceVersionIds} refreshToken={studioRefresh} onAskAboutNode={askAboutNode}
+          {desktopStudio ? desktopStudio : <StudioFallbackGate adapter={adapter} sources={viewState.sources} unchecked={uncheckedSourceVersionIds} knowledgeCount={knowledgeCount} refreshToken={studioRefresh} onAskAboutNode={askAboutNode}
             fallback={<><ProductStudioPane
             key={`${viewState.answer?.run_id ?? "no-run"}:${viewState.selectedSource?.sourceVersionId ?? "no-source"}`}
             adapter={adapter}

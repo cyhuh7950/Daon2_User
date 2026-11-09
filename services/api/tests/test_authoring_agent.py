@@ -171,6 +171,12 @@ class WritingTests(Base):
         self.run_job()
         self.assertEqual(self.finder.limits[0], 10)
 
+    def test_empty_plan_searches_with_the_subsection_title(self):
+        self.llm.plan = {"requests": []}
+        self.generating()
+        self.run_job()
+        self.assertIn("1.1 배경", self.finder.runs[0][0][1])
+
     def test_too_long_unit_is_asked_once_to_shorten(self):
         long_text = "평가 기준은 기술 90점이다. " * 200
         short = [{"text": "평가 기준은 기술 90점이다.", "refs": ["K1"]}]

@@ -71,9 +71,10 @@ export function pollInterval(outputs, hidden = false) {
 }
 
 // 타일 활성 규칙(설계서 §6.1): 유형 미제공 > 소스 없음 > 선택 0개 > 처리 중(준비된 소스가 없고 처리 중) > 활성.
-export function tileState(type, { sourceCount = 0, checkedCount = 0, readySourceCount = 0, processingCount = 0 } = {}) {
+export function tileState(type, { sourceCount = 0, checkedCount = 0, readySourceCount = 0, processingCount = 0, knowledgeCount = 0 } = {}) {
   if (!type || type.available !== true) return { enabled: false, reason: "unavailable" };
   if (type.type_id === "memo") return { enabled: true, reason: null };
+  if (knowledgeCount > 0) return { enabled: true, reason: null }; // 승인 지식을 골랐으면 소스 없이도 만들 수 있다
   if (sourceCount === 0) return { enabled: false, reason: "no_sources" };
   if (checkedCount === 0) return { enabled: false, reason: "none_selected" };
   if (readySourceCount === 0 && processingCount > 0) return { enabled: false, reason: "processing" };

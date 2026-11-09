@@ -20,6 +20,8 @@ test("타일 활성 규칙", () => {
   const report = { type_id: "report", available: true };
   assert.deepEqual(tileState({ type_id: "video_overview", available: false }, {}), { enabled: false, reason: "unavailable" });
   assert.equal(tileState(report, { sourceCount: 0 }).reason, "no_sources");
+  assert.deepEqual(tileState(report, { sourceCount: 0, knowledgeCount: 1 }), { enabled: true, reason: null });
+  assert.deepEqual(tileState(report, { sourceCount: 3, checkedCount: 0, knowledgeCount: 2 }), { enabled: true, reason: null });
   assert.equal(tileState(report, { sourceCount: 3, checkedCount: 0 }).reason, "none_selected");
   assert.equal(tileState(report, { sourceCount: 3, checkedCount: 2, readySourceCount: 0, processingCount: 1 }).reason, "processing");
   assert.equal(tileState(report, { sourceCount: 3, checkedCount: 2, readySourceCount: 0 }).reason, "no_sources");

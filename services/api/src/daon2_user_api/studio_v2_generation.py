@@ -67,6 +67,12 @@ class GeneratorRegistry:
     def register(self, generator: StudioGenerator) -> None:
         self._generators[generator.type_id] = generator
 
+    def attach_knowledge(self, knowledge: object) -> None:
+        for generator in self._generators.values():
+            attach = getattr(generator, "set_knowledge", None)
+            if callable(attach):
+                attach(knowledge)
+
     def get(self, type_id: str) -> StudioGenerator:
         generator = self._generators.get(type_id)
         if generator is None:
