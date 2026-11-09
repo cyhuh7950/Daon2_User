@@ -1344,6 +1344,11 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
         return;
       }
       setSourceAddError(errorCode);
+      if (sourceAddOpen) {
+        // 등록 실패 안내는 Source 추가 창에 있다. 목록은 실패한 것이 아니므로 다시 읽는다.
+        setLoadRevision((current) => current + 1);
+        return;
+      }
       setViewState(createProductWorkspaceState({
         status: "error",
         safeError: errorCode

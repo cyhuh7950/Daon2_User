@@ -122,6 +122,21 @@ test("DOCX upload consumer forwards original bytes/MIME/Notebook and never precl
   assert.equal(result.status,"accepted");assert.equal(result.processing_state,"vision_llm_understanding");
 });
 
+test("한글 파일 이름은 실제 브라우저 헤더로 보낼 수 있게 인코딩하고 영문 이름은 그대로 보낸다", async () => {
+  const accepted = { data: { source_id: "source-1", source_version_id: "version-1", object_id: "a".repeat(32), digest_sha256: "b".repeat(64), byte_size: 4, status: "accepted", replayed: false, processing_run_id: "run-1", processing_state: "processing", job_state: "pending" } };
+  const sent = async (name) => {
+    let headers;
+    await sourceApi.uploadSource("workspace-1", new File(["text"], name, { type: "text/plain" }), {
+      notebookId: "notebook-1", idempotencyKey: "filename-1",
+      fetchImpl: async (_url, init) => { headers = new Headers(init.headers); return Response.json(accepted, { status: 202 }); },
+    });
+    return headers.get("x-source-filename");
+  };
+  assert.equal(await sent("notes.txt"), "notes.txt");
+  assert.equal(await sent("한글 약관 100%.txt"), `UTF-8''${encodeURIComponent("한글 약관 100%.txt")}`);
+  assert.equal(await sent("UTF-8''notes.txt"), `UTF-8''${encodeURIComponent("UTF-8''notes.txt")}`);
+});
+
 test("Source 목록은 same-origin GET과 exact Safe DTO만 허용한다", async () => {
   const calls = [];
   const result = await listWorkspaceSources("workspace-1", {

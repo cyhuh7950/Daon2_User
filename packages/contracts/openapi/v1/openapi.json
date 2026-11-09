@@ -1128,7 +1128,8 @@
             "schema": {
               "type": "string",
               "pattern": "^[^/\\\\\\u0000-\\u001f]{1,251}\\.(pdf|txt|md|csv|png|jpg|jpeg)$",
-              "maxLength": 255
+              "maxLength": 2300,
+              "description": "ASCII 밖의 문자가 있는 이름은 UTF-8'' 뒤에 UTF-8 percent-encoding으로 보낸다."
             }
           },
           {

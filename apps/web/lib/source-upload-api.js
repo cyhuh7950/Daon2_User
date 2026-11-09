@@ -5,6 +5,14 @@ import { secureUuid } from "@daon2-user/ui/secure-uuid";
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const SAFE_DIGEST = /^[0-9a-f]{64}$/u;
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+const ENCODED_FILENAME_PREFIX = "UTF-8''";
+
+// 브라우저 fetch는 ISO-8859-1 밖의 문자가 든 헤더를 전송 전에 거부한다.
+function filenameHeader(name) {
+  return /^[\x20-\x7e]*$/u.test(name) && !name.startsWith(ENCODED_FILENAME_PREFIX)
+    ? name
+    : `${ENCODED_FILENAME_PREFIX}${encodeURIComponent(name)}`;
+}
 
 function uploadResponseError(payload, fallback) {
   const error = new Error(typeof payload?.error?.code === "string" ? payload.error.code : fallback);
@@ -47,7 +55,7 @@ export async function uploadSource(workspaceId, file, { notebookId, idempotencyK
       headers: {
         "Content-Type": file.type,
         "Idempotency-Key": key,
-        "X-Source-Filename": file.name,
+        "X-Source-Filename": filenameHeader(file.name),
         "X-Notebook-Id": notebookId,
       },
       body: file,

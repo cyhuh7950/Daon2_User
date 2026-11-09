@@ -181,6 +181,12 @@ test('Drive supported formats and exact 25MiB boundary retain browser MIME',asyn
     }
   }finally{await w.cleanup();}
 });
+test('upload failure shows only the upload error and reloads the Source list',async()=>{
+  let lists=0;const w=await mount({listSources:async()=>{lists++;return [];},uploadSource:async()=>{throw Error('SOURCE_UPLOAD_FAILED');}});
+  try {await select(w,file());const before=lists;await click(w,'Drive 파일 가져오기');await w.act(async()=>{await new Promise(r=>setTimeout(r,20));});
+    assert.match(w.container.textContent,/Source를 등록하지 못했습니다/);assert.doesNotMatch(w.container.textContent,/Source를 불러오지 못했습니다/);assert.ok(lists>before,'목록을 다시 읽어야 한다');}
+  finally{await w.cleanup();}
+});
 test('drive_retry_is_explicit and existing file tab still uploads on selection',async()=>{
   let calls=0;const w=await mount({uploadSource:async()=>{calls++;throw Error('SOURCE_UPLOAD_FAILED');}});
   try {await select(w,file());await click(w,'Drive 파일 가져오기');assert.equal(calls,1);await w.act(async()=>{await Promise.resolve();});assert.equal(calls,1);

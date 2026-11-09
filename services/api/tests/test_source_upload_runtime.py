@@ -7,6 +7,7 @@ import struct
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import quote
 
 import httpx
 
@@ -340,6 +341,40 @@ class SourceUploadRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(response.status_code, 202)
                 self.assertEqual(self.uploads.calls[-1]["content_type"], mime)
+
+    async def _upload_named(self, header_value: str, key: str):
+        with self._authenticated():
+            return await self.client.post(
+                "/api/v1/workspaces/workspace-001/sources",
+                content=b"plain source text",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={
+                    "Content-Type": "text/plain",
+                    "X-Source-Filename": header_value,
+                    "X-Notebook-Id": "notebook-001",
+                    "Idempotency-Key": key,
+                },
+            )
+
+    async def test_encoded_korean_filename_is_restored(self) -> None:
+        response = await self._upload_named(f"UTF-8''{quote('한글 약관 100%.txt')}", "upload-korean-name")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.uploads.calls[0]["filename"], "한글 약관 100%.txt")
+
+    async def test_plain_filename_with_percent_is_not_decoded(self) -> None:
+        response = await self._upload_named("a%20b.txt", "upload-percent-name")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.uploads.calls[0]["filename"], "a%20b.txt")
+
+    async def test_encoded_filename_is_validated_after_decoding(self) -> None:
+        for index, value in enumerate(("UTF-8''..%2Fnotes.txt", "UTF-8''%00notes.txt", "UTF-8''%FFnotes.txt", "UTF-8''notes%2Eexe")):
+            with self.subTest(value=value):
+                response = await self._upload_named(value, f"upload-bad-name-{index}")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["code"], "SOURCE_FILENAME_INVALID")
+        self.assertEqual(self.uploads.calls, [])
 
     async def test_upload_rejects_supported_extension_with_wrong_content_type(self) -> None:
         with self._authenticated():
