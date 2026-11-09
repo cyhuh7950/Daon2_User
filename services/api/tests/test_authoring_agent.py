@@ -183,6 +183,12 @@ class WritingTests(Base):
         self.assertEqual(len(writes), 6)
         self.assertEqual(result.content["units"][0]["paragraphs"][0]["text"], short[0]["text"])
 
+    def test_inline_labels_become_references_and_are_not_shown(self):
+        self.llm.paragraphs = [{"text": "기술 90점이다.[K1] 가격은 10점이다 [K1, K1]", "refs": []}]
+        self.generating()
+        paragraph = self.run_job().content["units"][0]["paragraphs"][0]
+        self.assertEqual((paragraph["text"], paragraph["refs"]), ("기술 90점이다. 가격은 10점이다", ["K1"]))
+
     def test_earlier_summary_and_terms_reach_the_next_unit(self):
         self.generating()
         self.run_job()

@@ -26,6 +26,7 @@ from .session import SESSION_SCHEMA, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
+INLINE_REF = re.compile(r"[ \t]*\[[SK][0-9]+(?:[ \t]*,[ \t]*[SK][0-9]+)*\]")
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
 _TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
@@ -283,7 +284,12 @@ class AuthoringPipeline:
             text = text_field(para.get("text"), 2500) if isinstance(para, Mapping) else ""
             if not text:
                 continue
-            refs = [r for r in dict.fromkeys(para.get("refs", [])) if isinstance(r, str) and r in known_refs]
+            # 본문에 쓴 근거 번호는 근거로 옮기고 지운다. 번호의 숫자가 숫자 검증에 걸리지 않게 먼저 처리한다.
+            inline = [label for found in INLINE_REF.findall(text) for label in re.findall(r"[SK][0-9]+", found)]
+            text = re.sub(r"[ \t]{2,}", " ", INLINE_REF.sub("", text)).strip()
+            refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
+            if not text:
+                continue
             if refs:
                 evidence_pack = ContextPack(tuple(p for p in pack.passages if p.ref in refs) + tuple(
                     Passage(row["ref"], "", "", "", None, "page", str(row["page"]), None, row["text"]) for row in material if row["ref"] in refs), False, 0)
