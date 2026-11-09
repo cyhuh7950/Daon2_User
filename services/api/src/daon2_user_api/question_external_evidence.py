@@ -32,7 +32,7 @@ APPROVED_MARK = "[승인 지식] "
 # LLM에게 보여 주는 지식 선택지. 승인된 지식 종류만 넣는다. 단계별로 늘린다(WO-K4 7절).
 KNOWLEDGE_KINDS: Mapping[str, str] = {
     "rag": "승인 문서의 원문 근거를 문장으로 검색한다.",
-    "ontology": "업무 용어의 정의와 상위·하위 개념을 찾는다.",
+    "ontology": "업무 용어의 정의와 상위·하위 개념을 찾는다. 검색어는 찾을 용어 하나만 쓴다.",
     "ruleset": "승인된 업무 규칙의 조건과 결과를 찾는다.",
 }
 DAON2_ITEM_LIMIT = 2

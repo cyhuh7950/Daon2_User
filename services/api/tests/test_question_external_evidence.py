@@ -596,6 +596,21 @@ class PlannedServiceTests(unittest.TestCase):
         self.assertEqual(plan_session.posted["max_tokens"], 512)
         self.assertEqual(plan_session.outcomes, ["succeeded"])
 
+    def test_empty_daon2_knowledge_falls_back_to_documents(self):
+        class Planner(_Planner):
+            def prepare(self, context):
+                return daon2_target("제안서 작업")
+
+            def run(self, tgt, requests):
+                self.runs.append(tuple(requests))
+                return () if any(len(item) > 2 for item in requests) else (external(),)
+
+        plan = json.dumps({"requests": [{"knowledge": "ontology", "package": "P1", "query": "용어"}]}, ensure_ascii=False)
+        service = self.service(plan)
+        service._external_planner = self.planner = Planner()  # noqa: SLF001
+        self.assertEqual(len(service._external_evidence(CTX, QUESTION)), 1)  # noqa: SLF001
+        self.assertEqual(self.planner.runs, [(("P1", "용어", "ontology"),), (("P1", QUESTION),)])
+
     def test_plan_call_needs_its_own_egress_approval(self):
         self.ask(self.service(None, allowed=False))
         self.assertEqual(len(self.egress.plan_checks), 1)
