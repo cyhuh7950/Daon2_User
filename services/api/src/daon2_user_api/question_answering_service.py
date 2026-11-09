@@ -122,6 +122,9 @@ class _PlanCallRecorder:
         return getattr(self._transport, name)
 
 
+_RECORDED_PLAN_CALL = "plan-call-already-sent"  # 다시 전송하지 않으므로 실제 자격이 필요 없다
+
+
 class _RecordedPlanResponse:
     """이미 끝난 계획 호출의 응답을 돌려준다. 다시 전송하지 않는다."""
 
@@ -621,7 +624,7 @@ class QuestionAnsweringService:
             attempt_key=PostgresQuestionAnsweringRepository._opaque_id("plan-attempt", run_id, selection.deployment_id),
             transport=_RecordedPlanResponse(response))
         if session is not None:
-            session.post_json(url=url, api_key="recorded", payload=payload, timeout_seconds=1)
+            session.post_json(url=url, api_key=_RECORDED_PLAN_CALL, payload=payload, timeout_seconds=1)
             session.finish(outcome="succeeded")
 
     def _generate_answer(self, context, prepared, cost_session, uses_knowledge: bool):  # type: ignore[no-untyped-def]
