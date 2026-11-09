@@ -217,3 +217,41 @@ test("기준 문서 입력은 문서 종류를 지정해 조회하고, 비어 �
     assert.ok(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "기준 약관").length === 1);
   } finally { await view.close(); }
 });
+
+const UNITS = [{ key: "s1__u1", title: "1.1 배경", status: "done", locked: false, paragraphs: [{ text: "쓴 본문", refs: [] }] }, { key: "s1__u2", title: "1.2 목적", status: "needs_review", locked: false, paragraphs: [{ text: "확인할 본문 [자료 없음]", refs: [] }] }, { key: "s2__u1", title: "2.1 평가", status: "pending", locked: false, paragraphs: [] }];
+const agent = (state, extra = {}) => ({ ...base, mode: "agent", state, units: UNITS, pause_requested: false, pause_reason: null, ...extra });
+const withControls = (studio) => { Object.assign(studio.authoring, { control: async (id, input) => { studio.calls.push(["control", input]); return { state: "generating" }; }, editUnit: async (id, key, input) => { studio.calls.push(["edit", key, input]); return {}; }, outline: async (id, input) => { studio.calls.push(["outline", input]); return { affected: ["s1__u1"], applied: input.confirm }; } }); return studio; };
+
+test("작성 중에는 소목차 진행이 보이고 일시 정지할 수 있다", async () => {
+  const studio = withControls(fakeStudio([agent("generating", { job_status: "generating" })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.match(text(view), /2\/3 소목차 완료/u);
+    await view.click(buttonByText(view.container, "일시 정지"));
+    assert.deepEqual(studio.calls.at(-1), ["control", { action: "pause" }]);
+  } finally { await view.close(); }
+});
+
+test("멈춘 뒤 사유가 보이고 이어서 작성을 요청한다", async () => {
+  const studio = withControls(fakeStudio([agent("paused", { pause_reason: "needs_review", revision_no: 9 })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.match(text(view), /확인하고 고친 뒤/u);
+    assert.match(text(view), /확인할 본문/u);
+    await view.click(buttonByText(view.container, "이어서 작성"));
+    assert.deepEqual(studio.calls.at(-1), ["control", { action: "resume", expectedRevision: 9 }]);
+  } finally { await view.close(); }
+});
+
+test("멈춘 동안 본문을 고치면 그 소목차로 저장한다", async () => {
+  const studio = withControls(fakeStudio([agent("paused", { pause_reason: "user", revision_no: 9 })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent === "본문 수정")[0]);
+    await view.click(buttonByText(view.container, "저장"));
+    assert.deepEqual(studio.calls.at(-1), ["edit", "s1__u1", { expectedRevision: 9, paragraphs: ["쓴 본문"] }]);
+  } finally { await view.close(); }
+});

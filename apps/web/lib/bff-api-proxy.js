@@ -171,6 +171,9 @@ function studioV2Route(method, segments) {
       if (rest.length === 3) return make(`/authoring/sessions/${id}`, ["GET"]);
       if (rest.length === 4 && rest[3] === "answers") return make(`/authoring/sessions/${id}/answers`, ["POST"]);
       if (rest.length === 4 && rest[3] === "review") return make(`/authoring/sessions/${id}/review`, ["PUT"]);
+      if (rest.length === 4 && rest[3] === "control") return make(`/authoring/sessions/${id}/control`, ["POST"]);
+      if (rest.length === 4 && rest[3] === "outline") return make(`/authoring/sessions/${id}/outline`, ["PUT"]);
+      if (rest.length === 5 && rest[3] === "units" && SAFE_SEGMENT.test(rest[4] ?? "")) return make(`/authoring/sessions/${id}/units/${encodeURIComponent(rest[4])}`, ["PUT"]);
     }
     return null;
   }

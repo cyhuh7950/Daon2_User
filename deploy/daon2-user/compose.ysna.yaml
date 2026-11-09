@@ -45,6 +45,9 @@ services:
     cpus: 2.0
   studio-v2-worker:
     environment:
+      # 문서 작성도 노트북에서 고른 승인 지식과 공용 연결을 쓴다(WO-K4 3단계).
+      DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED: "true"
+      DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT: admin
       DAON_DEVELOPMENT_STAGE: "true"
       DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr,daon2-admin.sinsan.kr,daon2.sinsan.kr
   document-worker:
