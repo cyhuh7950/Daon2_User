@@ -4877,11 +4877,11 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             mode = "explicit_source_lookup"
         insufficient = bool(getattr(stored, "insufficient", False))
         if insufficient and not has_source_context:
-            # 소스가 제공한 지식이 없어 모델을 호출하지 않았다. 일반 상담이 아니라 소스 추가 안내다.
+            # 지식이 없어 모델을 호출하지 않았으면 소스 추가를, 승인 지식으로 모델이 답했으나 근거가 모자라면 질문 보완을 안내한다.
             return {
                 "mode": "explicit_source_lookup", "grounding": "ungrounded",
                 "source_scope_summary": None, "mismatch": None,
-                "next_actions": ["Source 추가"],
+                "next_actions": (["Source 추가"] if str(getattr(stored, "answer", "")) == QuestionAnsweringService.NO_KNOWLEDGE_ANSWER else ["질문을 더 구체적으로 입력"]),
             }
         if insufficient and has_source_context:
             return {

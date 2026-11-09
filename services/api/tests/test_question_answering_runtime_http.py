@@ -12,6 +12,7 @@ import httpx
 from daon2_user_api.audit import AuditEventStore
 from daon2_user_api.authorization import AuthorizationService, Role, SqliteAuthorizationRepository
 from daon2_user_api.identity import IdentityPrincipal
+from daon2_user_api.question_answering_service import QuestionAnsweringService
 from daon2_user_api.question_answering_postgres import CitationContent, StoredCitation, StoredQuestionAnswer
 from daon2_user_api.runtime import WEB_SESSION_COOKIE, RuntimeDependencies, RuntimeSettings, create_app
 from test_identity_support import POLICY_VERSION, TRACE_ID, create_service, identity_session_view
@@ -49,6 +50,7 @@ class FakeQuestionService:
         self.replay_calls = []
         self.replay_answer = None
         self.insufficient_source = False
+        self.general_insufficient = None
 
     def replay(self, context, *, run_id, request_fingerprint):  # type: ignore[no-untyped-def]
         self.replay_calls.append((context, run_id, request_fingerprint))
@@ -56,6 +58,8 @@ class FakeQuestionService:
 
     def ask(self, context, **kwargs):  # type: ignore[no-untyped-def]
         self.calls.append((context, kwargs))
+        if kwargs["source_id"] is None and self.general_insufficient:
+            return StoredQuestionAnswer(kwargs["run_id"], "result-general", self.general_insufficient, True, ())
         if kwargs["source_id"] is None:
             return StoredQuestionAnswer(
                 kwargs["run_id"], "result-general", "안녕하세요. 무엇을 도와드릴까요?", False, (),
@@ -152,6 +156,26 @@ class QuestionRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(construct.call_count, 1)
         self.assertEqual(construct.call_args.kwargs["qa_structured_ollama_workspace_id"], "workspace-qa")
         self.assertFalse(settings.dev_auth_bypass)
+
+    async def _general_insufficient(self, answer: str):  # type: ignore[no-untyped-def]
+        self.service.general_insufficient = answer
+        with self._authenticated():
+            response = await self.client.post(
+                "/api/v1/workspaces/workspace-001/questions",
+                cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={"Idempotency-Key": "question-any-general-0002"},
+                json={"notebook_id": "notebook-cp3", "question": "다음"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["data"]
+
+    async def test_model_answer_without_enough_knowledge_asks_for_a_clearer_question(self) -> None:
+        data = await self._general_insufficient("질문이 특정되지 않아 확인할 수 없습니다.")
+        self.assertEqual(data["next_actions"], ["질문을 더 구체적으로 입력"])
+
+    async def test_no_knowledge_answer_still_asks_to_add_sources(self) -> None:
+        data = await self._general_insufficient(QuestionAnsweringService.NO_KNOWLEDGE_ANSWER)
+        self.assertEqual(data["next_actions"], ["Source 추가"])
 
     async def test_arbitrary_question_without_context_reaches_general_provider_answer(self) -> None:
         with self._authenticated():
