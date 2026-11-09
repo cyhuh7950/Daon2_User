@@ -10,6 +10,7 @@ from urllib.parse import parse_qs
 
 from daon2_user_api.knowledge_connector_service import ConnectorContext, ConnectorError, KnowledgeConnectorService
 from daon2_user_api.mcp_client import ClientCredentialsTokenSource, HttpJsonRpcTransport, McpError
+from daon2_user_api.mcp_client.lifecycle import connect
 from daon2_user_api.provider_credentials import ProviderCredentialCipher
 
 SECRET = "client-secret-value-for-test"
@@ -113,6 +114,52 @@ class TokenSourceTests(unittest.TestCase):
         self.assertEqual(opener.requests[0].get_header("Authorization"), "Bearer issued-token")
         self.assertEqual(len(calls), 1)
         self.assertNotIn("issued-token", repr(transport))
+
+
+class StatelessProtocolTests(unittest.TestCase):
+    """Daon2-RAG는 2026-07-28 요청마다 판본 헤더, Mcp-Method, _meta 판본을 요구한다."""
+
+    def transport(self, *results):
+        transport = HttpJsonRpcTransport("https://rag.example.com/mcp", token="fixed-token")
+        transport._opener = _Opener(*results)  # noqa: SLF001
+        return transport
+
+    def ok(self):
+        return json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode()
+
+    def test_tools_call_carries_required_headers_and_meta(self):
+        transport = self.transport(self.ok())
+        transport.request("tools/call", {"name": "list_knowledge_scopes", "arguments": {"limit": 1}}, protocol_version="2026-07-28")
+        request = transport._opener.requests[0]  # noqa: SLF001
+        self.assertEqual(request.get_header("Mcp-protocol-version"), "2026-07-28")
+        self.assertEqual(request.get_header("Mcp-method"), "tools/call")
+        self.assertEqual(request.get_header("Mcp-name"), "list_knowledge_scopes")
+        self.assertIn("text/event-stream", request.get_header("Accept"))
+        params = json.loads(request.data)["params"]
+        self.assertEqual(params["_meta"], {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                                           "io.modelcontextprotocol/clientInfo": {"name": "daon2-user", "version": "0.1.0"},
+                                           "io.modelcontextprotocol/clientCapabilities": {}})
+        self.assertEqual(params["arguments"], {"limit": 1})
+
+    def test_older_protocol_is_unchanged(self):
+        transport = self.transport(self.ok())
+        transport.request("tools/list", {}, protocol_version="2025-11-25")
+        request = transport._opener.requests[0]  # noqa: SLF001
+        self.assertIsNone(request.get_header("Mcp-method"))
+        self.assertNotIn("_meta", json.loads(request.data)["params"])
+
+    def test_discover_uses_stateless_format(self):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"supportedVersions": ["2026-07-28"]}}).encode()
+        transport = self.transport(body)
+        self.assertEqual(connect(transport).protocol_version, "2026-07-28")
+        request = transport._opener.requests[0]  # noqa: SLF001
+        self.assertEqual(request.get_header("Mcp-method"), "server/discover")
+        self.assertEqual(request.get_header("Mcp-protocol-version"), "2026-07-28")
+
+    def test_server_without_stateless_version_falls_back_to_initialize(self):
+        init = json.dumps({"jsonrpc": "2.0", "id": 2, "result": {"protocolVersion": "2025-11-25"}}).encode()
+        transport = self.transport(http_error(400), init, b"")
+        self.assertEqual(connect(transport).protocol_version, "2025-11-25")
 
 
 class _Connection:

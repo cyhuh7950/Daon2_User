@@ -11,6 +11,10 @@ from urllib.parse import urlsplit
 from .errors import McpError
 
 MAX_RESPONSE_BYTES = 1024 * 1024
+STATELESS_PROTOCOL = "2026-07-28"
+CLIENT_INFO = {"name": "daon2-user", "version": "0.1.0"}
+_STATELESS_META = {"io.modelcontextprotocol/protocolVersion": STATELESS_PROTOCOL, "io.modelcontextprotocol/clientInfo": CLIENT_INFO,
+                   "io.modelcontextprotocol/clientCapabilities": {}}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -43,6 +47,8 @@ class HttpJsonRpcTransport:
         body: dict[str, Any] = {"jsonrpc": "2.0", "id": self._counter, "method": method}
         if params is not None:
             body["params"] = dict(params)
+        if protocol_version == STATELESS_PROTOCOL:
+            body["params"] = {**body.get("params", {}), "_meta": _STATELESS_META}
         return self._post(body, protocol_version, session_id, expect_result=True)
 
     def notify(self, method: str, params: Mapping[str, Any] | None = None, *, protocol_version: str | None = None,
@@ -59,6 +65,11 @@ class HttpJsonRpcTransport:
             headers["Authorization"] = f"Bearer {token}"
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
+        if protocol_version == STATELESS_PROTOCOL:  # 이 판본의 서버는 헤더와 본문의 method가 일치하는지 검사한다.
+            headers["Accept"] = "application/json, text/event-stream"
+            headers["Mcp-Method"] = str(body["method"])
+            if body["method"] == "tools/call":
+                headers["Mcp-Name"] = str(body["params"]["name"])
         if session_id:
             headers["Mcp-Session-Id"] = session_id
         request = urllib.request.Request(self._endpoint, data=json.dumps(body, separators=(",", ":")).encode("utf-8"), headers=headers, method="POST")

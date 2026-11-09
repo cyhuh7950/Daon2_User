@@ -30,7 +30,7 @@
 | 현재 목록 | Daon2 Demo Project의 `제안서 작업`, `Insurance Policy Support` | Daon2-RAG 회신 |
 | `제안서 작업` 승인 상태 | RAG 문서 7건 승인됨. 최종 승인·게시 package 0건(GraphRAG 미승인) | 관리 화면, 신산님 확인 |
 | ID 일치 | Daon2-RAG는 같은 값이라고 회신. Daon2에서 이 값으로 호출한 시험은 없음 | Daon2-RAG 회신 |
-| 실제 토큰 호출 | 미검증. 컨테이너 안에서 DB 목록 조회만 확인됨 | Daon2-RAG 회신 |
+| 실제 토큰 호출 | 2026-11-09 로컬에서 확인. Daon2-RAG: 토큰 발급, `2026-07-28` 연결, 도구 3개(`search_document_evidence`, `get_document_evidence`, `list_knowledge_scopes`), 목록 2건. Daon2: 토큰 발급, `2025-06-18` 연결, 도구 9개 | 실제 호출 |
 | Daon2 MCP 주체 | ysna는 시험용 주체(`spn:daon2-mcp-ysna-test`)만 허용. `spn:daon-user`는 호출 불가 | Daon2-RAG 회신 |
 | Daon2 호출 범위 | 인자 `scope = {tenant_id, project_id, work_package_id}` 필수 | `Daon2/apps/api/src/app/daon2_mcp_server.py:63` |
 | Daon2 승인 지식 검색 | 필수 `limit`, 선택 `query`. `query`는 자산 이름과 `canonical_key` 문자열 일치만 비교 | `daon2_mcp_ruleset_tools.py:376` |
