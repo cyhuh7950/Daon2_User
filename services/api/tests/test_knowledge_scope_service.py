@@ -95,6 +95,15 @@ class CatalogTests(unittest.TestCase):
             self.service([], connectors=[{"connector_id": "kc-off", "kind": "daon2_rag", "status": "failed"}]).catalog(CTX)
         self.assertEqual((caught.exception.code, caught.exception.status), ("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409))
 
+    def test_virtual_connector_is_never_used(self):
+        fake = {"connector_id": "kc-fake", "kind": "daon2_rag", "status": "verified", "virtual": True}
+        real = {"connector_id": "kc-real", "kind": "daon2_rag", "status": "verified", "virtual": False}
+        self.service([{"scopes": [], "next_cursor": None}], connectors=[fake, real]).catalog(CTX)
+        self.assertEqual(self.connectors.calls[0][1], "kc-real")
+        with self.assertRaises(KnowledgeScopeError) as caught:
+            self.service([], connectors=[fake]).catalog(CTX)
+        self.assertEqual(caught.exception.code, "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED")
+
     def test_malformed_or_looping_response_fails_closed(self):
         bad = [[{"next_cursor": None}], [{"scopes": [{"project_id": "p"}], "next_cursor": None}], [{"scopes": [], "next_cursor": 3}],
                [{"scopes": [], "next_cursor": "same"}, {"scopes": [], "next_cursor": "same"}]]

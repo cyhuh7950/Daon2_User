@@ -70,7 +70,9 @@ class KnowledgeScopeService:
 
     def _approved_scopes(self, context: KnowledgeScopeContext) -> dict[tuple[str, str], Mapping[str, Any]]:
         connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version)
-        connector = next((item for item in self._connectors.list(connector_context) if item["kind"] == "daon2_rag" and item["status"] == "verified"), None)
+        # 가상(시험용) 서버의 값은 승인 지식이 아니므로 쓰지 않는다.
+        connector = next((item for item in self._connectors.list(connector_context)
+                          if item["kind"] == "daon2_rag" and item["status"] == "verified" and not item.get("virtual")), None)
         if connector is None:
             raise KnowledgeScopeError("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409)
         found: dict[tuple[str, str], Mapping[str, Any]] = {}
