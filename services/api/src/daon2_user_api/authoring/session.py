@@ -146,6 +146,27 @@ def resume(session: Mapping[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def reopen(session: Mapping[str, Any]) -> dict[str, Any]:
+    """완성된 문서를 다시 열어 사람이 고치거나 소목차를 다시 쓰게 한다."""
+    if session.get("mode") != "agent" or session["state"] != "completed":
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+    updated = copy.deepcopy(dict(session))
+    updated.update({"state": "paused", "pause_requested": False, "pause_reason": "user"})
+    return updated
+
+
+def redo_unit(session: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """소목차 하나만 다시 쓴다. 사람이 고정한 소목차는 덮어쓰지 않는다."""
+    if session["state"] != "paused":
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+    updated = copy.deepcopy(dict(session))
+    unit = updated["units"][_unit_index(updated, key)]
+    if unit["locked"]:
+        raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+    unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
+    return updated
+
+
 def edit_unit(session: Mapping[str, Any], key: str, paragraphs: Sequence[str]) -> dict[str, Any]:
     """사람이 고친 본문은 기준값으로 고정한다. 이후 LLM이 덮어쓰지 않는다."""
     if session["state"] != "paused":

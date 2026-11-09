@@ -116,7 +116,7 @@ function Review({ session, onConfirm, busy }) {
         <td><button type="button" className="studio-icon-button" aria-label={msg("authoring.review.req.delete", { id: r.id })} onClick={() => setRequirements((list) => list.filter((_, j) => j !== i))}><StudioIcon name="delete" size={18} /></button></td></tr>)}</tbody></table></div>
     <button type="button" className="studio-btn" onClick={() => setRequirements((list) => [...list, { id: `REQ-${String(list.length + 1).padStart(3, "0")}-N`, text: msg("authoring.review.req.new"), mandatory: true, category: "", refs: [] }])}>{msg("authoring.review.req.add")}</button></>}
     <h3>{msg("authoring.review.plan")}</h3>
-    <ol>{sections.map((s, i) => <li key={s.key}><strong>{s.title}</strong> {baseOnly ? null : <small>{msg("authoring.review.plan.requirements", { count: s.requirement_ids.length })}</small>}
+    <ol>{sections.map((s, i) => <li key={s.key}><strong>{s.title}</strong> {(session.units ?? []).some((unit) => unit.section_key === s.key) && <ul>{session.units.filter((unit) => unit.section_key === s.key).map((unit) => <li key={unit.key}>{unit.title} <small>{msg("authoring.unit.target", { count: unit.target_chars })}</small></li>)}</ul>} {baseOnly ? null : <small>{msg("authoring.review.plan.requirements", { count: s.requirement_ids.length })}</small>}
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.up", { title: s.title })} disabled={i === 0} onClick={() => move(i, -1)}><StudioIcon name="chevron_down" size={16} style={{ transform: "rotate(180deg)" }} /></button>
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.down", { title: s.title })} disabled={i === sections.length - 1} onClick={() => move(i, 1)}><StudioIcon name="chevron_down" size={16} /></button>
       <button type="button" className="studio-icon-button" aria-label={msg("authoring.review.plan.delete", { title: s.title })} disabled={sections.length <= 1} onClick={() => setSections((list) => list.filter((_, j) => j !== i))}><StudioIcon name="delete" size={16} /></button></li>)}</ol>
@@ -165,7 +165,7 @@ function Result({ document, formats = ["docx", "pptx"], onDownload }) {
 }
 
 /** 소목차 진행 현황과 사람 개입(일시 정지, 본문 수정, 구조 변경, 이어서 작성). */
-function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline }) {
+function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onRedo }) {
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState("");
   const [titles, setTitles] = useState({});
@@ -193,6 +193,7 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline }) {
       {paused && unit.paragraphs?.length > 0 && editing !== unit.key && <>
         {unit.paragraphs.map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}
         <button type="button" className="studio-btn" disabled={busy} onClick={() => { setEditing(unit.key); setDraft(unit.paragraphs.map((paragraph) => paragraph.text).join("\n\n")); }}>{msg("authoring.unit.edit")}</button>
+        {!unit.locked && <button type="button" className="studio-btn" disabled={busy} onClick={() => onRedo(unit.key)}>{msg("authoring.unit.redo")}</button>}
       </>}
       {editing === unit.key && <>
         <textarea aria-label={msg("authoring.unit.body", { title: unit.title })} rows={8} style={{ width: "100%" }} value={draft} onChange={(event) => setDraft(event.target.value)} />
@@ -256,6 +257,8 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
   };
   const pause = () => act(() => authoring.control(id, { action: "pause" }));
   const resume = () => act(() => authoring.control(id, { action: "resume", expectedRevision: session.revision_no }));
+  const redoUnit = (unitKey) => act(() => authoring.control(id, { action: "redo", expectedRevision: session.revision_no, unitKey }));
+  const reopen = () => act(() => authoring.control(id, { action: "reopen", expectedRevision: session.revision_no }));
   const editUnit = (key, paragraphs) => act(() => authoring.editUnit(id, key, { expectedRevision: session.revision_no, paragraphs }));
   const changeOutline = (units, apply) => act(() => authoring.outline(id, { expectedRevision: session.revision_no, units, confirm: apply }));
   const download = async (format) => {
@@ -286,7 +289,8 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
         <StepBar state={session.state} />
         {session.state === "collecting" && <Questions session={session} sources={sources} adapter={authoring} busy={busy} onSubmit={submit} />}
         {(session.state === "analyzing" || session.state === "generating") && <p role="status"><StudioIcon name="spinner" size={18} /> {session.state === "analyzing" ? (session.analysis === "base_document" ? msg("authoring.wait.base") : msg("authoring.wait.rfp")) : msg("authoring.wait.generating")}</p>}
-        {session.mode === "agent" && (session.state === "generating" || session.state === "paused") && session.units?.length > 0 && <UnitProgress session={session} busy={busy} onPause={pause} onResume={resume} onEdit={editUnit} onOutline={changeOutline} />}
+        {session.mode === "agent" && (session.state === "generating" || session.state === "paused") && session.units?.length > 0 && <UnitProgress session={session} busy={busy} onPause={pause} onResume={resume} onEdit={editUnit} onOutline={changeOutline} onRedo={redoUnit} />}
+        {session.mode === "agent" && session.state === "completed" && <button type="button" className="studio-btn" disabled={busy} onClick={reopen}>{msg("authoring.reopen")}</button>}
         {session.state === "review" && <Review session={session} busy={busy} onConfirm={confirm} />}
         {session.state === "completed" && session.document && <Result document={session.document} formats={session.output_choices ?? ["docx", "pptx"]} onDownload={download} />}
         {session.state === "failed" && <p role="alert">{studioErrorMessage(session.error_code)}</p>}

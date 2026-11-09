@@ -3167,12 +3167,18 @@
             "type": "string",
             "enum": [
               "pause",
-              "resume"
+              "resume",
+              "reopen",
+              "redo"
             ]
           },
           "expected_revision": {
             "type": "integer",
             "minimum": 1
+          },
+          "unit_key": {
+            "type": "string",
+            "maxLength": 128
           }
         }
       },

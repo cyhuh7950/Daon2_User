@@ -245,6 +245,37 @@ test("멈춘 뒤 사유가 보이고 이어서 작성을 요청한다", async ()
   } finally { await view.close(); }
 });
 
+test("멈춘 동안 소목차 하나만 다시 쓰게 요청한다", async () => {
+  const studio = withControls(fakeStudio([agent("paused", { pause_reason: "user", revision_no: 9 })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent === "이 소목차 다시 쓰기")[0]);
+    assert.deepEqual(studio.calls.at(-1), ["control", { action: "redo", expectedRevision: 9, unitKey: "s1__u1" }]);
+  } finally { await view.close(); }
+});
+
+test("확정 화면에 소목차와 목표 글자 수가 보인다", async () => {
+  const units = [{ key: "s1__u1", section_key: "s1", title: "1.1 배경", target_chars: 400, status: "pending", locked: false, paragraphs: [] }];
+  const studio = withControls(fakeStudio([agent("review", { units, plan: { sections: [{ key: "s1", title: "1. 개요", purpose: "", requirement_ids: [], knowledge_refs: [] }] } })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.match(text(view), /1\.1 배경/u);
+    assert.match(text(view), /약 400자/u);
+  } finally { await view.close(); }
+});
+
+test("완성된 문서를 다시 열어 고칠 수 있다", async () => {
+  const studio = withControls(fakeStudio([agent("completed", { document: DOCUMENT, revision_no: 9 })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    await view.click(buttonByText(view.container, "다시 열어 고치기"));
+    assert.deepEqual(studio.calls.at(-1), ["control", { action: "reopen", expectedRevision: 9 }]);
+  } finally { await view.close(); }
+});
+
 test("멈춘 동안 본문을 고치면 그 소목차로 저장한다", async () => {
   const studio = withControls(fakeStudio([agent("paused", { pause_reason: "user", revision_no: 9 })]));
   const view = await mount(studio, { outputId: OID });

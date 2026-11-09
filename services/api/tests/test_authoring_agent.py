@@ -216,6 +216,12 @@ class WritingTests(Base):
         self.assertEqual(len([p for p in self.llm.prompts if p.schema_name == "authoring_unit"]), 2)
         self.assertEqual(result.content["document"]["sections"][0]["paragraphs"][0]["text"], "저장된 본문")
 
+    def test_document_keeps_the_required_checks(self):
+        self.generating()
+        ids = [check["id"] for check in self.run_job().content["document"]["checks"]]
+        self.assertIn("term_consistency", ids)
+        self.assertIn("required_clauses", ids)
+
     def test_every_unit_is_saved_as_it_finishes(self):
         self.generating()
         self.run_job()
@@ -311,6 +317,31 @@ class InterventionTests(Base):
         self.assertEqual([u["status"] for u in updated["units"]], ["done", "pending", "done"])
         self.assertEqual(updated["units"][1]["title"], "1.2 바뀐 목적")
 
+    def test_one_finished_unit_can_be_written_again(self):
+        session = S.transition(self.generating(), "paused")
+        session["units"][0].update({"status": "done", "paragraphs": [{"text": "이전 본문", "refs": [], "origin": "new"}], "summary": "요약"})
+        updated = S.redo_unit(session, session["units"][0]["key"])
+        self.assertEqual((updated["units"][0]["status"], updated["units"][0]["paragraphs"]), ("pending", []))
+
+    def test_unit_fixed_by_a_person_is_not_rewritten(self):
+        session = S.transition(self.generating(), "paused")
+        session["units"][0].update({"status": "done", "locked": True})
+        with self.assertRaises(AuthoringError):
+            S.redo_unit(session, session["units"][0]["key"])
+
+    def test_finished_document_can_be_reopened(self):
+        session = self.generating()
+        for unit in session["units"]:
+            unit["status"] = "done"
+        finished = S.transition(session, "completed")
+        finished["document"] = {"sections": []}
+        reopened = S.reopen(finished)
+        self.assertEqual((reopened["state"], reopened["pause_reason"]), ("paused", "user"))
+
+    def test_only_writing_mode_documents_can_be_reopened(self):
+        with self.assertRaises(AuthoringError):
+            S.reopen({"state": "completed", "mode": "legacy"})
+
     def test_paused_session_only_moves_through_allowed_states(self):
         session = S.transition(self.generating(), "paused")
         self.assertEqual(S.transition(session, "generating")["state"], "generating")
@@ -357,6 +388,21 @@ class ServiceTests(Base):
         service = self.service(self.analyzed())
         with self.assertRaises(AuthoringError):
             service.control(CTX, "sv2-x", "pause", None)
+
+    def test_redo_requests_only_that_unit(self):
+        session = S.transition(self.generating(), "paused")
+        session["units"][0]["status"] = "done"
+        service = self.service(session)
+        service.control(CTX, "sv2-x", "redo", 7, unit_key=session["units"][0]["key"])
+        self.assertEqual(self.studio.session["units"][0]["status"], "pending")
+        self.assertEqual(self.studio.applied, [None])
+
+    def test_reopen_returns_a_finished_document_to_paused(self):
+        session = self.generating()
+        finished = S.transition(session, "completed")
+        service = self.service(finished)
+        service.control(CTX, "sv2-x", "reopen", 7)
+        self.assertEqual(self.studio.session["state"], "paused")
 
     def test_outline_preview_does_not_change_the_session(self):
         session = S.transition(self.generating(), "paused")
