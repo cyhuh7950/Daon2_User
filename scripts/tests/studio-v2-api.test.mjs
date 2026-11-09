@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   StudioV2Error, cancelStudioOutput, createStudioMemo, createStudioOutput, deleteStudioOutput, downloadStudioExport, getStudioCustomization,
+  applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns,
   getStudioEvidenceContent, getStudioOutput, listStudioOutputs, listStudioTypes, regenerateStudioOutput, renameStudioOutput, saveStudioCustomization,
 } from "../../apps/web/lib/studio-v2-api.js";
 
@@ -95,4 +96,36 @@ test("맞춤설정은 ETag로 저장한다", async () => {
   const saved = await saveStudioCustomization("ws-1", "존댓말", { notebookId: "nb-1", etag: current.etag, fetchImpl });
   assert.equal(calls[1].init.headers["If-Match"], '"studio-v2-customization:nb-1:0"');
   assert.equal(saved.version, 1);
+});
+
+const TURN = `svt-${"b".repeat(32)}`;
+const EDIT_OID = `sv2-${"a".repeat(32)}`;
+const EDIT_BASE = `/bff/api/workspaces/ws-1/notebooks/nb-1/studio/outputs/${EDIT_OID}/edit-turns`;
+const editTurn = (over = {}) => ({ turn_id: TURN, output_id: EDIT_OID, base_revision: 3, instruction: "고쳐", state: "ready", reply: "됨",
+  changes: [{ op: "replace", id: "s1.b1", before_text: "가", after_text: "나", reason: "요청" }], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00", ...over });
+const envelope = (data, status = 200) => Response.json({ data, meta: { trace_id: "t" } }, { status });
+
+test("대화 수정 API는 경로·Idempotency-Key·응답 모양을 지킨다", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => { calls.push({ url, init }); return envelope({ turn_id: TURN, job_id: "sve-1", state: "queued" }, 202); };
+  const created = await createStudioEditTurn("ws-1", EDIT_OID, { notebookId: "nb-1", instruction: "고쳐", fetchImpl });
+  assert.equal(created.turn_id, TURN);
+  assert.equal(calls[0].url, EDIT_BASE);
+  assert.match(calls[0].init.headers["Idempotency-Key"], /^studio-v2-/u);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { instruction: "고쳐" });
+
+  const turns = await listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope({ turns: [editTurn()] }) });
+  assert.equal(turns[0].changes[0].after_text, "나");
+
+  const applied = await applyStudioEditTurn("ws-1", EDIT_OID, TURN, { notebookId: "nb-1", fetchImpl: async (url) => { assert.equal(url, `${EDIT_BASE}/${TURN}/apply`); return envelope({ output_id: EDIT_OID, turn_id: TURN, revision_no: 4 }, 201); } });
+  assert.equal(applied.revision_no, 4);
+
+  await discardStudioEditTurn("ws-1", EDIT_OID, TURN, { notebookId: "nb-1", fetchImpl: async (url) => { assert.equal(url, `${EDIT_BASE}/${TURN}/discard`); return new Response(null, { status: 204 }); } });
+});
+
+test("대화 수정 API는 잘못된 응답과 잘못된 번호를 거부한다", async () => {
+  for (const bad of [{ turns: [editTurn({ extra: 1 })] }, { turns: [editTurn({ state: "unknown" })] }, { turns: [editTurn({ changes: [{ op: "move", id: "x", before_text: "", after_text: "", reason: "" }] })] }, { turns: "x" }]) {
+    await assert.rejects(listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope(bad) }), { code: "STUDIO_RESPONSE_INVALID" });
+  }
+  await assert.rejects(applyStudioEditTurn("ws-1", EDIT_OID, "../x", { notebookId: "nb-1", fetchImpl: async () => { throw new Error("MUST_NOT_SEND"); } }), { code: "STUDIO_INPUT_INVALID" });
 });

@@ -88,6 +88,12 @@ export const STUDIO_MESSAGES = Object.freeze({
 });
 
 export const STUDIO_ERRORS = Object.freeze({
+  CHAT_EDIT_UNSUPPORTED: "이 자료는 대화로 수정할 수 없습니다.",
+  CHAT_EDIT_BUSY: "앞선 수정 요청을 처리하고 있습니다. 끝난 뒤 다시 입력하세요.",
+  CHAT_EDIT_STALE: "자료가 바뀌었습니다. 다시 지시해 주세요.",
+  CHAT_EDIT_INVALID: "수정안을 만들지 못했습니다. 지시를 바꿔 다시 시도하세요.",
+  CHAT_EDIT_TOO_LARGE: "자료가 너무 길어 대화로 수정할 수 없습니다.",
+  CHAT_EDIT_STATE_INVALID: "이미 처리된 수정안입니다.",
   STUDIO_NO_READY_SOURCE: "사용할 수 있는 소스가 없습니다. 소스 처리가 끝났는지 확인하세요.",
   STUDIO_TYPE_UNAVAILABLE: "아직 제공하지 않는 유형입니다.",
   STUDIO_VERSION_CONFLICT: "다른 곳에서 먼저 변경되었습니다. 새로 고친 뒤 다시 시도하세요.",

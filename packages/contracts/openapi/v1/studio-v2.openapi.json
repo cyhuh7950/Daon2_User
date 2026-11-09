@@ -599,6 +599,288 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/edit-turns": {
+      "get": {
+        "operationId": "listStudioV2EditTurns",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2EditTurnListEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createStudioV2EditTurn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2EditTurnRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2EditTurnReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/edit-turns/{turn_id}/apply": {
+      "post": {
+        "operationId": "applyStudioV2EditTurn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/TurnId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2EditTurnApplyReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/edit-turns/{turn_id}/discard": {
+      "post": {
+        "operationId": "discardStudioV2EditTurn",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          },
+          {
+            "$ref": "#/components/parameters/TurnId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Discarded"
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/cancel": {
       "post": {
         "operationId": "cancelStudioV2Output",
@@ -2201,6 +2483,15 @@
           "pattern": "^sv2-[0-9a-f]{32}$"
         }
       },
+      "TurnId": {
+        "name": "turn_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^svt-[0-9a-f]{32}$"
+        }
+      },
       "UnitKey": {
         "name": "unit_key",
         "in": "path",
@@ -2325,7 +2616,13 @@
                   "STUDIO_SOURCE_TOO_LARGE",
                   "NOTEBOOK_SCOPE_REQUIRED",
                   "NOTEBOOK_SCOPE_MISMATCH",
-                  "OBJECT_STORAGE_UNAVAILABLE"
+                  "OBJECT_STORAGE_UNAVAILABLE",
+                  "CHAT_EDIT_UNSUPPORTED",
+                  "CHAT_EDIT_BUSY",
+                  "CHAT_EDIT_STALE",
+                  "CHAT_EDIT_INVALID",
+                  "CHAT_EDIT_TOO_LARGE",
+                  "CHAT_EDIT_STATE_INVALID"
                 ]
               },
               "trace_id": {
@@ -2824,6 +3121,195 @@
         "properties": {
           "settings": {
             "type": "object"
+          }
+        }
+      },
+      "StudioV2EditTurnRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instruction"
+        ],
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      },
+      "StudioV2EditTurnReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "turn_id",
+          "job_id",
+          "state"
+        ],
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "job_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "working",
+              "ready",
+              "no_change",
+              "failed",
+              "applied",
+              "discarded"
+            ]
+          }
+        }
+      },
+      "StudioV2EditTurnApplyReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output_id",
+          "turn_id",
+          "revision_no"
+        ],
+        "properties": {
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "turn_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "revision_no": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "StudioV2EditTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "turn_id",
+          "output_id",
+          "base_revision",
+          "instruction",
+          "state",
+          "reply",
+          "changes",
+          "error_code",
+          "applied_revision",
+          "created_at"
+        ],
+        "properties": {
+          "turn_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "output_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "base_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "instruction": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "working",
+              "ready",
+              "no_change",
+              "failed",
+              "applied",
+              "discarded"
+            ]
+          },
+          "reply": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "op",
+                "id",
+                "before_text",
+                "after_text",
+                "reason"
+              ],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "insert_after",
+                    "delete"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "before_text": {
+                  "type": "string"
+                },
+                "after_text": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "applied_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StudioV2EditTurnList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "turns"
+        ],
+        "properties": {
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StudioV2EditTurn"
+            }
           }
         }
       },
@@ -3415,6 +3901,54 @@
           },
           "queued": {
             "type": "boolean"
+          }
+        }
+      },
+      "StudioV2EditTurnReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2EditTurnReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2EditTurnApplyReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2EditTurnApplyReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2EditTurnListEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2EditTurnList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
           }
         }
       },

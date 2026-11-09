@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  cancelStudioOutput, createStudioMemo, createStudioOutput, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
+  cancelStudioOutput, createStudioMemo, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, issueExportStepUp,
@@ -29,6 +29,10 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     cancelOutput: (outputId, options) => cancelStudioOutput(workspaceId, outputId, scope(options)),
     regenerateOutput: (outputId, options) => regenerateStudioOutput(workspaceId, outputId, scope(options)),
     createRevision: (outputId, input) => createStudioRevision(workspaceId, outputId, scope(input)),
+    createEditTurn: (outputId, input) => createStudioEditTurn(workspaceId, outputId, scope(input)),
+    listEditTurns: (outputId, options) => listStudioEditTurns(workspaceId, outputId, scope(options)),
+    applyEditTurn: (outputId, turnId, options) => applyStudioEditTurn(workspaceId, outputId, turnId, scope(options)),
+    discardEditTurn: (outputId, turnId, options) => discardStudioEditTurn(workspaceId, outputId, turnId, scope(options)),
     getProvenance: (outputId, options) => getStudioProvenance(workspaceId, outputId, scope(options)),
     downloadExport: (outputId, format, options) => downloadStudioExport(workspaceId, outputId, format, scope(options)),
     getAudio: (outputId, options) => getStudioAudio(workspaceId, outputId, scope(options)),

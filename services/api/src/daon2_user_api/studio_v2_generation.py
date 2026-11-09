@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .studio_workspace import StudioContext, StudioError
 
@@ -72,6 +72,15 @@ class GeneratorRegistry:
             attach = getattr(generator, "set_knowledge", None)
             if callable(attach):
                 attach(knowledge)
+
+    def attach_chat_editor(self, editor: object) -> None:
+        self._chat_editor = editor
+
+    def chat_editor(self) -> Any:
+        editor = getattr(self, "_chat_editor", None)
+        if editor is None:
+            raise StudioError("STUDIO_TYPE_UNAVAILABLE", 409)
+        return editor
 
     def get(self, type_id: str) -> StudioGenerator:
         generator = self._generators.get(type_id)

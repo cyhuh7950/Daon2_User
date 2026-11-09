@@ -60,7 +60,7 @@ def test_document_readiness_runtime_default_off_and_active_requires_exact_ready_
         ("tenant-a", "workspace-a", "actor-a", "version-a")}))
     with pytest.raises(ValueError, match="DOCUMENT_READINESS_SCHEMA_REQUIRED"):
         module._build_document_readiness_runtime(store, settings)
-    for unsupported in ('0071','0083'):
+    for unsupported in ('0071','0084'):
         store.revision=unsupported
         with pytest.raises(ValueError, match="DOCUMENT_READINESS_SCHEMA_REQUIRED"):
             module._build_document_readiness_runtime(store, settings)
@@ -1678,7 +1678,7 @@ class RuntimeSettingsTests(unittest.TestCase):
             revision='0072';ready=True
             def readiness(self):return SimpleNamespace(ready=self.ready,schema_revision=self.revision)
         store=Store()
-        for revision in ('0072','0083'):
+        for revision in ('0072','0084'):
             store.revision=revision
             with self.assertRaises(ValueError):module._build_run_cost_sessions(store,settings)
         store.revision='0073';store.ready=False

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from .cloud_storage import CloudAccessContext, PostgresCloudStore
 from .studio_v2_generation import GenerationContext, GeneratorRegistry, StudioCancelled
 from .studio_v2_postgres import PostgresStudioV2Repository
-from .studio_v2_queue import PostgresStudioV2Queue, StudioV2Job, StudioV2QueueError
+from .studio_v2_queue import CHAT_EDIT_MODE, PostgresStudioV2Queue, StudioV2Job, StudioV2QueueError
 from .studio_title import derive_title
 from .studio_workspace import StudioContext, StudioError
 
@@ -93,6 +93,9 @@ class StudioV2Worker:
             _LOGGER.warning("STUDIO_V2_SWEEP_FAILED")
 
     def _process(self, job: StudioV2Job) -> None:
+        if job.request_json.get("mode") == CHAT_EDIT_MODE:
+            self._process_chat_edit(job)
+            return
         worker = self._worker_id
         try:
             job = self._queue.start(job, worker)
@@ -141,6 +144,37 @@ class StudioV2Worker:
             self._fail(job, error.code, retryable=error.code in RETRYABLE)
         except Exception:
             self._fail(job, "STUDIO_JOB_PROCESSING_FAILED", retryable=True)
+
+    def _process_chat_edit(self, job: StudioV2Job) -> None:
+        """수정안만 만든다. 리비전과 자료 상태는 건드리지 않는다(WO-K5 §5.4)."""
+        worker = self._worker_id
+        turn_id = str((job.request_json.get("settings") or {}).get("turn_id"))
+        context = self._context(job)
+        try:
+            job = self._queue.start(job, worker)
+
+            def cancel_check() -> None:
+                if self._queue.heartbeat(job, worker, extend_seconds=self._lease_seconds):
+                    raise StudioCancelled()
+
+            self._registry.chat_editor().run(context, job.output_id, turn_id, str(job.request_json.get("type_id")), cancel_check=cancel_check)
+            self._queue.finish(job, worker, state="completed")
+        except StudioCancelled:
+            self._queue.finish(job, worker, state="cancelled")
+            self._repository.fail_edit_turn(context, turn_id, "STUDIO_JOB_CANCELLED")
+        except StudioV2QueueError:
+            raise
+        except StudioError as error:
+            self._fail_chat_edit(job, context, turn_id, error.code, retryable=error.code in RETRYABLE)
+        except Exception:
+            self._fail_chat_edit(job, context, turn_id, "STUDIO_JOB_PROCESSING_FAILED", retryable=True)
+
+    def _fail_chat_edit(self, job: StudioV2Job, context: StudioContext, turn_id: str, code: str, *, retryable: bool) -> None:
+        if retryable and self._queue.retry(job, self._worker_id, error_code=code):
+            return
+        final = "STUDIO_DEAD_LETTER" if retryable else code
+        self._queue.finish(job, self._worker_id, state="failed", error_code=final)
+        self._repository.fail_edit_turn(context, turn_id, final)
 
     def _fail(self, job: StudioV2Job, code: str, *, retryable: bool) -> None:
         if retryable and self._queue.retry(job, self._worker_id, error_code=code):
@@ -200,6 +234,8 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
     from .knowledge_connector_egress import ConnectorEgressGate
     connectors = KnowledgeConnectorService(cloud_store, cipher, egress_gate=ConnectorEgressGate(EgressPolicyService(PostgresEgressPolicyRepository(cloud_store))), **settings_from_env())
     repository = PostgresStudioV2Repository(cloud_store)
+    from .studio_chat_edit_runner import ChatEditRunner
+    registry.attach_chat_editor(ChatEditRunner(llm, repository))
     from .knowledge_scope_service import KnowledgeScopeService
     from .question_external_evidence import NotebookKnowledgeEvidence
     knowledge_evidence = None

@@ -26,8 +26,10 @@ STUDIO_V2_PUBLIC_CODES = frozenset({
     "STUDIO_NO_READY_SOURCE", "STUDIO_TYPE_UNAVAILABLE", "STUDIO_VERSION_CONFLICT", "STUDIO_VALIDATION_FAILED",
     "STUDIO_GENERATION_FAILED", "STUDIO_CANCELLED", "STUDIO_EXTERNAL_PROVIDER_UNSUPPORTED", "STUDIO_REVISION_TOO_LARGE",
     "STUDIO_SOURCE_TOO_LARGE", "NOTEBOOK_SCOPE_REQUIRED", "NOTEBOOK_SCOPE_MISMATCH",
+    "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
+_TURN_ID = re.compile(r"^svt-[0-9a-f]{32}$")
 _EXPORT_FORMATS = frozenset({"docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt"})
 
 
@@ -49,6 +51,10 @@ class RenameBody(_Strict):
 class RevisionBody(_Strict):
     content: dict[str, Any]
     change_reason: str | None = Field(default=None, max_length=200)
+
+
+class EditTurnBody(_Strict):
+    instruction: str = Field(min_length=1, max_length=2000)
 
 
 class RegenerateBody(_Strict):
@@ -114,6 +120,11 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
 
     def _output_id(value: str) -> str:
         if _ID.fullmatch(value) is None:
+            raise HTTPException(status_code=400)
+        return value
+
+    def _turn_id(value: str) -> str:
+        if _TURN_ID.fullmatch(value) is None:
             raise HTTPException(status_code=400)
         return value
 
@@ -232,6 +243,37 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         result = await run(service.regenerate, ctx, _output_id(output_id), body.settings, idempotency_key)
         return JSONResponse({"data": {k: result[k] for k in ("output_id", "job_id", "status")},
                              "meta": {**_meta(request, id), "replayed": result["replayed"]}}, status_code=202)
+
+    @app.post(base + "/outputs/{output_id}/edit-turns", status_code=202)
+    async def studio_v2_edit_turn(id: str, notebook_id: str, output_id: str, body: EditTurnBody, request: Request,
+                                  idempotency_key: str = Header(alias="Idempotency-Key")) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        _studio_idempotency_key(idempotency_key)
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        result = await run(service.enqueue_edit_turn, ctx, _output_id(output_id), body.instruction, idempotency_key)
+        return JSONResponse({"data": {k: result[k] for k in ("turn_id", "job_id", "state")},
+                             "meta": {**_meta(request, id), "replayed": result["replayed"]}}, status_code=202)
+
+    @app.get(base + "/outputs/{output_id}/edit-turns")
+    async def studio_v2_edit_turns(id: str, notebook_id: str, output_id: str, request: Request) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        turns = await run(service.list_edit_turns, ctx, _output_id(output_id))
+        return JSONResponse({"data": {"turns": turns}, "meta": _meta(request, id)})
+
+    @app.post(base + "/outputs/{output_id}/edit-turns/{turn_id}/apply", status_code=201)
+    async def studio_v2_edit_turn_apply(id: str, notebook_id: str, output_id: str, turn_id: str, request: Request) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        number = await run(service.apply_edit_turn, ctx, _output_id(output_id), _turn_id(turn_id))
+        return JSONResponse({"data": {"output_id": output_id, "turn_id": turn_id, "revision_no": number}, "meta": _meta(request, id)}, status_code=201)
+
+    @app.post(base + "/outputs/{output_id}/edit-turns/{turn_id}/discard", status_code=204)
+    async def studio_v2_edit_turn_discard(id: str, notebook_id: str, output_id: str, turn_id: str, request: Request) -> Response:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        await run(service.discard_edit_turn, ctx, _output_id(output_id), _turn_id(turn_id))
+        return Response(status_code=204)
 
     @app.post(base + "/outputs/{output_id}/cancel", status_code=202)
     async def studio_v2_cancel(id: str, notebook_id: str, output_id: str, request: Request) -> JSONResponse:

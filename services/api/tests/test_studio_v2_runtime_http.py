@@ -17,6 +17,7 @@ from test_identity_support import POLICY_VERSION, create_service, identity_sessi
 
 BASE = "/api/v1/workspaces/workspace-001/notebooks/notebook-001/studio"
 OID = "sv2-" + "a" * 32
+TURN = "svt-" + "b" * 32
 
 
 class FakeV2:
@@ -71,6 +72,23 @@ class FakeV2:
     def get_customization(self, ctx):
         self._record("customization_get", ctx)
         return {"instruction": "", "version": 0}
+
+    def enqueue_edit_turn(self, ctx, output_id, instruction, key):
+        self._record("edit_turn", ctx, output_id, instruction, key)
+        return {"turn_id": TURN, "job_id": "sve-1", "state": "queued", "replayed": False}
+
+    def list_edit_turns(self, ctx, output_id):
+        self._record("edit_turns", ctx, output_id)
+        return [{"turn_id": TURN, "output_id": output_id, "base_revision": 3, "instruction": "고쳐", "state": "ready", "reply": "됨",
+                 "changes": [{"op": "delete", "id": "s1", "before_text": "가", "after_text": "", "reason": "요청"}], "error_code": None,
+                 "applied_revision": None, "created_at": "2026-11-10T00:00:00+00:00"}]
+
+    def apply_edit_turn(self, ctx, output_id, turn_id):
+        self._record("edit_turn_apply", ctx, output_id, turn_id)
+        return 4
+
+    def discard_edit_turn(self, ctx, output_id, turn_id):
+        self._record("edit_turn_discard", ctx, output_id, turn_id)
 
     def save_customization(self, ctx, instruction, expected):
         self._record("customization_put", ctx, instruction, expected)
@@ -129,6 +147,69 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exported.content, b"# memo")
         self.assertEqual(exported.headers["cache-control"], "no-store")
         self.assertIn("attachment", exported.headers["content-disposition"])
+
+    async def test_edit_turn_requires_idempotency_key(self):
+        with self.authenticated():
+            response = await self.client.post(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies, json={"instruction": "고쳐"})
+        self.assertIn(response.status_code, (400, 422))
+        self.assertEqual(self.v2.calls, [])
+
+    async def test_edit_turn_rejects_extra_field_and_long_instruction(self):
+        key = {"Idempotency-Key": "studio-v2-key-000001"}
+        with self.authenticated():
+            extra = await self.client.post(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies, headers=key, json={"instruction": "고쳐", "x": 1})
+            long = await self.client.post(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies, headers=key, json={"instruction": "가" * 2001})
+        self.assertIn(extra.status_code, (400, 422))
+        self.assertIn(long.status_code, (400, 422))
+        self.assertEqual(self.v2.calls, [])
+
+    async def test_edit_turn_routes(self):
+        key = {"Idempotency-Key": "studio-v2-key-000001"}
+        path = BASE + "/outputs/" + OID + "/edit-turns"
+        with self.authenticated():
+            created = await self.client.post(path, cookies=self.cookies, headers=key, json={"instruction": "고쳐"})
+            listed = await self.client.get(path, cookies=self.cookies)
+            applied = await self.client.post(path + "/" + TURN + "/apply", cookies=self.cookies, json={})
+            discarded = await self.client.post(path + "/" + TURN + "/discard", cookies=self.cookies, json={})
+        self.assertEqual([r.status_code for r in (created, listed, applied, discarded)], [202, 200, 201, 204])
+        self.assertEqual(created.json()["data"], {"turn_id": TURN, "job_id": "sve-1", "state": "queued"})
+        self.assertIs(created.json()["meta"]["replayed"], False)
+        self.assertEqual(applied.json()["data"], {"output_id": OID, "turn_id": TURN, "revision_no": 4})
+
+    async def test_edit_turn_routes_use_edit_action(self):
+        from daon2_user_api.authorization import Action
+        seen = []
+        original = self.dependencies.authorization_service.authorize_action
+        def spy(**kwargs):
+            seen.append(kwargs["action"])
+            return original(**kwargs)
+        key = {"Idempotency-Key": "studio-v2-key-000001"}
+        path = BASE + "/outputs/" + OID + "/edit-turns"
+        with self.authenticated(), patch.object(self.dependencies.authorization_service, "authorize_action", side_effect=spy):
+            await self.client.post(path, cookies=self.cookies, headers=key, json={"instruction": "고쳐"})
+            await self.client.get(path, cookies=self.cookies)
+            await self.client.post(path + "/" + TURN + "/apply", cookies=self.cookies, json={})
+            await self.client.post(path + "/" + TURN + "/discard", cookies=self.cookies, json={})
+        self.assertEqual(seen, [Action.EDIT] * 4)
+
+    async def test_dto_hides_internal_content(self):
+        with self.authenticated():
+            listed = await self.client.get(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies)
+        turn = listed.json()["data"]["turns"][0]
+        self.assertNotIn("new_evidence", turn)
+        self.assertEqual(set(turn["changes"][0]), {"op", "id", "before_text", "after_text", "reason"})
+
+    async def test_edit_turn_errors_are_safe_codes(self):
+        self.v2.fail = ("CHAT_EDIT_STALE", 409)
+        with self.authenticated():
+            response = await self.client.post(BASE + "/outputs/" + OID + "/edit-turns/" + TURN + "/apply", cookies=self.cookies, json={})
+        self.assertEqual((response.status_code, response.json()["error"]["code"]), (409, "CHAT_EDIT_STALE"))
+
+    async def test_bad_turn_id_is_rejected(self):
+        with self.authenticated():
+            response = await self.client.post(BASE + "/outputs/" + OID + "/edit-turns/not-a-turn/apply", cookies=self.cookies, json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.v2.calls, [])
 
     async def test_audio_route_serves_mp3_with_single_range_support(self):
         with self.authenticated():
