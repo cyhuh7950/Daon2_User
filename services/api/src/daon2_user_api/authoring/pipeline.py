@@ -365,6 +365,19 @@ class AuthoringPipeline:
         paused.update({"pause_requested": False, "pause_reason": reason})
         return GenerationResult(content={**paused, "language": "ko", "warnings": []}, generated_with={"prompt_version": "authoring-unit-v1"})
 
+    def _terms_units(self, ctx: GenerationContext, session: Mapping[str, Any], sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        """소목차가 정한 핵심 용어로 승인 온톨로지를 찾아 용어 사용을 점검한다."""
+        base = {"id": "term_consistency", "title": "용어·일관성"}
+        lookup = getattr(self._evidence, "concepts", None)
+        if not callable(lookup):
+            return {**base, "status": "skipped", "reason": "connector_not_registered"}
+        target = self._evidence.prepare(ctx.context)
+        if target is None or target.daon2_connector_id is None:
+            return {**base, "status": "skipped", "reason": "connector_not_registered"}
+        queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
+        concepts = lookup(target, queries)
+        return term_consistency(sections, concepts) if concepts else {**base, "status": "skipped", "reason": "no_approved_concepts"}
+
     def _finish_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate, pack: ContextPack, provider: tuple[str, str, str]) -> GenerationResult:
         ctx.progress(92, "점검")
         knowledge = session.get("knowledge") or []
@@ -378,7 +391,7 @@ class AuthoringPipeline:
             checks.append({"id": "rfp_requirement_coverage", "title": "요구사항 대응표", "status": "done", "summary": {s: sum(1 for c in coverage if c["status"] == s) for s in ("covered", "partial", "missing")}})
         checks.append(self.ruleset(ctx, template, document_sections))
         checks.append(evidence_integrity(document_sections, {p.ref for p in pack.passages} | {str(k["ref"]) for k in knowledge}))
-        checks.append(self.terms(ctx, template, document_sections))
+        checks.append(self._terms_units(ctx, session, document_sections))
         if template.style == "contract":
             checks.append(self.law_crosscheck(ctx, template, document_sections, knowledge))
         warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]

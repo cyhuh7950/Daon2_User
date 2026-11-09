@@ -222,6 +222,15 @@ class WritingTests(Base):
         self.assertIn("term_consistency", ids)
         self.assertIn("required_clauses", ids)
 
+    def test_term_check_uses_terms_written_by_the_units(self):
+        self.finder.concepts = lambda target, queries: self.term_queries.append(list(queries)) or [{"concept_id": "c1", "label": "평가 기준", "synonyms": ["심사 기준"]}]
+        self.finder.prepare = lambda context: EvidenceTarget(SimpleNamespace(tenant_id="t"), "kc-rag", ({"alias": "P1", "project_id": "p1", "project_name": "프로젝트", "work_package_id": "w1", "work_package_name": "제안서 작업"},), "ctx", "kc-daon2")
+        self.term_queries = []
+        self.generating()
+        check = next(c for c in self.run_job().content["document"]["checks"] if c["id"] == "term_consistency")
+        self.assertEqual(check["status"], "done")
+        self.assertEqual(self.term_queries, [["평가 기준"]])
+
     def test_every_unit_is_saved_as_it_finishes(self):
         self.generating()
         self.run_job()
