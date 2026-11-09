@@ -8,7 +8,7 @@ import { secureUuid } from "@daon2-user/ui/secure-uuid";
 const CONNECTOR_ID = /^kc-[0-9a-f]{32}$/u;
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{2,63}$/u;
 export const CONNECTOR_KINDS = Object.freeze({
-  daon2_rag: { label: "Daon2-RAG", tools: ["search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status"] },
+  daon2_rag: { label: "Daon2-RAG", tools: ["search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status", "list_knowledge_scopes"] },
   daon2: { label: "Daon2", tools: ["ontology_search_concepts", "ontology_get_concept", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search"] },
   law: { label: "법령", tools: ["search_law", "get_law_text"] },
 });
@@ -62,10 +62,11 @@ export async function listKnowledgeConnectors({ signal, fetchImpl } = {}) {
   return data.connectors;
 }
 
-export async function registerKnowledgeConnector({ kind, name, endpointUrl, token, allowedTools, allowedScopes, signal, fetchImpl }) {
+export async function registerKnowledgeConnector({ kind, name, endpointUrl, token, oauth, allowedTools, allowedScopes, signal, fetchImpl }) {
   if (!Object.hasOwn(CONNECTOR_KINDS, kind) || !String(name ?? "").trim() || !String(endpointUrl ?? "").trim()) throw new KnowledgeConnectorError("CONNECTOR_INPUT_INVALID", 0);
   const body = { kind, name: String(name).trim(), endpoint_url: String(endpointUrl).trim() };
   if (token) body.token = token;
+  if (oauth) body.oauth = { token_url: oauth.tokenUrl, client_id: oauth.clientId, client_secret: oauth.clientSecret, resource: oauth.resource, scope: oauth.scope };
   if (Array.isArray(allowedTools) && allowedTools.length) body.allowed_tools = allowedTools;
   if (Array.isArray(allowedScopes) && allowedScopes.length) body.allowed_scopes = allowedScopes.map((scope) => ({ project_id: scope.projectId, work_package_id: scope.workPackageId }));
   const { data } = await call("POST", "/bff/api/admin/knowledge-connectors", { body, idempotent: true, signal, fetchImpl });

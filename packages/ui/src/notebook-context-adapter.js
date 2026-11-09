@@ -264,6 +264,12 @@ export function createNotebookContextWorkspaceAdapter(baseAdapter, inputContext)
       ? (requestId, options) => baseAdapter.cancelSourceDeletionRequest(requestId, options)
       : undefined,
     listKnowledgePackages,
+    getNotebookKnowledgeScopes: typeof baseAdapter.getNotebookKnowledgeScopes === "function"
+      ? (options) => baseAdapter.getNotebookKnowledgeScopes({ ...options, notebookId: context.notebook_id })
+      : undefined,
+    saveNotebookKnowledgeScopes: typeof baseAdapter.saveNotebookKnowledgeScopes === "function"
+      ? (items, options) => baseAdapter.saveNotebookKnowledgeScopes(items, { ...options, notebookId: context.notebook_id })
+      : undefined,
     loadNotebookConversation,
     listStudioOutputs,
     listProductStudioOutputs: typeof baseAdapter.listProductStudioOutputs === "function"

@@ -2,6 +2,7 @@
 
 from .client import McpClient, McpToolResult
 from .errors import McpError
+from .oauth import ClientCredentialsTokenSource
 from .transport import HttpJsonRpcTransport
 
-__all__ = ["HttpJsonRpcTransport", "McpClient", "McpError", "McpToolResult"]
+__all__ = ["ClientCredentialsTokenSource", "HttpJsonRpcTransport", "McpClient", "McpError", "McpToolResult"]

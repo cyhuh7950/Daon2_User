@@ -219,6 +219,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 .connector-status.status-failed { background: rgba(239, 68, 68, .18); color: #f87171; }
 .connector-dialog { display: grid; gap: 10px; max-width: 560px; padding: 16px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface, rgba(255, 255, 255, .04)); }
 .connector-dialog h3 { margin: 0; }
+.daon-scope-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.daon-scope-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.daon-scope-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .45); }
+.daon-scope-dialog { width: min(560px, 100%); max-height: min(640px, 90vh); overflow: auto; background: var(--daon-color-surface, #fff); }
+.daon-scope-projects { display: grid; gap: 10px; }
 .connector-dialog label { display: grid; gap: 4px; }
 .connector-dialog input[type="text"], .connector-dialog input[type="url"], .connector-dialog input[type="password"], .connector-dialog select { min-height: 32px; padding: 0 8px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: transparent; color: inherit; }
 .connector-dialog fieldset { display: grid; gap: 6px; margin: 0; padding: 8px 10px; border: 1px solid var(--daon-color-border); border-radius: 8px; }

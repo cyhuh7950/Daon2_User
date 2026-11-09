@@ -245,6 +245,11 @@ class VirtualServer:
                 return {"evidence": self._result(doc, block, 1.0)}
         raise ToolError("NOT_FOUND")
 
+    def _t_list_knowledge_scopes(self, args, claims):  # type: ignore[no-untyped-def]
+        return {"scopes": [{"tenant_id": "virtual-tenant", "project_id": p["project_id"], "project_name": p["project_id"], "work_package_id": p["work_package_id"],
+                            "work_package_name": p["work_package_id"], "updated_at": "2026-01-01T00:00:00Z", "approved_document_count": 1} for p in claims.get("pairs", [])],
+                "next_cursor": None}
+
     def _t_list_documents(self, args, claims):  # type: ignore[no-untyped-def]
         docs = self._scoped(args, claims)
         if args.get("document_type"):

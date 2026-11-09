@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const KIND_LABEL = { daon2_rag: "Daon2-RAG", daon2: "Daon2", law: "법령" };
 const KIND_TOOLS = {
-  daon2_rag: ["search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status"],
+  daon2_rag: ["search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status", "list_knowledge_scopes"],
   daon2: ["ontology_search_concepts", "ontology_get_concept", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search"],
   law: ["search_law", "get_law_text"],
 };
@@ -26,21 +26,26 @@ const ERROR_TEXT = {
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const stamp = (value) => (value ? String(value).replace("T", " ").slice(0, 16) : "—");
 
-const emptyForm = () => ({ kind: "daon2_rag", name: "", endpointUrl: "", token: "", tools: [], scopes: [{ projectId: "", workPackageId: "" }] });
+const emptyForm = () => ({ kind: "daon2_rag", name: "", endpointUrl: "", authMode: "token", token: "", tokenUrl: "", clientId: "", clientSecret: "", resource: "", scope: "", tools: [], scopes: [{ projectId: "", workPackageId: "" }] });
+const OAUTH_FIELDS = [["tokenUrl", "토큰 발급 주소", "url"], ["clientId", "Client ID", "text"], ["clientSecret", "Secret", "password"], ["resource", "Resource", "url"], ["scope", "Scope", "text"]];
 
 function RegisterDialog({ onSubmit, onCancel, pending, error }) {
   const [form, setForm] = useState(emptyForm);
   const set = (patch) => setForm((current) => ({ ...current, ...patch }));
   const toggleTool = (tool) => set({ tools: form.tools.includes(tool) ? form.tools.filter((item) => item !== tool) : [...form.tools, tool] });
   const setScope = (index, patch) => set({ scopes: form.scopes.map((scope, position) => (position === index ? { ...scope, ...patch } : scope)) });
-  const valid = form.name.trim() && form.endpointUrl.trim();
+  const oauthMode = form.authMode === "oauth";
+  const valid = form.name.trim() && form.endpointUrl.trim() && (!oauthMode || OAUTH_FIELDS.every(([key]) => form[key].trim()));
   return <section className="connector-dialog" role="dialog" aria-modal="true" aria-label="지식 연결 등록">
     <h3>지식 연결 등록</h3>
     <label>종류<select aria-label="종류" value={form.kind} onChange={(event) => set({ kind: event.target.value, tools: [] })}>
       {Object.entries(KIND_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <label>이름<input type="text" aria-label="이름" maxLength={120} value={form.name} onChange={(event) => set({ name: event.target.value })} /></label>
     <label>서버 주소<input type="url" aria-label="서버 주소" autoComplete="off" value={form.endpointUrl} onChange={(event) => set({ endpointUrl: event.target.value })} /></label>
-    <label>인증 토큰<input type="password" aria-label="인증 토큰" autoComplete="new-password" maxLength={8192} value={form.token} onChange={(event) => set({ token: event.target.value })} /></label>
+    <label>인증 방식<select aria-label="인증 방식" value={form.authMode} onChange={(event) => set({ authMode: event.target.value })}>
+      <option value="token">고정 토큰</option><option value="oauth">토큰 발급(Client ID·Secret)</option></select></label>
+    {oauthMode ? OAUTH_FIELDS.map(([key, label, type]) => <label key={key}>{label}<input type={type} aria-label={label} autoComplete={type === "password" ? "new-password" : "off"} value={form[key]} onChange={(event) => set({ [key]: event.target.value })} /></label>)
+      : <label>인증 토큰<input type="password" aria-label="인증 토큰" autoComplete="new-password" maxLength={8192} value={form.token} onChange={(event) => set({ token: event.target.value })} /></label>}
     <fieldset><legend>허용 도구 (선택하지 않으면 종류의 기본 도구를 모두 허용)</legend>
       {KIND_TOOLS[form.kind].map((tool) => <label key={tool} className="connector-tool"><input type="checkbox" checked={form.tools.includes(tool)} onChange={() => toggleTool(tool)} />{tool}</label>)}
     </fieldset>
@@ -56,7 +61,9 @@ function RegisterDialog({ onSubmit, onCancel, pending, error }) {
     <div className="connector-dialog-actions">
       <button type="button" onClick={onCancel} disabled={pending}>취소</button>
       <button type="button" disabled={!valid || pending} onClick={() => onSubmit({
-        kind: form.kind, name: form.name, endpointUrl: form.endpointUrl, token: form.token, allowedTools: form.tools,
+        kind: form.kind, name: form.name, endpointUrl: form.endpointUrl, token: oauthMode ? "" : form.token,
+        ...(oauthMode ? { oauth: { tokenUrl: form.tokenUrl.trim(), clientId: form.clientId.trim(), clientSecret: form.clientSecret, resource: form.resource.trim(), scope: form.scope.trim() } } : {}),
+        allowedTools: form.tools,
         allowedScopes: form.scopes.filter((scope) => scope.projectId.trim() && scope.workPackageId.trim()).map((scope) => ({ projectId: scope.projectId.trim(), workPackageId: scope.workPackageId.trim() })),
       })}>등록</button>
     </div>

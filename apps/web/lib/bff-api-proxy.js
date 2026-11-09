@@ -517,6 +517,21 @@ function routeFor(method, segments) {
           query: new Set(["run_id", "studio_job_id"]), strictQuery: true, notebookContextSelection: true }
       : { methodRejected: true };
   }
+  if (segments.length === 3 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "daon-knowledge-scopes") {
+    return method === "GET"
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/daon-knowledge-scopes`, query: new Set(), strictQuery: true, timeoutMs: 60_000 }
+      : { methodRejected: true };
+  }
+  if (
+    segments.length === 5 && segments[0] === "workspaces"
+    && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "knowledge-scopes"
+  ) {
+    return method === "GET" || method === "PUT"
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/knowledge-scopes`,
+          query: new Set(), strictQuery: true, csrfProvenanceRequired: method === "PUT", maxRequestBytes: 128 * 1024, timeoutMs: 60_000 }
+      : { methodRejected: true };
+  }
   if (
     segments.length === 5 && segments[0] === "workspaces"
     && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
