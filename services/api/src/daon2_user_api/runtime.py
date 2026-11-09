@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Literal, Mapping, cast
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -267,10 +267,21 @@ def _source_boundary_event(
 _BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
 _SOURCE_UPLOAD_PATH = re.compile(r"^/api/v1/workspaces/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/sources$")
 _SOURCE_FILENAME = re.compile(r"^[^/\\\x00-\x1f]{1,251}$")
+_ENCODED_FILENAME_PREFIX = "UTF-8''"
 _QUESTION_REQUEST_TIMEOUT_SECONDS = None
 _RFC1918_NETWORKS = tuple(
     ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
+
+
+def _source_filename(header_value: str) -> str:
+    """헤더의 파일 이름을 복원한다. 복원할 수 없으면 기존 이름 검사가 거부하도록 빈 값을 돌려준다."""
+    if not header_value.startswith(_ENCODED_FILENAME_PREFIX):
+        return header_value
+    try:
+        return unquote(header_value[len(_ENCODED_FILENAME_PREFIX):], errors="strict")
+    except UnicodeDecodeError:
+        return ""
 
 
 def _is_private_http_gateway(parsed: object) -> bool:
@@ -2902,7 +2913,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
                     request.method == "POST" and _SOURCE_UPLOAD_PATH.fullmatch(request.url.path) is not None
                 )
                 if is_source_upload:
-                    filename = request.headers.get("x-source-filename", "")
+                    filename = _source_filename(request.headers.get("x-source-filename", ""))
                     expected_type = SourceIngestor.expected_mime_for_filename(filename)
                     if expected_type is None:
                         return _error_response(400, "SOURCE_FILENAME_INVALID", trace_id)
@@ -4530,6 +4541,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     ) -> JSONResponse:
         _require_query_keys(request, frozenset())
         _idempotency_key(idempotency_key)
+        source_filename = _source_filename(source_filename)
         if _SOURCE_FILENAME.fullmatch(source_filename) is None:
             raise SourceUploadError("SOURCE_FILENAME_INVALID")
         principal = _principal(request, dependencies)
