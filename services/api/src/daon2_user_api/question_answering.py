@@ -9,7 +9,7 @@ import time
 import unicodedata
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Mapping, Protocol, cast
+from typing import Iterable, Mapping, Protocol, cast
 from urllib.parse import urlsplit
 
 from .document_index_postgres import IndexedEvidenceChunk
@@ -44,6 +44,17 @@ def classify_question_intent(value: str) -> str:
     if _SOURCE_LOOKUP_PATTERN.search(normalized):
         return "explicit_source_lookup"
     return "work_support"
+
+
+def strip_citation_labels(answer: str, chunk_ids: Iterable[str]) -> str:
+    """LLM이 본문에 그대로 쓴 내부 인용 번호를 지운다. 사실 검사가 아니라 표시 정리이며 숫자·날짜 검사는 그대로다."""
+    cleaned = answer
+    for chunk_id in sorted(chunk_ids, key=len, reverse=True):
+        cleaned = re.sub(rf"(?<![\w-]){re.escape(chunk_id)}(?![\w-])", "", cleaned)
+    if cleaned == answer:
+        return answer
+    cleaned = re.sub(r"[(\[（【][\s,，]*[)\]）】]", "", cleaned)
+    return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +267,7 @@ class OpenAICompatibleTextGenerationAdapter:
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
+        answer = strip_citation_labels(answer, allowed)
         cited_text = "\n".join(
             item.text for item in request.evidence if item.chunk_id in set(cited)
         )
@@ -754,6 +766,7 @@ class OllamaTextGenerationAdapter:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
+        answer = strip_citation_labels(answer, allowed)
         cited_text = "\n".join(
             item.text for item in request.evidence if item.chunk_id in set(cited)
         )

@@ -271,6 +271,19 @@ class PostgresQuestionEgressAuthorizer:
         except (TypeError, ValueError, json.JSONDecodeError):
             raise QuestionAnsweringError("EGRESS_TRANSFORMATION_FAILED", status=403) from None
 
+    def authorize_plan(self, context: QuestionContext, selection: TextModelSelection, provider_payload: bytes) -> bool:
+        """자료 계획 호출의 외부 전송 판정. 문서 본문이 없는 호출이며, 사람의 추가 승인이 필요한 정책이면 보내지 않는다."""
+        if selection.provider_kind != "external_api":
+            return True
+        effective = self._policy_service.get_effective(EgressPolicyContext(
+            context.tenant_id, context.tenant_id, context.workspace_id,
+            context.actor_id, context.trace_id, context.policy_version,
+        ))
+        return effective.required_approver == "none" and external_question_policy_matches(
+            effective, provider_kind=selection.provider_kind, destination=(urlsplit(selection.base_url).hostname or "").casefold(),
+            payload_bytes=len(provider_payload), classification="internal", masking_required=True, redaction_required=True,
+        )
+
     def authorize(
         self, context: QuestionContext, *, run_id: str, source_id: str | None,
         source_version_id: str | None, selection: TextModelSelection, provider_payload: bytes,

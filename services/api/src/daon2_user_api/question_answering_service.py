@@ -15,7 +15,11 @@ from typing import ContextManager, Mapping, Protocol, cast
 
 from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
-from .question_external_evidence import LOCAL_LIMIT_WITH_EXTERNAL, ExternalEvidence, ExternalEvidenceError, merge_evidence
+from .question_answering import strip_citation_labels
+from .question_external_evidence import (
+    ANSWER_FORMAT_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
+    default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
+)
 from .document_index_postgres import IndexedEvidenceChunk
 from .document_understanding_adapter import DocumentUnderstandingError, _evidence_anchors
 from .question_answering import (
@@ -286,6 +290,7 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
         except (KeyError, TypeError):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
+        answer = strip_citation_labels(answer, allowed)
         cited_text = "\n".join(item.text for item in request.evidence if item.chunk_id in set(cited))
         if (
             not answer or len(answer) > 8_000 or len(cited) != len(set(cited))
@@ -532,10 +537,19 @@ class QuestionAnsweringService:
         self._customization_provider = None
 
     _external_search = None
+    _external_planner = None
+    _external_history = None
+    _external_plan_audit = None
 
-    def set_external_evidence(self, search) -> None:
-        """search(context, question) -> 선택한 업무 패키지의 승인 근거. 설정하지 않으면 지금까지처럼 소스만 쓴다."""
+    def set_external_evidence(self, search, *, planner=None, history=None, plan_audit=None) -> None:
+        """search(context, question) -> 선택한 업무 패키지의 승인 근거. 설정하지 않으면 지금까지처럼 소스만 쓴다.
+
+        planner를 주면 검색 전에 LLM에 필요한 자료를 묻고(WO-K4), history는 최근 대화, plan_audit은 그 전송 기록이다.
+        """
         self._external_search = search
+        self._external_planner = planner
+        self._external_history = history
+        self._external_plan_audit = plan_audit
         self._external_cache: dict[tuple[str, ...], tuple[float, tuple[ExternalEvidence, ...]]] = {}
         self._external_lock = threading.Lock()
 
@@ -551,12 +565,48 @@ class QuestionAnsweringService:
         if cached is not None:
             return cached[1]
         try:
-            found = tuple(self._external_search(context, question))
+            found = (self._planned_evidence(context, question) if self._external_planner is not None
+                     else tuple(self._external_search(context, question)))
         except ExternalEvidenceError as error:
             raise QuestionAnsweringError(error.code, status=error.status, retryable=error.retryable) from None
         with self._external_lock:
             self._external_cache[key] = (now + EXTERNAL_EVIDENCE_REUSE_SECONDS, found)
         return found
+
+    @staticmethod
+    def _knowledge_answer_payload(payload, mixed: bool):  # type: ignore[no-untyped-def]
+        payload = append_system_rule(payload, ANSWER_FORMAT_RULE)
+        return append_system_rule(payload, PRIORITY_RULE) if mixed else payload
+
+    def _planned_evidence(self, context: QuestionContext, question: str) -> tuple[ExternalEvidence, ...]:
+        target = self._external_planner.prepare(context)
+        if target is None:
+            return ()
+        requests = self._plan_requests(context, question, target)
+        return tuple(self._external_planner.run(target, default_requests(target, question) if requests is None else requests))
+
+    def _plan_requests(self, context: QuestionContext, question: str, target):  # type: ignore[no-untyped-def]
+        """LLM에 필요한 자료를 묻는다. 답을 받지 못하면 None이고 호출자는 사용자 문장으로 검색한다."""
+        try:
+            history = tuple(self._external_history(context)) if self._external_history is not None else ()
+        except Exception:  # noqa: BLE001  최근 대화는 검색어를 다듬는 보조 자료라 없어도 질문은 진행한다.
+            history = ()
+        model_context = WorkspaceModelContext(context.tenant_id, context.workspace_id, context.actor_id)
+        try:
+            with self._resolve_selected(context, model_context) as (selection, _explicit):
+                if self._run_cost_sessions is not None and self._run_cost_sessions.applies(context, selection, run_kind="question"):
+                    return None
+                prepared = self._adapter_registry.prepare_general(selection, question, context.trace_id, self._transport)
+                prepared = replace(prepared, provider_payload=rewrite_plan_payload(prepared.provider_payload, build_plan_prompt(question, history, target)))
+                authorize = getattr(self._egress, "authorize_plan", None)
+                if not callable(authorize) or not authorize(context, selection, canonical_json_bytes(prepared.provider_payload)):
+                    return None
+                if self._external_plan_audit is not None:
+                    self._external_plan_audit(context, selection)
+                generated = self._adapter_registry.generate_general(prepared)
+        except (ValueError, DocumentUnderstandingError, WorkspaceModelUnavailable, QuestionAnsweringError):
+            return None
+        return parse_plan(generated.answer, target)
 
     def set_model_selection_reader(self, reader) -> None:
         """노트북·사용자별 모델 선택(reader(tenant, workspace, notebook, actor) -> dict|None). 없으면 작업공간 기본 모델."""
@@ -833,6 +883,7 @@ class QuestionAnsweringService:
             if not evidence:
                 general = True
         external = self._external_evidence(context, question)
+        mixed = bool(evidence) and bool(external)
         evidence = merge_evidence(evidence, external)
         use_general = general and not external
         model_context = WorkspaceModelContext(
@@ -851,6 +902,8 @@ class QuestionAnsweringService:
                         selection, evidence, question, context.trace_id, self._transport,
                     )
                 )
+                if external:
+                    prepared = replace(prepared, provider_payload=self._knowledge_answer_payload(prepared.provider_payload, mixed))
                 prepared = self._prepare_qa_structured_payload(context, prepared)
                 wire = canonical_json_bytes(prepared.provider_payload)
                 transformer = getattr(self._egress, "prepare_payload", None)
@@ -1157,6 +1210,8 @@ class QuestionAnsweringService:
                 raw_code if raw_code.startswith("TEXT_") else "TEXT_GENERATION_FAILED",
                 status=503 if raw_code.startswith("TEXT_PROVIDER_") else 502,
             ) from None
+        if external:
+            prepared = replace(prepared, provider_payload=self._knowledge_answer_payload(prepared.provider_payload, bool(local_evidence)))
         original_format = prepared.provider_payload.get("format")
         prepared = self._prepare_qa_structured_payload(context, prepared)
         # Only the existing verified QA adapter changes section evidence to
