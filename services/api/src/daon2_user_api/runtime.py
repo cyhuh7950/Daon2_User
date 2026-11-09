@@ -161,7 +161,6 @@ from .knowledge_package import (
 from .knowledge_package_postgres import PostgresKnowledgePackageService
 from .mcp_connector import ConnectorError, ConnectorRegistry, create_open_law_connector
 from .connector_postgres import PostgresConnectorRepository
-from .approved_knowledge_connector import ApprovedKnowledgeConnector
 from .retention import (
     DerivativeInput, ReferenceCleanupPort, ReferenceRetentionRepository,
     RetentionContext, RetentionError, RetentionService,
@@ -2484,11 +2483,6 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     connector_registry = dependencies.connector_registry or ConnectorRegistry(
         (
             create_open_law_connector(api_key=os.environ.get("DAON_OPEN_LAW_API_KEY")),
-            ApprovedKnowledgeConnector(
-                token=os.environ.get("DAON_APPROVED_KNOWLEDGE_TOKEN"),
-                timeout_seconds=5,
-                max_retries=2,
-            ).as_connector(),
         )
     )
     connector_repository = dependencies.connector_repository or (
@@ -4432,10 +4426,6 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         )
         if body.kind == "mcp" and body.name == "국가법령정보센터":
             connector = create_open_law_connector(api_key=os.environ.get("DAON_OPEN_LAW_API_KEY"))
-        elif body.kind == "daon_approved_knowledge":
-            connector = ApprovedKnowledgeConnector(
-                token=os.environ.get("DAON_APPROVED_KNOWLEDGE_TOKEN"), timeout_seconds=5, max_retries=2,
-            ).as_connector()
         else:
             raise ConnectorError("CONNECTOR_KIND_UNSUPPORTED")
         # Law registration has no Notebook/public consent input. Do not probe
