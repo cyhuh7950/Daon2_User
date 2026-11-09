@@ -12,6 +12,8 @@ gen() { [ -s "secrets/$1" ] || { umask 077; openssl rand -hex "${2:-32}" > "secr
 for name in db_app_password db_owner_password db_superuser_password object_access_key object_secret_key; do gen "$name" 24; done
 for name in provider_credential_key recovery_manifest_key step_up_token_key; do gen "$name" 48; done
 [ -s secrets/tts_engines.json ] || { umask 077; echo '{"engines": []}' > secrets/tts_engines.json; }
+# compose.yaml 이 외부 네트워크로 요구한다. 새 서버에는 없으므로 없을 때만 만든다.
+docker network inspect proxy-network >/dev/null 2>&1 || docker network create proxy-network >/dev/null
 
 if [ ! -f .env ]; then
   umask 077
