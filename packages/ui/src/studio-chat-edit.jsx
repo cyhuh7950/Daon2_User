@@ -13,7 +13,7 @@ const STATE_NOTE = { applied: "studio.chat_edit.applied", discarded: "studio.cha
 
 function Change({ change }) {
   return <div className="studio-chat-edit__change">
-    <p className="studio-chat-edit__piece">{change.reason}</p>
+    <p className="studio-chat-edit__piece">{msg(`studio.chat_edit.op.${change.op}`)} · {change.id}{change.reason ? ` · ${change.reason}` : ""}</p>
     <div className="studio-chat-edit__compare">
       <div><strong>{msg("studio.chat_edit.before")}</strong><p>{change.before_text || msg("studio.chat_edit.empty")}</p></div>
       <div><strong>{msg("studio.chat_edit.after")}</strong><p>{change.after_text || msg("studio.chat_edit.empty")}</p></div>
@@ -42,15 +42,16 @@ export function StudioChatEdit({ studio, outputId, onApplied, pollMs = POLL_MS }
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [listRetry, setListRetry] = useState(0);
   const alive = useRef(true);
   const working = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const next = await studio.listEditTurns(outputId);
-      if (alive.current) setTurns(next);
-    } catch (failure) {
-      if (alive.current) setError(failure?.code ?? "STUDIO_REQUEST_FAILED");
+      if (alive.current) { setTurns(next); setListRetry(0); }
+    } catch {
+      if (alive.current) setListRetry((count) => count + 1);  // 일시 오류면 다음 조회로 잇는다
     }
   }, [studio, outputId]);
 
@@ -65,7 +66,7 @@ export function StudioChatEdit({ studio, outputId, onApplied, pollMs = POLL_MS }
     if (!active) return undefined;
     const timer = setTimeout(load, pollMs);
     return () => clearTimeout(timer);
-  }, [active, turns, load, pollMs]);
+  }, [active, turns, listRetry, load, pollMs]);
 
   const run = async (work) => {
     if (working.current) return;
@@ -99,7 +100,7 @@ export function StudioChatEdit({ studio, outputId, onApplied, pollMs = POLL_MS }
 
   return <section className="studio-chat-edit" aria-label={msg("studio.chat_edit.title")}>
     <h3>{msg("studio.chat_edit.title")}</h3>
-    {error && <p className="studio-alert" role="alert">{studioErrorMessage(error)}</p>}
+    {(error || listRetry > 0) && <p className="studio-alert" role="alert">{studioErrorMessage(error ?? "STUDIO_REQUEST_FAILED")}</p>}
     <ul className="studio-chat-edit__turns">
       {turns.map((turn) => <Turn key={turn.turn_id} turn={turn} busy={busy} onApply={apply} onDiscard={discard} />)}
     </ul>

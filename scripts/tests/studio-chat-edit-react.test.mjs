@@ -172,3 +172,27 @@ test("failed and stale show safe message", async () => {
     assert.ok(!view.container.textContent.includes("raw internal detail"));
   } finally { await view.close(); }
 });
+
+test("polling recovers after a failed list", async () => {
+  const studio = fakeStudio([[turn({ state: "queued", reply: null, changes: [] })], [turn()]]);
+  const original = studio.listEditTurns;
+  let failures = 1, calls = 0;
+  studio.listEditTurns = async () => { calls += 1; if (calls === 2 && failures-- > 0) throw Object.assign(new Error("net"), { code: "STUDIO_REQUEST_FAILED" }); return original(); };
+  const view = await mount(studio);
+  try {
+    await view.flush();
+    await view.flush();
+    await view.flush();
+    assert.ok(buttonByText(view.container, "반영"), "실패 뒤에도 조회를 이어야 한다");
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("role") === "alert").length, 0);
+  } finally { await view.close(); }
+});
+
+test("each change says what happens and where", async () => {
+  const view = await mount(fakeStudio([[turn({ changes: [
+    { op: "insert_after", id: "s2.b1", before_text: "", after_text: "새 문단", reason: "" },
+    { op: "delete", id: "s3", before_text: "지울 절", after_text: "", reason: "" }] })]]));
+  try {
+    for (const expected of ["뒤에 추가", "s2.b1", "삭제", "s3"]) assert.ok(view.container.textContent.includes(expected), expected);
+  } finally { await view.close(); }
+});
