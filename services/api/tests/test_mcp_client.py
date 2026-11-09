@@ -46,7 +46,7 @@ class McpClientTests(unittest.TestCase):
             self.assertEqual(client.connect().protocol_version, "2026-07-28")
             names = {t["name"] for t in client.list_tools()}
             self.assertEqual(names, {"search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline",
-                                     "read_document_section", "get_document_version_status"})
+                                     "read_document_section", "get_document_version_status", "list_knowledge_scopes"})
 
     def test_initialize_fallback_for_2025_server_with_session(self):
         with Running("rag", protocol="2025-06-18") as s:

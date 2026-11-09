@@ -9,6 +9,7 @@ import { ProductStudioPane } from "./product-studio-pane.jsx";
 import { StudioFallbackGate } from "./studio-panel.jsx";
 import { NotebookTools } from "./notebook-menu.jsx";
 import { ModelSelectionBar } from "./model-selection-bar.jsx";
+import { DaonKnowledgeScopeSection } from "./daon-knowledge-scope-section.jsx";
 import { StudioIcon } from "./studio-icon.js";
 import "./studio-icon.css";
 import { classifyConversationIntent } from "./conversation-intent.js";
@@ -2050,7 +2051,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {sourceAddError ? <div className="inline-alert compact" role="alert">Source를 등록하지 못했습니다.{sourceErrorHint(sourceAddError)} ({sourceAddError})</div> : null}
           </section> : null}
           {processing ? <p className="source-inline-state" role="status">처리 중 · 잠시만 기다려 주세요.</p> : null}
-          <section className="source-group" aria-labelledby="approved-knowledge-title">
+          {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
             <div className="source-group-heading"><h3 id="approved-knowledge-title">Daon 승인 지식</h3><span>{knowledgePackages.length}</span></div>
             <ul className="source-list knowledge-list" aria-label="Daon 승인 지식 목록">
               {knowledgePackages.map((item) => (
@@ -2062,7 +2063,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               ))}
             </ul>
             {knowledgeSafeError ? <div className="inline-alert compact" role="alert">승인 지식을 불러오지 못했습니다.</div> : null}
-          </section>
+          </section>}
           <section className="source-group" aria-labelledby="connector-source-title">
             <div className="source-group-heading"><h3 id="connector-source-title">연결형 Source</h3><span>{connectors.length}</span></div>
             <ul className="source-list connector-list" aria-label="MCP 및 Daon 승인 지식 Connector 목록">

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import os
 import secrets
 import socket
@@ -18,18 +19,20 @@ from urllib.parse import urlsplit
 from psycopg.types.json import Jsonb
 
 from .cloud_storage import CloudAccessContext
-from .mcp_client import HttpJsonRpcTransport, McpClient, McpError, McpToolResult
+from .mcp_client import ClientCredentialsTokenSource, HttpJsonRpcTransport, McpClient, McpError, McpToolResult
 from .provider_credentials import EncryptedCredential, ProviderCredentialCipher
 
 KINDS = {"daon2_rag": "knowledge-rag", "daon2": "knowledge-ops", "law": "law"}
 # Connector 종류별로 호출을 허용하는 도구의 상한(등록 시 허용 목록은 이 안에서만 고른다).
 KIND_TOOLS: Mapping[str, frozenset[str]] = {
     "daon2_rag": frozenset({"search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section",
-                            "get_document_version_status"}),
+                            "get_document_version_status", "list_knowledge_scopes"}),
     "daon2": frozenset({"ontology_search_concepts", "ontology_get_concept", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search"}),
     "law": frozenset({"search_law", "get_law_text"}),
 }
 _PROVIDER_CODE = "CUSTOM"
+_OAUTH_AUTH_KIND = "oauth_client_credentials"
+_OAUTH_LIMITS = {"token_url": 2048, "client_id": 256, "client_secret": 8192, "resource": 2048, "scope": 1024}
 
 
 # Connector별 호출 한도(F4-02). 비어 있으면 서버 기본값(시간 초과 25초, 동시 4건, 응답 1 MiB, 분당 30회)을 쓴다.
@@ -105,6 +108,7 @@ class KnowledgeConnectorService:
         self._egress_gate = egress_gate
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._clients: dict[tuple[str, str, int], McpClient] = {}
+        self._token_urls: dict[tuple[str, str, int], str] = {}
 
     @staticmethod
     def _scope(context: ConnectorContext, capability: str) -> CloudAccessContext:
@@ -129,21 +133,39 @@ class KnowledgeConnectorService:
         if not isinstance(scopes, list) or any(not isinstance(s, dict) for s in scopes):
             raise ConnectorError("CONNECTOR_SCOPE_INVALID")
         token = spec.get("token")
+        oauth = spec.get("oauth")
+        if token and oauth:
+            raise ConnectorError("CONNECTOR_CREDENTIAL_INVALID")
         connector_id = "kc-" + secrets.token_hex(16)
         sealed = None
-        if token:
+        auth_kind = "none"
+        if oauth:
+            secret = json.dumps(self._validated_oauth(oauth, virtual), ensure_ascii=False).encode("utf-8")
+            sealed = self._cipher.encrypt(connector_id, _PROVIDER_CODE, 1, secret)
+            auth_kind = _OAUTH_AUTH_KIND
+        elif token:
             if not isinstance(token, str) or not 8 <= len(token) <= 8192:
                 raise ConnectorError("CONNECTOR_CREDENTIAL_INVALID")
             sealed = self._cipher.encrypt(connector_id, _PROVIDER_CODE, 1, token.encode("utf-8"))
+            auth_kind = "bearer"
         with self._store._transaction(self._scope(context, "connector.write")) as connection:
             row = connection.execute(
                 "INSERT INTO knowledge_connectors(tenant_id,connector_id,kind,name,endpoint_url,auth_kind,credential_ciphertext,credential_nonce,credential_version,"
                 "encryption_key_version,allowed_tools,allowed_scopes,is_virtual,created_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                 f"RETURNING {_COLUMNS}",
-                (context.tenant_id, connector_id, kind, name, endpoint, "bearer" if sealed else "none", None if sealed is None else sealed.ciphertext,
+                (context.tenant_id, connector_id, kind, name, endpoint, auth_kind, None if sealed is None else sealed.ciphertext,
                  None if sealed is None else sealed.nonce, 1 if sealed else 0, None if sealed is None else sealed.encryption_key_version, tools,
                  Jsonb(scopes), virtual, context.actor_id)).fetchone()
         return _view(row)
+
+    def _validated_oauth(self, oauth: Any, virtual: bool) -> dict[str, str]:
+        if not isinstance(oauth, Mapping) or set(oauth) != set(_OAUTH_LIMITS):
+            raise ConnectorError("CONNECTOR_CREDENTIAL_INVALID")
+        for key, limit in _OAUTH_LIMITS.items():
+            if not isinstance(oauth[key], str) or not 1 <= len(oauth[key]) <= limit:
+                raise ConnectorError("CONNECTOR_CREDENTIAL_INVALID")
+        validate_endpoint(oauth["token_url"], allow_private=self._allow_private or virtual)
+        return {key: oauth[key] for key in _OAUTH_LIMITS}
 
     def list(self, context: ConnectorContext) -> list[dict[str, Any]]:
         with self._store._transaction(self._scope(context, "connector.read")) as connection:
@@ -192,7 +214,7 @@ class KnowledgeConnectorService:
     def _client(self, context: ConnectorContext, connector_id: str) -> tuple[McpClient, dict[str, Any]]:
         with self._store._transaction(self._scope(context, "connector.read")) as connection:
             row = connection.execute(
-                f"SELECT {_COLUMNS},credential_ciphertext,credential_nonce,credential_version,encryption_key_version FROM knowledge_connectors WHERE tenant_id=%s AND connector_id=%s",
+                f"SELECT {_COLUMNS},credential_ciphertext,credential_nonce,credential_version,encryption_key_version,auth_kind FROM knowledge_connectors WHERE tenant_id=%s AND connector_id=%s",
                 (context.tenant_id, connector_id)).fetchone()
         if row is None:
             raise ConnectorError("CONNECTOR_NOT_FOUND", 404)
@@ -202,11 +224,21 @@ class KnowledgeConnectorService:
         key = (context.tenant_id, connector_id, view["version"])
         client = self._clients.get(key)
         if client is None:
-            token = None
+            token, token_provider = None, None
             if row[14] is not None:
                 sealed = EncryptedCredential(bytes(row[14]), bytes(row[15]), int(row[17]), int(row[16]), 1)
                 try:
-                    token = self._cipher.decrypt(connector_id, _PROVIDER_CODE, int(row[16]), sealed).decode("utf-8")
+                    credential = self._cipher.decrypt(connector_id, _PROVIDER_CODE, int(row[16]), sealed).decode("utf-8")
+                    if row[18] == _OAUTH_AUTH_KIND:
+                        oauth = json.loads(credential)
+                        validate_endpoint(oauth["token_url"], allow_private=self._allow_private or view["virtual"])
+                        token_source = ClientCredentialsTokenSource(**oauth)
+                        token_provider = token_source.token
+                        self._token_urls[key] = oauth["token_url"]
+                    else:
+                        token = credential
+                except ConnectorError:
+                    raise
                 except Exception:
                     raise ConnectorError("CONNECTOR_CREDENTIAL_UNAVAILABLE", 503) from None
             validate_endpoint(view["endpoint_url"], allow_private=self._allow_private or view["virtual"])
@@ -219,8 +251,11 @@ class KnowledgeConnectorService:
                 client_options["max_concurrent"] = int(limits["max_concurrent"])
             if "calls_per_minute" in limits:
                 client_options["per_minute"] = int(limits["calls_per_minute"])
-            client = McpClient(HttpJsonRpcTransport(view["endpoint_url"], token=token, **transport_options), allowed_tools=view["allowed_tools"], **client_options)
+            client = McpClient(HttpJsonRpcTransport(view["endpoint_url"], token=token, token_provider=token_provider, **transport_options),
+                               allowed_tools=view["allowed_tools"], **client_options)
             self._clients[key] = client
+        if key in self._token_urls:
+            view["token_url"] = self._token_urls[key]
         return client, view
 
     def verify(self, context: ConnectorContext, connector_id: str) -> dict[str, Any]:
@@ -249,7 +284,9 @@ class KnowledgeConnectorService:
         # 허용 도구는 호출마다 DB에서 읽은 판본으로 만든 클라이언트가 확인한다(판본이 바뀌면 클라이언트를 다시 만든다).
         self._authorize_egress(context, view, arguments)
         scopes = view["allowed_scopes"] or []
-        pair = {k: arguments[k] for k in ("project_id", "work_package_id") if k in arguments}
+        # Daon2 도구는 범위를 중첩 인자 scope로 받는다.
+        target = arguments["scope"] if isinstance(arguments.get("scope"), Mapping) else arguments
+        pair = {k: target[k] for k in ("project_id", "work_package_id") if k in target}
         if pair and scopes and pair not in scopes:
             raise ConnectorError("CONNECTOR_SCOPE_DENIED", 403)
         if client._connection is None:  # noqa: SLF001
@@ -259,17 +296,18 @@ class KnowledgeConnectorService:
     def _authorize_egress(self, context: ConnectorContext, view: Mapping[str, Any], arguments: Mapping[str, Any]) -> None:
         if self._egress_gate is None or view["virtual"]:
             return
-        host = urlsplit(view["endpoint_url"]).hostname or ""
-        if _is_private_host(host):
-            return
-        import json
-        allowed, reason = self._egress_gate.authorize(context, view, len(json.dumps(arguments, ensure_ascii=False).encode("utf-8")))
-        if not allowed:
-            raise ConnectorError("CONNECTOR_EGRESS_DENIED", 403)
+        targets = [(view, len(json.dumps(arguments, ensure_ascii=False).encode("utf-8")))]
+        if view.get("token_url"):  # 토큰 발급 요청도 같은 외부 전송 판정을 받는다.
+            targets.append(({**view, "endpoint_url": view["token_url"]}, 1024))
+        for target, size in targets:
+            if _is_private_host(urlsplit(target["endpoint_url"]).hostname or ""):
+                continue
+            allowed, _reason = self._egress_gate.authorize(context, target, size)
+            if not allowed:
+                raise ConnectorError("CONNECTOR_EGRESS_DENIED", 403)
 
     @staticmethod
     def arguments_fingerprint(arguments: Mapping[str, Any]) -> str:
-        import json
         return hashlib.sha256(json.dumps(arguments, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 

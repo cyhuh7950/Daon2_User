@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 
 from .errors import McpError
 
 MAX_RESPONSE_BYTES = 1024 * 1024
+STATELESS_PROTOCOL = "2026-07-28"
+CLIENT_INFO = {"name": "daon2-user", "version": "0.1.0"}
+_STATELESS_META = {"io.modelcontextprotocol/protocolVersion": STATELESS_PROTOCOL, "io.modelcontextprotocol/clientInfo": CLIENT_INFO,
+                   "io.modelcontextprotocol/clientCapabilities": {}}
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -20,12 +24,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 class HttpJsonRpcTransport:
     def __init__(self, endpoint: str, *, token: str | None = None, timeout_seconds: float = 25.0,
-                 max_response_bytes: int = MAX_RESPONSE_BYTES, extra_headers: Mapping[str, str] | None = None) -> None:
+                 max_response_bytes: int = MAX_RESPONSE_BYTES, extra_headers: Mapping[str, str] | None = None,
+                 token_provider: Callable[[], str] | None = None) -> None:
         parsed = urlsplit(endpoint)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise McpError("MCP_ENDPOINT_INVALID")
         self._endpoint = endpoint
         self._token = token
+        self._token_provider = token_provider
         self._timeout = timeout_seconds
         self._max = max_response_bytes
         self._extra = dict(extra_headers or {})
@@ -33,7 +39,7 @@ class HttpJsonRpcTransport:
         self._counter = 0
 
     def __repr__(self) -> str:  # 토큰을 노출하지 않는다.
-        return f"HttpJsonRpcTransport(endpoint={self._endpoint!r}, token={'set' if self._token else 'none'})"
+        return f"HttpJsonRpcTransport(endpoint={self._endpoint!r}, token={'set' if self._token or self._token_provider else 'none'})"
 
     def request(self, method: str, params: Mapping[str, Any] | None = None, *, protocol_version: str | None = None,
                 session_id: str | None = None) -> tuple[Mapping[str, Any], Mapping[str, str]]:
@@ -41,6 +47,8 @@ class HttpJsonRpcTransport:
         body: dict[str, Any] = {"jsonrpc": "2.0", "id": self._counter, "method": method}
         if params is not None:
             body["params"] = dict(params)
+        if protocol_version == STATELESS_PROTOCOL:
+            body["params"] = {**body.get("params", {}), "_meta": _STATELESS_META}
         return self._post(body, protocol_version, session_id, expect_result=True)
 
     def notify(self, method: str, params: Mapping[str, Any] | None = None, *, protocol_version: str | None = None,
@@ -52,10 +60,16 @@ class HttpJsonRpcTransport:
 
     def _post(self, body: Mapping[str, Any], protocol_version: str | None, session_id: str | None, *, expect_result: bool):  # type: ignore[no-untyped-def]
         headers = {"Content-Type": "application/json", "Accept": "application/json", **self._extra}
-        if self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
+        token = self._token_provider() if self._token_provider else self._token
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         if protocol_version:
             headers["MCP-Protocol-Version"] = protocol_version
+        if protocol_version == STATELESS_PROTOCOL:  # 이 판본의 서버는 헤더와 본문의 method가 일치하는지 검사한다.
+            headers["Accept"] = "application/json, text/event-stream"
+            headers["Mcp-Method"] = str(body["method"])
+            if body["method"] == "tools/call":
+                headers["Mcp-Name"] = str(body["params"]["name"])
         if session_id:
             headers["Mcp-Session-Id"] = session_id
         request = urllib.request.Request(self._endpoint, data=json.dumps(body, separators=(",", ":")).encode("utf-8"), headers=headers, method="POST")

@@ -16,6 +16,7 @@ import { downloadManualAsset, getManualManifest, readManualDocument } from "../l
 import { cancelSourceDeletionRequest, getSourceDeletionRequest, issueSourceDeletionStepUp, requestSourceDeletion } from "../lib/source-retention-api.js";
 import { importWebsiteSource, getWebsiteSnapshot, validWebsiteUrl } from '../lib/website-source-api.js';
 import { searchOpenLaw,previewOpenLaw,importOpenLaw,getOpenLawSnapshot,getOpenLawCitation,listWorkspaceConnectorSources } from '../lib/product-workspace-api.js';
+import { getNotebookKnowledgeScopes, listDaonKnowledgeScopes, saveNotebookKnowledgeScopes } from "../lib/daon-knowledge-scopes-api.js";
 
 export function createWebProductWorkspaceAdapter(workspaceId, notebookId) {
   const notebookOptions = (options = {}) => (notebookId
@@ -43,6 +44,9 @@ export function createWebProductWorkspaceAdapter(workspaceId, notebookId) {
     getSourceDeletionRequest,
     cancelSourceDeletionRequest,
     listKnowledgePackages: (options) => listWorkspaceKnowledgePackages(workspaceId, options),
+    listDaonKnowledgeScopes: (options) => listDaonKnowledgeScopes(workspaceId, options),
+    getNotebookKnowledgeScopes: (options = {}) => getNotebookKnowledgeScopes(workspaceId, notebookId ?? options.notebookId, options),
+    saveNotebookKnowledgeScopes: (items, options = {}) => saveNotebookKnowledgeScopes(workspaceId, notebookId ?? options.notebookId, items, options),
     listConnectors: (options) => listWorkspaceConnectors(workspaceId, options),
     registerConnector: (input, options) => registerWorkspaceConnector(workspaceId, input, options),
     reconnectConnector: (connectorId, options) => reconnectWorkspaceConnector(workspaceId, connectorId, options),

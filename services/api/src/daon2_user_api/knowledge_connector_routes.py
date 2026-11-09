@@ -28,11 +28,20 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class OAuthBody(_Strict):
+    token_url: str = Field(min_length=8, max_length=2048)
+    client_id: str = Field(min_length=1, max_length=256)
+    client_secret: str = Field(min_length=1, max_length=8192)
+    resource: str = Field(min_length=8, max_length=2048)
+    scope: str = Field(min_length=1, max_length=1024)
+
+
 class RegisterBody(_Strict):
     kind: str = Field(max_length=32)
     name: str = Field(min_length=1, max_length=120)
     endpoint_url: str = Field(min_length=8, max_length=2048)
     token: str | None = Field(default=None, min_length=8, max_length=8192)
+    oauth: OAuthBody | None = None
     allowed_tools: list[str] | None = Field(default=None, max_length=32)
     allowed_scopes: list[dict[str, str]] | None = Field(default=None, max_length=64)
     virtual: bool = False

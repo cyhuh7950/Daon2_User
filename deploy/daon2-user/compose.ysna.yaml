@@ -32,7 +32,7 @@ services:
       # 개발·WSL QA에서는 인수테스트 전까지 라이선스 없이 모든 기능을 검증한다.
       DAON_DEVELOPMENT_STAGE: "true"
       # 개발 단계 기본 외부 전송 정책("추가 인증 없이 허용")의 허용 목적지. 새 Workspace의 시드 차단 정책을 이 값으로 올린다.
-      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr,daon2-admin.sinsan.kr,daon2.sinsan.kr
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,11 +42,11 @@ services:
   studio-v2-worker:
     environment:
       DAON_DEVELOPMENT_STAGE: "true"
-      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr,daon2-admin.sinsan.kr,daon2.sinsan.kr
   document-worker:
     environment:
       DAON_DEVELOPMENT_STAGE: "true"
-      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr
+      DAON_DEV_EGRESS_DESTINATIONS: media-bridge-gateway.sinsan.kr,api.upstage.ai,omniroute.sinsan.kr,tts.supertonic.sinsan.kr,daon2-admin.sinsan.kr,daon2.sinsan.kr
     depends_on:
       postgres:
         condition: service_healthy

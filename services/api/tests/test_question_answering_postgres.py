@@ -228,7 +228,7 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                 self.cloud.connection.cost_calls.clear()
                 self._complete_cost()
                 self.assertEqual(len(self.cloud.connection.cost_calls),1)
-        self.cloud.connection.revision='0081'
+        self.cloud.connection.revision='0082'
         with self.assertRaisesRegex(QuestionRepositoryError,'QUESTION_DATABASE_UNAVAILABLE'):
             self._complete_cost()
 

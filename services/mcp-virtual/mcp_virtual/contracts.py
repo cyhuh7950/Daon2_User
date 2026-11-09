@@ -38,6 +38,8 @@ RAG_TOOLS = {
         {"type": "object", "required": ["document_id", "version_id", "nodes"], "properties": {"document_id": S, "version_id": S, "nodes": {"type": "array", "items": NODE}}}),
     "read_document_section": tool("개요 노드의 본문 블록을 읽는다.", {**PAIR, "document_id": ID, "node_id": ID, "cursor": S}, [*PAIR_REQ, "document_id", "node_id"],
         {"type": "object", "required": ["node_id", "blocks", "next_cursor"], "properties": {"node_id": S, "blocks": {"type": "array", "items": BLOCK}, "next_cursor": {"type": ["string", "null"]}}}),
+    "list_knowledge_scopes": tool("호출자에게 허용된 프로젝트·업무 패키지 목록.", {"limit": {"type": "integer", "minimum": 1, "maximum": 200}, "cursor": S}, ["limit"],
+        {"type": "object", "required": ["scopes", "next_cursor"], "properties": {"scopes": {"type": "array", "items": {"type": "object"}}, "next_cursor": {"type": ["string", "null"]}}}),
     "get_document_version_status": tool("문서 버전이 아직 최신인지 확인한다(stale 판정).", {**PAIR, "document_id": ID, "version_id": ID}, [*PAIR_REQ, "document_id", "version_id"],
         {"type": "object", "required": ["document_id", "current_version_id", "changed"], "properties": {"document_id": S, "current_version_id": S, "changed": {"type": "boolean"}}}),
 }

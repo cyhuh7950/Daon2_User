@@ -86,6 +86,26 @@ test("등록 대화상자: 이름·주소가 있어야 등록되고 토큰·허�
   } finally { await view.close(); }
 });
 
+test("토큰 발급 방식은 다섯 값이 모두 있어야 등록되고 고정 토큰 없이 전달된다", async () => {
+  const calls = [];
+  const view = await mount({ list: async () => [], register: async (input) => { calls.push(input); return connector(); } });
+  try {
+    await view.flush();
+    await view.click(buttonByText(view.container, "연결 추가"));
+    await view.type("이름", "RAG");
+    await view.type("서버 주소", "https://knowledge.example/mcp");
+    const mode = findElements(view.container, (node) => node.getAttribute?.("aria-label") === "인증 방식")[0];
+    mode.value = "oauth";
+    await view.act(async () => mode[Object.keys(mode).find((key) => key.startsWith("__reactProps$"))].onChange({ target: mode, currentTarget: mode }));
+    for (const [label, value] of [["토큰 발급 주소", "https://issuer.example/oauth/token"], ["Client ID", "stc_x"], ["Secret", "s3cret"], ["Resource", "https://knowledge.example/mcp"]]) await view.type(label, value);
+    assert.equal(buttonByText(view.container, "등록").disabled, true);
+    await view.type("Scope", "rag.mcp.evidence.read");
+    await view.click(buttonByText(view.container, "등록"));
+    assert.equal(calls[0].token, "");
+    assert.deepEqual(calls[0].oauth, { tokenUrl: "https://issuer.example/oauth/token", clientId: "stc_x", clientSecret: "s3cret", resource: "https://knowledge.example/mcp", scope: "rag.mcp.evidence.read" });
+  } finally { await view.close(); }
+});
+
 test("호출 한도 대화상자는 채운 항목만 저장하고 범위 오류는 안내한다(F4-02)", async () => {
   const saved = [];
   let fail = false;

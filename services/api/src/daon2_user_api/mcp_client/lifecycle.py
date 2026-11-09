@@ -6,10 +6,9 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from .errors import McpError
-from .transport import HttpJsonRpcTransport
+from .transport import CLIENT_INFO, HttpJsonRpcTransport
 
 SUPPORTED = ("2026-07-28", "2025-11-25", "2025-06-18")
-CLIENT_INFO = {"name": "daon2-user", "version": "0.1.0"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +29,7 @@ class DiscoverAdapter:
     """2026-07-28: 세션 없는 server/discover."""
 
     def connect(self, transport: HttpJsonRpcTransport) -> Connection:
-        result, _ = transport.request("server/discover", {"supportedVersions": list(SUPPORTED), "clientInfo": CLIENT_INFO})
+        result, _ = transport.request("server/discover", {"supportedVersions": list(SUPPORTED), "clientInfo": CLIENT_INFO}, protocol_version=SUPPORTED[0])
         offered = result.get("supportedVersions")
         versions = [v for v in offered if v in SUPPORTED] if isinstance(offered, list) else []
         version = _negotiate(versions[0] if versions else result.get("protocolVersion"))
@@ -53,6 +52,7 @@ def connect(transport: HttpJsonRpcTransport) -> Connection:
     try:
         return DiscoverAdapter().connect(transport)
     except McpError as error:
-        if error.code in {"MCP_METHOD_NOT_FOUND", "MCP_RPC_ERROR", "MCP_NOT_FOUND", "MCP_RESPONSE_INVALID"}:
+        # 이 판본을 쓰지 않는 서버는 판본 헤더를 400으로 거절한다.
+        if error.code in {"MCP_METHOD_NOT_FOUND", "MCP_RPC_ERROR", "MCP_NOT_FOUND", "MCP_RESPONSE_INVALID"} or (error.code == "MCP_HTTP_ERROR" and error.status == 400):
             return InitializeAdapter().connect(transport)
         raise
