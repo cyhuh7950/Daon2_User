@@ -124,8 +124,12 @@ def _load_plan(raw: str) -> Any:
     return None
 
 
-def parse_plan(raw: str, target: EvidenceTarget) -> tuple[tuple[str, str], ...] | None:
-    """LLM의 자료 계획을 실행할 요청으로 바꾼다. 해석할 수 없으면 None, 검색이 필요 없다는 답이면 빈 값이다."""
+def parse_plan(raw: str, target: EvidenceTarget, dropped: dict[str, int] | None = None) -> tuple[tuple[str, str], ...] | None:
+    """LLM의 자료 계획을 실행할 요청으로 바꾼다. 해석할 수 없으면 None, 검색이 필요 없다는 답이면 빈 값이다. 버린 요청은 사유별로 dropped에 센다."""
+    def drop(reason: str) -> None:
+        if dropped is not None:
+            dropped[reason] = dropped.get(reason, 0) + 1
+
     plan = _load_plan(raw)
     requests = plan.get("requests") if isinstance(plan, Mapping) else None
     if not isinstance(requests, list):
@@ -136,14 +140,23 @@ def parse_plan(raw: str, target: EvidenceTarget) -> tuple[tuple[str, str], ...] 
     chosen: list[tuple[str, str]] = []
     queries: list[str] = []
     for item in requests:
-        if not isinstance(item, Mapping) or item.get("knowledge") not in KNOWLEDGE_KINDS or not isinstance(item.get("query"), str):
+        if not isinstance(item, Mapping) or not isinstance(item.get("query"), str):
+            drop("malformed")
+            continue
+        if item.get("knowledge") not in KNOWLEDGE_KINDS:
+            drop("unknown_kind")
             continue
         query = item["query"].strip()[:MAX_SEARCH_QUESTION_CHARS]
         package = item.get("package")
-        if not query or (package != ALL_PACKAGES and package not in aliases):
+        if not query:
+            drop("malformed")
+            continue
+        if package != ALL_PACKAGES and package not in aliases:
+            drop("unknown_package")
             continue
         if query not in queries:
             if len(queries) == MAX_PLAN_QUERIES:
+                drop("over_limit")
                 continue
             queries.append(query)
         chosen += [(alias, query) for alias in (aliases if package == ALL_PACKAGES else (package,))]

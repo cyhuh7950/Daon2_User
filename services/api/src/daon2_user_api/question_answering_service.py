@@ -17,7 +17,7 @@ from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
 from .question_answering import strip_citation_labels
 from .question_external_evidence import (
-    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
+    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
     default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
 )
 from .document_index_postgres import IndexedEvidenceChunk
@@ -104,6 +104,32 @@ class DocumentIndexPort(Protocol):
 
 class QuestionEgressPort(Protocol):
     def authorize(self, context: QuestionContext, **kwargs): ...  # type: ignore[no-untyped-def]
+
+
+class _PlanCallRecorder:
+    """Run 생성 전의 자료 계획 호출을 나중에 비용 장부에 올리려고 URL·요청·응답만 잠시 들고 있는다. 자격은 보관하지 않는다."""
+
+    def __init__(self, transport: TextGenerationTransport) -> None:
+        self._transport = transport
+        self.call: tuple[str, object, object] | None = None
+
+    def post_json(self, *, url, api_key, payload, timeout_seconds):  # type: ignore[no-untyped-def]
+        response = self._transport.post_json(url=url, api_key=api_key, payload=payload, timeout_seconds=timeout_seconds)
+        self.call = (url, payload, response)
+        return response
+
+    def __getattr__(self, name):  # type: ignore[no-untyped-def]
+        return getattr(self._transport, name)
+
+
+class _RecordedPlanResponse:
+    """이미 끝난 계획 호출의 응답을 돌려준다. 다시 전송하지 않는다."""
+
+    def __init__(self, response) -> None:  # type: ignore[no-untyped-def]
+        self._response = response
+
+    def post_json(self, *, url, api_key, payload, timeout_seconds):  # type: ignore[no-untyped-def]
+        return self._response
 
 
 class QuestionAdapterRegistry:
@@ -540,8 +566,10 @@ class QuestionAnsweringService:
     _external_planner = None
     _external_history = None
     _external_plan_audit = None
+    _external_plan_dropped_audit = None
+    _external_plan_calls: dict[tuple[str, ...], tuple[float, tuple[str, object, object]]] | None = None
 
-    def set_external_evidence(self, search, *, planner=None, history=None, plan_audit=None) -> None:
+    def set_external_evidence(self, search, *, planner=None, history=None, plan_audit=None, plan_dropped_audit=None) -> None:
         """search(context, question) -> 선택한 업무 패키지의 승인 근거. 설정하지 않으면 지금까지처럼 소스만 쓴다.
 
         planner를 주면 검색 전에 LLM에 필요한 자료를 묻고(WO-K4), history는 최근 대화, plan_audit은 그 전송 기록이다.
@@ -550,6 +578,8 @@ class QuestionAnsweringService:
         self._external_planner = planner
         self._external_history = history
         self._external_plan_audit = plan_audit
+        self._external_plan_dropped_audit = plan_dropped_audit
+        self._external_plan_calls = {}
         self._external_cache: dict[tuple[str, ...], tuple[float, tuple[ExternalEvidence, ...]]] = {}
         self._external_lock = threading.Lock()
 
@@ -557,7 +587,7 @@ class QuestionAnsweringService:
         if self._external_search is None or context.notebook_id is None or is_chat_question(question):
             return ()
         # 인증 확인과 실제 질문이 같은 근거를 쓰도록 짧게 재사용한다. 근거가 달라지면 전송 내용 지문이 어긋난다.
-        key = (context.tenant_id, context.workspace_id, context.notebook_id, context.actor_id, question)
+        key = self._external_key(context, question)
         now = time.monotonic()
         with self._external_lock:
             self._external_cache = {k: v for k, v in self._external_cache.items() if v[0] > now}
@@ -572,6 +602,27 @@ class QuestionAnsweringService:
         with self._external_lock:
             self._external_cache[key] = (now + EXTERNAL_EVIDENCE_REUSE_SECONDS, found)
         return found
+
+    @staticmethod
+    def _external_key(context: QuestionContext, question: str) -> tuple[str, ...]:
+        return (context.tenant_id, context.workspace_id, context.notebook_id, context.actor_id, question)
+
+    def _charge_plan_call(self, context: QuestionContext, selection, run_id: str, question: str) -> None:  # type: ignore[no-untyped-def]
+        """자료 계획은 Run이 생기기 전에 호출되므로, Run이 생긴 뒤 같은 Run의 비용 장부에 올린다."""
+        if self._run_cost_sessions is None or not self._external_plan_calls:
+            return
+        with self._external_lock:
+            recorded = self._external_plan_calls.pop(self._external_key(context, question), None)
+        if recorded is None:
+            return
+        url, payload, response = recorded[1]
+        session = self._run_cost_sessions.for_call(
+            context, selection, run_kind="question", run_id=run_id,
+            attempt_key=PostgresQuestionAnsweringRepository._opaque_id("plan-attempt", run_id, selection.deployment_id),
+            transport=_RecordedPlanResponse(response))
+        if session is not None:
+            session.post_json(url=url, api_key="recorded", payload=payload, timeout_seconds=1)
+            session.finish(outcome="succeeded")
 
     def _generate_answer(self, context, prepared, cost_session, uses_knowledge: bool):  # type: ignore[no-untyped-def]
         """승인 지식 답변이 검증에 걸리면 같은 근거로 1회만 다시 요청한다. 검증 기준은 바꾸지 않는다."""
@@ -608,19 +659,30 @@ class QuestionAnsweringService:
         model_context = WorkspaceModelContext(context.tenant_id, context.workspace_id, context.actor_id)
         try:
             with self._resolve_selected(context, model_context) as (selection, _explicit):
-                if self._run_cost_sessions is not None and self._run_cost_sessions.applies(context, selection, run_kind="question"):
-                    return None
-                prepared = self._adapter_registry.prepare_general(selection, question, context.trace_id, self._transport)
+                charged = self._run_cost_sessions is not None and self._run_cost_sessions.applies(context, selection, run_kind="question")
+                recorder = _PlanCallRecorder(self._transport) if charged else None
+                prepared = self._adapter_registry.prepare_general(selection, question, context.trace_id, recorder or self._transport)
                 prepared = replace(prepared, provider_payload=rewrite_plan_payload(prepared.provider_payload, build_plan_prompt(question, history, target)))
+                if charged:
+                    prepared = replace(prepared, provider_payload={**prepared.provider_payload, "max_tokens": PLAN_OUTPUT_TOKENS})
                 authorize = getattr(self._egress, "authorize_plan", None)
                 if not callable(authorize) or not authorize(context, selection, canonical_json_bytes(prepared.provider_payload)):
                     return None
                 if self._external_plan_audit is not None:
                     self._external_plan_audit(context, selection)
                 generated = self._adapter_registry.generate_general(prepared)
+                if recorder is not None and recorder.call is not None:
+                    with self._external_lock:
+                        now = time.monotonic()
+                        self._external_plan_calls = {k: v for k, v in self._external_plan_calls.items() if v[0] > now}
+                        self._external_plan_calls[self._external_key(context, question)] = (now + EXTERNAL_EVIDENCE_REUSE_SECONDS, recorder.call)
+                dropped: dict[str, int] = {}
+                requests = parse_plan(generated.answer, target, dropped)
+                if dropped and self._external_plan_dropped_audit is not None:
+                    self._external_plan_dropped_audit(context, selection, dropped)
         except (ValueError, DocumentUnderstandingError, WorkspaceModelUnavailable, QuestionAnsweringError):
             return None
-        return parse_plan(generated.answer, target)
+        return requests
 
     def set_model_selection_reader(self, reader) -> None:
         """노트북·사용자별 모델 선택(reader(tenant, workspace, notebook, actor) -> dict|None). 없으면 작업공간 기본 모델."""
@@ -1173,6 +1235,7 @@ class QuestionAnsweringService:
                 )
             recheck()
             try:
+                self._charge_plan_call(context, selection, run_id, question)
                 generated = self._generate_with_run_cost(prepared,general=True,session=cost_session)
             except (ValueError, DocumentUnderstandingError) as error:
                 raw_code = error.code if isinstance(error, DocumentUnderstandingError) else str(error)
@@ -1279,6 +1342,7 @@ class QuestionAnsweringService:
                     **prepared.provider_payload, "format": ordered_schema})
         recheck()
         try:
+            self._charge_plan_call(context, selection, run_id, question)
             generated = self._generate_answer(context, prepared, cost_session, bool(external))
         except (ValueError, DocumentUnderstandingError) as error:
             raw_code = error.code if isinstance(error, DocumentUnderstandingError) else str(error)

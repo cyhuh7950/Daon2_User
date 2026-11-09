@@ -189,6 +189,13 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(len(parsed), 8)
         self.assertEqual(sorted({q for _, q in parsed}), ["a", "b"])
 
+    def test_dropped_requests_are_counted_by_reason(self):
+        dropped = {}
+        raw = json.dumps({"requests": ["문자열", {"knowledge": "ontology", "package": "P1", "query": "a"}, {"knowledge": "rag", "package": "P9", "query": "b"},
+                                       *[{"knowledge": "rag", "package": "P1", "query": f"q{i}"} for i in range(4)]]})
+        self.assertEqual(len(parse_plan(raw, target("A"), dropped)), 3)
+        self.assertEqual(dropped, {"malformed": 1, "unknown_kind": 1, "unknown_package": 1, "over_limit": 1})
+
     def test_query_is_cut_to_server_limit(self):
         parsed = parse_plan(json.dumps({"requests": [{"knowledge": "rag", "package": "P1", "query": "가" * 800}]}, ensure_ascii=False), target("A"))
         self.assertEqual(parsed[0][1], "가" * MAX_SEARCH_QUESTION_CHARS)
@@ -441,11 +448,38 @@ PLAN = json.dumps({"needs": "기준", "requests": [{"knowledge": "rag", "package
 QUESTION = "제안서 작업을 확인해"
 
 
+class _CostSession:
+    def __init__(self, run_id, attempt_key, transport):
+        self.run_id, self.attempt_key, self.transport, self.posted, self.outcomes = run_id, attempt_key, transport, None, []
+
+    def post_json(self, *, url, api_key, payload, timeout_seconds):
+        self.posted = payload
+        return self.transport.post_json(url=url, api_key=api_key, payload=payload, timeout_seconds=timeout_seconds)
+
+    def finish(self, *, outcome):
+        self.outcomes.append(outcome)
+        return object()
+
+
+class _Costs:
+    def __init__(self):
+        self.sessions = []
+
+    def applies(self, context, selection, *, run_kind):
+        return True
+
+    def for_call(self, context, selection, *, run_kind, run_id, attempt_key, transport):
+        self.sessions.append(_CostSession(run_id, attempt_key, transport))
+        return self.sessions[-1]
+
+
 class PlannedServiceTests(unittest.TestCase):
-    def service(self, plan=PLAN, *, allowed=True, packages=True, chunks=(), history=None):
+    def service(self, plan=PLAN, *, allowed=True, packages=True, chunks=(), history=None, costs=None):
         self.repository, self.transport, self.egress, self.planner, self.audits = _Repository(), _PlanTransport(plan, ["ext-b1"]), _PlanEgress(allowed), _Planner(packages), []
-        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, FakeIndex(chunks), FakeCredential(), self.transport, self.egress)
-        service.set_external_evidence(self.planner.run, planner=self.planner, history=history, plan_audit=lambda context, selection: self.audits.append(context.notebook_id))
+        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, FakeIndex(chunks), FakeCredential(), self.transport, self.egress, run_cost_sessions=costs)
+        self.dropped_audits = []
+        service.set_external_evidence(self.planner.run, planner=self.planner, history=history, plan_audit=lambda context, selection: self.audits.append(context.notebook_id),
+                                      plan_dropped_audit=lambda context, selection, dropped: self.dropped_audits.append(dropped))
         return service
 
     def ask(self, service, question=QUESTION):
@@ -460,6 +494,28 @@ class PlannedServiceTests(unittest.TestCase):
         self.assertNotIn("외부 b1", first)
         self.assertIn("외부 b1", json.dumps(self.transport.payloads[1], ensure_ascii=False))
         self.assertEqual(self.audits, ["nb-a"])
+
+    def test_dropped_plan_requests_are_recorded_without_their_text(self):
+        plan = json.dumps({"requests": [{"knowledge": "rag", "package": "P1", "query": "평가 기준"}, {"knowledge": "rag", "package": "P9", "query": "비밀 검색어"}]}, ensure_ascii=False)
+        self.ask(self.service(plan))
+        self.assertEqual(self.dropped_audits, [{"unknown_package": 1}])
+
+    def test_clean_plan_records_no_dropped_requests(self):
+        self.ask(self.service())
+        self.assertEqual(self.dropped_audits, [])
+
+    def test_plan_call_is_charged_to_the_same_run_after_it_exists(self):
+        costs = _Costs()
+        service = self.service(costs=costs)
+        costs.transport = self.transport
+        self.ask(service)
+        self.assertEqual(self.planner.runs, [(("P1", "평가 기준과 배점"),)])
+        self.assertEqual(self.transport.calls, 2)
+        self.assertEqual([item.run_id for item in costs.sessions], ["run-a", "run-a"])
+        self.assertEqual(len({item.attempt_key for item in costs.sessions}), 2)
+        plan_session = next(item for item in costs.sessions if item.posted and "retrieval planner" in json.dumps(item.posted, ensure_ascii=False))
+        self.assertEqual(plan_session.posted["max_tokens"], 512)
+        self.assertEqual(plan_session.outcomes, ["succeeded"])
 
     def test_plan_call_needs_its_own_egress_approval(self):
         self.ask(self.service(None, allowed=False))
