@@ -12,6 +12,7 @@ export function validCitationDocumentName(value) {
 }
 
 export function approvedKnowledgeCitationLabel(citation) {
+  if (/^(온톨로지|규칙) · /u.test(citation.document_name ?? "")) return citation.document_name;
   return `${citation.document_name ?? "승인 지식"} ${citation.page}쪽`;
 }
 

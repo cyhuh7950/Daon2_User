@@ -5174,7 +5174,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     if knowledge_connector_service is not None:
         register_knowledge_connector_routes(app, dependencies, knowledge_connector_service)
         from .knowledge_scope_service import KnowledgeScopeService, register_knowledge_scope_routes
-        knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service)
+        knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service, os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None)
         register_knowledge_scope_routes(app, dependencies, knowledge_scope_service)
         # Daon2-RAG 검색의 승인 기준이 확인되기 전에는 켜지 않는다(WO-K3 E1).
         if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") == "true" and hasattr(question_answering_service, "set_external_evidence"):
@@ -5196,8 +5196,16 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
                     target_id=context.notebook_id, outcome=AuditOutcome.SUCCEEDED, trace_id=context.trace_id, policy_version=context.policy_version,
                     metadata={"provider_kind": selection.provider_kind}))
 
+            def _knowledge_plan_dropped_audit(context, selection, dropped):  # type: ignore[no-untyped-def]
+                dependencies.audit_store.append(AuditEventDraft(
+                    event_id="kp-" + secrets.token_hex(16), occurred_at=datetime.now(timezone.utc), actor_id=context.actor_id, actor_type=ActorType.USER,
+                    tenant_id=context.tenant_id, workspace_id=context.workspace_id, action="question.knowledge_plan_dropped", target_type="notebook",
+                    target_id=context.notebook_id, outcome=AuditOutcome.SUCCEEDED, trace_id=context.trace_id, policy_version=context.policy_version,
+                    metadata={"provider_kind": selection.provider_kind, **dropped}))
+
             question_answering_service.set_external_evidence(
-                knowledge_evidence.search, planner=knowledge_evidence, history=_recent_question_turns, plan_audit=_knowledge_plan_audit)
+                knowledge_evidence.search, planner=knowledge_evidence, history=_recent_question_turns,
+                plan_audit=_knowledge_plan_audit, plan_dropped_audit=_knowledge_plan_dropped_audit)
     if studio_v2_service is not None:
         def _studio_v2_license_check(principal, workspace_id, request):  # type: ignore[no-untyped-def]
             if license_enforcement_enabled:

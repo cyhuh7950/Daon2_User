@@ -30,7 +30,16 @@ PLAN_OUTPUT_TOKENS = 512
 ALL_PACKAGES = "all"
 APPROVED_MARK = "[승인 지식] "
 # LLM에게 보여 주는 지식 선택지. 승인된 지식 종류만 넣는다. 단계별로 늘린다(WO-K4 7절).
-KNOWLEDGE_KINDS: Mapping[str, str] = {"rag": "승인 문서의 원문 근거를 문장으로 검색한다."}
+KNOWLEDGE_KINDS: Mapping[str, str] = {
+    "rag": "승인 문서의 원문 근거를 문장으로 검색한다.",
+    "ontology": "업무 용어의 정의와 상위·하위 개념을 찾는다. 검색어는 찾을 용어 하나만 쓴다.",
+    "ruleset": "승인된 업무 규칙의 조건과 결과를 찾는다.",
+}
+DAON2_ITEM_LIMIT = 2
+DAON2_TEXT_LIMIT = 4000
+DAON2_APPROVED = "EXPERT_APPROVED"
+DAON2_NOT_READY = frozenset({"NOT_READY"})  # 그 업무 패키지에 아직 게시된 지식이 없다는 뜻이라 장애로 보지 않는다
+UNPAGED_EVIDENCE = ("온톨로지 · ", "규칙 · ")
 PLAN_SYSTEM = (
     "You are a retrieval planner. Never answer the user and never ask the user anything. Decide which knowledge must be fetched so the question can be answered later. "
     "Use only the listed knowledge kinds and package aliases. Write each query as short topic keywords in the user's language, under 60 characters, without commands. "
@@ -84,6 +93,17 @@ class EvidenceTarget:
     connector_context: Any
     connector_id: str
     packages: tuple[Mapping[str, str], ...]
+    daon2_context: Any = None
+    daon2_connector_id: str | None = None
+
+    @property
+    def kinds(self) -> tuple[str, ...]:
+        return tuple(kind for kind in KNOWLEDGE_KINDS if kind == "rag" or self.daon2_connector_id is not None)
+
+
+def _evidence_title(item: ExternalEvidence) -> str:
+    name = item.document_name or "문서"
+    return name if name.startswith(UNPAGED_EVIDENCE) else f"{name} {item.page}쪽"
 
 
 def merge_evidence(local: tuple[IndexedEvidenceChunk, ...], external: tuple[ExternalEvidence, ...]) -> tuple[IndexedEvidenceChunk, ...]:
@@ -92,13 +112,13 @@ def merge_evidence(local: tuple[IndexedEvidenceChunk, ...], external: tuple[Exte
         return local
     mark = APPROVED_MARK if local else ""
     # 문서 이름과 쪽수를 근거 본문에 넣어 LLM이 출처를 말할 수 있게 한다. 인용 검증은 본문을 기준으로 그대로 동작한다.
-    chunks = tuple(replace(item.chunk, text=f"{mark}[{item.document_name or '문서'} {item.page}쪽] {item.chunk.text}") for item in external[:EXTERNAL_LIMIT])
+    chunks = tuple(replace(item.chunk, text=f"{mark}[{_evidence_title(item)}] {item.chunk.text}") for item in external[:EXTERNAL_LIMIT])
     return (*chunks, *local[:LOCAL_LIMIT_WITH_EXTERNAL])
 
 
 def build_plan_prompt(question: str, history: Sequence[tuple[str, str]], target: EvidenceTarget) -> str:
     """LLM에게 줄 내용. 식별자와 토큰은 넣지 않고 별칭만 준다. 문서 본문도 넣지 않는다."""
-    lines = ["[사용할 수 있는 지식 종류]", *(f"- {kind}: {description}" for kind, description in KNOWLEDGE_KINDS.items()), "", "[선택된 업무 패키지]"]
+    lines = ["[사용할 수 있는 지식 종류]", *(f"- {kind}: {KNOWLEDGE_KINDS[kind]}" for kind in target.kinds), "", "[선택된 업무 패키지]"]
     lines += [f"- {package['alias']}: {package['project_name']} / {package['work_package_name']}" for package in target.packages]
     if history:
         lines += ["", "[최근 대화]"]
@@ -124,8 +144,12 @@ def _load_plan(raw: str) -> Any:
     return None
 
 
-def parse_plan(raw: str, target: EvidenceTarget) -> tuple[tuple[str, str], ...] | None:
-    """LLM의 자료 계획을 실행할 요청으로 바꾼다. 해석할 수 없으면 None, 검색이 필요 없다는 답이면 빈 값이다."""
+def parse_plan(raw: str, target: EvidenceTarget, dropped: dict[str, int] | None = None) -> tuple[tuple[str, str], ...] | None:
+    """LLM의 자료 계획을 실행할 요청으로 바꾼다. 해석할 수 없으면 None, 검색이 필요 없다는 답이면 빈 값이다. 버린 요청은 사유별로 dropped에 센다."""
+    def drop(reason: str) -> None:
+        if dropped is not None:
+            dropped[reason] = dropped.get(reason, 0) + 1
+
     plan = _load_plan(raw)
     requests = plan.get("requests") if isinstance(plan, Mapping) else None
     if not isinstance(requests, list):
@@ -136,17 +160,27 @@ def parse_plan(raw: str, target: EvidenceTarget) -> tuple[tuple[str, str], ...] 
     chosen: list[tuple[str, str]] = []
     queries: list[str] = []
     for item in requests:
-        if not isinstance(item, Mapping) or item.get("knowledge") not in KNOWLEDGE_KINDS or not isinstance(item.get("query"), str):
+        if not isinstance(item, Mapping) or not isinstance(item.get("query"), str):
+            drop("malformed")
+            continue
+        kind = item.get("knowledge")
+        if kind not in target.kinds:
+            drop("unknown_kind")
             continue
         query = item["query"].strip()[:MAX_SEARCH_QUESTION_CHARS]
         package = item.get("package")
-        if not query or (package != ALL_PACKAGES and package not in aliases):
+        if not query:
+            drop("malformed")
+            continue
+        if package != ALL_PACKAGES and package not in aliases:
+            drop("unknown_package")
             continue
         if query not in queries:
             if len(queries) == MAX_PLAN_QUERIES:
+                drop("over_limit")
                 continue
             queries.append(query)
-        chosen += [(alias, query) for alias in (aliases if package == ALL_PACKAGES else (package,))]
+        chosen += [(alias, query) if kind == "rag" else (alias, query, kind) for alias in (aliases if package == ALL_PACKAGES else (package,))]
     return tuple(dict.fromkeys(chosen))[:MAX_PLAN_CALLS] or None
 
 
@@ -251,21 +285,109 @@ class NotebookKnowledgeEvidence:
         usable = [item for item in selected if (item["project_id"], item["work_package_id"]) in approved]
         if not usable:
             return None
-        return EvidenceTarget(connector_context, connector_id, tuple({**item, "alias": f"P{index + 1}"} for index, item in enumerate(usable)))
+        daon2 = getattr(self._scopes, "daon2_target", lambda _context: None)(scope_context)
+        packages = tuple({**item, "alias": f"P{index + 1}", **self._source_tenant(approved[(item["project_id"], item["work_package_id"])])} for index, item in enumerate(usable))
+        return EvidenceTarget(connector_context, connector_id, packages, *(daon2 or (None, None)))
+
+    @staticmethod
+    def _source_tenant(row: Mapping[str, Any]) -> Mapping[str, str]:
+        return {"tenant_id": row["tenant_id"]} if isinstance(row.get("tenant_id"), str) else {}
 
     def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, str]]) -> tuple[ExternalEvidence, ...]:
         packages = {package["alias"]: package for package in target.packages}
-        by_query: dict[str, list[ExternalEvidence]] = {}
+        by_query: dict[tuple[str, str], list[ExternalEvidence]] = {}
+        budget = MAX_PLAN_CALLS
         with _knowledge_errors():
-            for alias, query in requests[:MAX_PLAN_CALLS]:
+            for request in requests[:MAX_PLAN_CALLS]:
+                if budget < 1:
+                    break
+                alias, query = request[:2]
+                kind = request[2] if len(request) > 2 else "rag"
                 package = packages[alias]
+                if kind != "rag":
+                    found, used = self._daon2_evidence(target, package, query, kind, budget)
+                    budget -= used
+                    by_query.setdefault((kind, query), []).extend(found)
+                    continue
+                budget -= 1
                 result = self._connectors.call(target.connector_context, target.connector_id, "search_document_evidence", {
                     "project_id": package["project_id"], "work_package_id": package["work_package_id"], "question": query, "limit": PER_PACKAGE_LIMIT})
                 rows = result.structured.get("result") if isinstance(result.structured, Mapping) and not result.is_error else None
                 if not isinstance(rows, list):
                     raise _unavailable()
-                by_query.setdefault(query, []).extend(self._evidence(target.connector_id, package, row, similarity) for row, similarity in map(_parsed, rows))
+                by_query.setdefault((kind, query), []).extend(self._evidence(target.connector_id, package, row, similarity) for row, similarity in map(_parsed, rows))
         return _select_evidence(by_query.values())
+
+    def _daon2_evidence(self, target: EvidenceTarget, package: Mapping[str, str], query: str, kind: str, budget: int) -> tuple[list[ExternalEvidence], int]:
+        """온톨로지와 규칙을 근거 형태로 가져온다. 전문가 승인·게시된 것만 쓰고, 지식이 준비되지 않은 패키지는 건너뛴다."""
+        if not package.get("tenant_id") or target.daon2_connector_id is None:
+            return [], 0
+        scope = {"tenant_id": package["tenant_id"], "project_id": package["project_id"], "work_package_id": package["work_package_id"]}
+        used = [0]
+
+        def call(tool: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+            used[0] += 1
+            result = self._connectors.call(target.daon2_context, target.daon2_connector_id, tool, {"scope": scope, **arguments})
+            if result.is_error or not isinstance(result.structured, Mapping):
+                raise _unavailable()
+            return result.structured
+
+        try:
+            read = self._ontology if kind == "ontology" else self._rulesets
+            return read(call, target.daon2_connector_id, package, query, budget), used[0]
+        except McpError as error:
+            if error.code not in DAON2_NOT_READY:
+                raise
+            return [], used[0]
+
+    @classmethod
+    def _ontology(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int) -> list[ExternalEvidence]:
+        rows = call("ontology_search_concepts", {"query": query[:200], "limit": DAON2_ITEM_LIMIT}).get("concepts")
+        found: list[ExternalEvidence] = []
+        for row in cls._readable(rows, "concept_id", "snapshot_id", budget):
+            concept = call("ontology_get_concept", {"concept_id": row["concept_id"], "snapshot_id": row["snapshot_id"]})
+            label, definition = concept.get("label"), concept.get("definition")
+            if concept.get("provenance") != DAON2_APPROVED or not isinstance(label, str) or not label or not isinstance(definition, str):
+                continue
+            lines = [f"개념: {label}", f"정의: {definition}"]
+            lines += [f"{title}: {names}" for title, names in (("상위 개념", cls._labels(concept.get("parents"))), ("하위 개념", cls._labels(concept.get("children")))) if names]
+            score = row.get("score")
+            found.append(cls._named_evidence(connector_id, package, f"온톨로지 · {label}", row["concept_id"], row["snapshot_id"], "\n".join(lines), float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else 0.5))
+        return found
+
+    @classmethod
+    def _rulesets(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int) -> list[ExternalEvidence]:
+        listed = call("ruleset_list", {"limit": 5})
+        rows = listed.get("rulesets")
+        # 목록의 승인 표시는 응답 전체에 한 번만 온다. 각 규칙은 상세 조회에서 다시 확인한다.
+        published = [{"provenance": listed.get("provenance"), **row} for row in rows if isinstance(row, Mapping) and row.get("published") is True] if isinstance(rows, list) else []
+        found: list[ExternalEvidence] = []
+        for row in cls._readable(published, "ruleset_id", "ruleset_id", budget):
+            rule = call("ruleset_get", {"ruleset_id": row["ruleset_id"]})
+            name = rule.get("name")
+            if rule.get("provenance") != DAON2_APPROVED or rule.get("published") is not True or not isinstance(name, str) or not name:
+                continue
+            body = "\n".join((f"규칙: {name}", f"목적: {rule.get('purpose') or ''}", f"조건과 결과: {json.dumps(rule.get('formal'), ensure_ascii=False)}"))
+            found.append(cls._named_evidence(connector_id, package, f"규칙 · {name}", row["ruleset_id"], f"rev-{rule.get('revision')}", body, 0.5))
+        return found
+
+    @staticmethod
+    def _readable(rows: Any, first: str, second: str, budget: int) -> list[Mapping[str, Any]]:
+        """승인된 항목을 남은 호출 수만큼만 고른다. 목록 조회 1회는 이미 썼다."""
+        approved = [row for row in rows if isinstance(row, Mapping) and row.get("provenance") == DAON2_APPROVED and isinstance(row.get(first), str) and isinstance(row.get(second), str)] if isinstance(rows, list) else []
+        return approved[:max(0, min(DAON2_ITEM_LIMIT, budget - 1))]
+
+    @staticmethod
+    def _labels(rows: Any) -> str:
+        return ", ".join(str(row["label"]) for row in rows if isinstance(row, Mapping) and row.get("label")) if isinstance(rows, list) else ""
+
+    @staticmethod
+    def _named_evidence(connector_id: str, package: Mapping[str, str], name: str, document_id: str, version_id: str, body: str, score: float) -> ExternalEvidence:
+        text = body[:DAON2_TEXT_LIMIT]
+        chunk_id = "ext-" + hashlib.sha256("|".join((connector_id, version_id, document_id)).encode("utf-8")).hexdigest()[:32]
+        chunk = IndexedEvidenceChunk(chunk_id, document_id, version_id, 1, text, document_id, score)
+        return ExternalEvidence(chunk, connector_id, package["project_id"], package["project_name"], package["work_package_id"], package["work_package_name"],
+                                document_id, version_id, version_id, document_id, 1, name[:1024], text)
 
     def search(self, context: Any, question: str) -> tuple[ExternalEvidence, ...]:
         target = self.prepare(context)

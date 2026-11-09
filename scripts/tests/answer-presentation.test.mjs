@@ -40,6 +40,8 @@ test("목록 안의 굵은 글씨와 제목 기호를 처리한다", () => {
 test("승인 지식 인용은 문서명과 쪽수로 표시하고 문서명이 없으면 쪽수만 쓴다", () => {
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "제안요청서.pdf", page: 12 }), "제안요청서.pdf 12쪽");
   assert.equal(approvedKnowledgeCitationLabel({ page: 3 }), "승인 지식 3쪽");
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "온톨로지 · 보험금 지급", page: 1 }), "온톨로지 · 보험금 지급");
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "규칙 · 제외기간", page: 1 }), "규칙 · 제외기간");
 });
 
 test("승인 지식 인용이 있는 답변만 승인 지식 사용으로 본다", () => {

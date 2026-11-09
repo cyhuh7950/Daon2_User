@@ -64,6 +64,7 @@ class ConnectorContext:
     trace_id: str = "connector"
     workspace_id: str | None = None  # 호출 직전 외부 전송 판정에 쓴다(없으면 공용 주소 호출은 거부된다)
     policy_version: str | None = None
+    owner_tenant_id: str | None = None  # 시스템 공용 연결을 가진 조직. 읽기에만 쓰고 외부 전송 판정은 호출 조직 기준이다
 
 
 def _is_private_host(host: str) -> bool:
@@ -112,7 +113,8 @@ class KnowledgeConnectorService:
 
     @staticmethod
     def _scope(context: ConnectorContext, capability: str) -> CloudAccessContext:
-        return CloudAccessContext(context.tenant_id, "connectors", context.actor_id, capability)
+        tenant_id = context.owner_tenant_id if capability == "connector.read" and context.owner_tenant_id else context.tenant_id
+        return CloudAccessContext(tenant_id, "connectors", context.actor_id, capability)
 
     # ------------------------------------------------------------ 관리
     def register(self, context: ConnectorContext, spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -169,7 +171,7 @@ class KnowledgeConnectorService:
 
     def list(self, context: ConnectorContext) -> list[dict[str, Any]]:
         with self._store._transaction(self._scope(context, "connector.read")) as connection:
-            rows = connection.execute(f"SELECT {_COLUMNS} FROM knowledge_connectors WHERE tenant_id=%s ORDER BY created_at,connector_id", (context.tenant_id,)).fetchall()
+            rows = connection.execute(f"SELECT {_COLUMNS} FROM knowledge_connectors WHERE tenant_id=%s ORDER BY created_at,connector_id", (context.owner_tenant_id or context.tenant_id,)).fetchall()
         return [_view(r) for r in rows]
 
     def get(self, context: ConnectorContext, connector_id: str) -> dict[str, Any]:
@@ -215,13 +217,13 @@ class KnowledgeConnectorService:
         with self._store._transaction(self._scope(context, "connector.read")) as connection:
             row = connection.execute(
                 f"SELECT {_COLUMNS},credential_ciphertext,credential_nonce,credential_version,encryption_key_version,auth_kind FROM knowledge_connectors WHERE tenant_id=%s AND connector_id=%s",
-                (context.tenant_id, connector_id)).fetchone()
+                (context.owner_tenant_id or context.tenant_id, connector_id)).fetchone()
         if row is None:
             raise ConnectorError("CONNECTOR_NOT_FOUND", 404)
         view = _view(row[:14])
         if view["virtual"] and self._production:
             raise ConnectorError("VIRTUAL_CONNECTOR_FORBIDDEN_IN_PRODUCTION", 403)
-        key = (context.tenant_id, connector_id, view["version"])
+        key = (context.owner_tenant_id or context.tenant_id, connector_id, view["version"])
         client = self._clients.get(key)
         if client is None:
             token, token_provider = None, None
