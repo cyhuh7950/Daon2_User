@@ -141,6 +141,46 @@ export async function createStudioRevision(workspaceId, outputId, { notebookId, 
   return data;
 }
 
+const TURN_ID = /^svt-[0-9a-f]{32}$/u;
+const TURN_STATES = new Set(["queued", "working", "ready", "no_change", "failed", "applied", "discarded"]);
+const CHANGE_OPS = new Set(["replace", "insert_after", "delete"]);
+const TURN_KEYS = ["turn_id", "output_id", "base_revision", "instruction", "state", "reply", "changes", "error_code", "applied_revision", "created_at"];
+const CHANGE_KEYS = ["op", "id", "before_text", "after_text", "reason"];
+const validChange = (c) => exact(c, CHANGE_KEYS) && CHANGE_OPS.has(c.op) && typeof c.id === "string" && typeof c.before_text === "string"
+  && typeof c.after_text === "string" && typeof c.reason === "string";
+const validTurn = (t) => exact(t, TURN_KEYS) && TURN_ID.test(t.turn_id) && TURN_STATES.has(t.state) && typeof t.instruction === "string"
+  && (t.reply === null || typeof t.reply === "string") && Array.isArray(t.changes) && t.changes.every(validChange)
+  && (t.error_code === null || ERROR_CODE.test(t.error_code));
+
+function turnPath(workspaceId, notebookId, outputId, turnId) {
+  if (!TURN_ID.test(turnId ?? "")) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  return `${outputPath(workspaceId, notebookId, outputId)}/edit-turns/${turnId}`;
+}
+
+export async function createStudioEditTurn(workspaceId, outputId, { notebookId, instruction, idempotencyKey, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("POST", `${outputPath(workspaceId, notebookId, outputId)}/edit-turns`,
+    { body: { instruction }, idempotent: true, idempotencyKey, signal, fetchImpl }),
+  (d) => exact(d, ["turn_id", "job_id", "state"]) && TURN_ID.test(d.turn_id) && TURN_STATES.has(d.state));
+  return data;
+}
+
+export async function listStudioEditTurns(workspaceId, outputId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("GET", `${outputPath(workspaceId, notebookId, outputId)}/edit-turns`, { signal, fetchImpl }),
+    (d) => exact(d, ["turns"]) && Array.isArray(d.turns) && d.turns.every(validTurn));
+  return data.turns;
+}
+
+export async function applyStudioEditTurn(workspaceId, outputId, turnId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("POST", `${turnPath(workspaceId, notebookId, outputId, turnId)}/apply`, { signal, fetchImpl }),
+    (d) => exact(d, ["output_id", "turn_id", "revision_no"]) && Number.isSafeInteger(d.revision_no));
+  return data;
+}
+
+export async function discardStudioEditTurn(workspaceId, outputId, turnId, { notebookId, signal, fetchImpl = fetch } = {}) {
+  const response = await request("POST", `${turnPath(workspaceId, notebookId, outputId, turnId)}/discard`, { signal, fetchImpl });
+  if (!response.ok) throw await failure(response);
+}
+
 export async function getStudioProvenance(workspaceId, outputId, { notebookId, revision, signal, fetchImpl } = {}) {
   const suffix = revision ? `?revision=${encodeURIComponent(revision)}` : "";
   const { data } = await json(await request("GET", `${outputPath(workspaceId, notebookId, outputId)}/provenance${suffix}`, { signal, fetchImpl }),

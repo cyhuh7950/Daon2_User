@@ -151,7 +151,7 @@ const STUDIO_V2_EXPORT_FORMATS = new Set(["docx", "pdf", "md", "txt", "xlsx", "c
 const STUDIO_V2_EXPORT_BYTES = 32 * 1024 * 1024;
 const STUDIO_V2_REVISION_QUERY = new Set(["revision"]);
 const STUDIO_V2_ACTIONS = new Map([
-  ["revisions", ["POST"]], ["regenerate", ["POST"]], ["cancel", ["POST"]], ["provenance", ["GET"]],
+  ["edit-turns", ["GET", "POST"]], ["revisions", ["POST"]], ["regenerate", ["POST"]], ["cancel", ["POST"]], ["provenance", ["GET"]],
   ["sharing", ["GET"]], ["learning-attempts", ["GET", "POST"]],
 ]);
 
@@ -192,6 +192,9 @@ function studioV2Route(method, segments) {
   if (rest.length === 3 && STUDIO_V2_ACTIONS.has(rest[2])) {
     const withRevision = method === "GET" && rest[2] === "provenance";
     return make(`/outputs/${id}/${rest[2]}`, STUDIO_V2_ACTIONS.get(rest[2]), { query: withRevision ? STUDIO_V2_REVISION_QUERY : new Set() });
+  }
+  if (rest.length === 5 && rest[2] === "edit-turns" && SAFE_SEGMENT.test(rest[3] ?? "") && (rest[4] === "apply" || rest[4] === "discard")) {
+    return make(`/outputs/${id}/edit-turns/${encodeURIComponent(rest[3])}/${rest[4]}`, ["POST"]);
   }
   if (rest.length === 4 && rest[2] === "exports" && STUDIO_V2_EXPORT_FORMATS.has(rest[3])) {
     return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: STUDIO_V2_REVISION_QUERY, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });

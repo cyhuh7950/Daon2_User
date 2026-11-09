@@ -15,6 +15,7 @@ export const ERROR_CODES = [
   "STUDIO_TYPE_UNAVAILABLE", "STUDIO_VERSION_CONFLICT", "STUDIO_VALIDATION_FAILED", "STUDIO_GENERATION_FAILED",
   "STUDIO_CANCELLED", "STUDIO_EXTERNAL_PROVIDER_UNSUPPORTED", "STUDIO_REVISION_TOO_LARGE", "STUDIO_SOURCE_TOO_LARGE",
   "NOTEBOOK_SCOPE_REQUIRED", "NOTEBOOK_SCOPE_MISMATCH", "OBJECT_STORAGE_UNAVAILABLE",
+  "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
 ];
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const exact = (properties, required = Object.keys(properties)) => ({ type: "object", additionalProperties: false, required, properties });
@@ -63,6 +64,16 @@ const schemas = {
   StudioV2RevisionRequest: exact({ content: { type: "object" }, change_reason: { type: "string", maxLength: 200 } }, ["content"]),
   StudioV2RevisionReceipt: exact({ output_id: id, revision_no: { type: "integer", minimum: 1 } }),
   StudioV2RegenerateRequest: exact({ settings: { type: "object" } }, []),
+  StudioV2EditTurnRequest: exact({ instruction: { type: "string", minLength: 1, maxLength: 2000 } }),
+  StudioV2EditTurnReceipt: exact({ turn_id: id, job_id: id, state: { type: "string", enum: ["queued", "working", "ready", "no_change", "failed", "applied", "discarded"] } }),
+  StudioV2EditTurnApplyReceipt: exact({ output_id: id, turn_id: id, revision_no: { type: "integer", minimum: 1 } }),
+  StudioV2EditTurn: exact({
+    turn_id: id, output_id: id, base_revision: { type: "integer", minimum: 1 }, instruction: { type: "string", minLength: 1, maxLength: 2000 },
+    state: { type: "string", enum: ["queued", "working", "ready", "no_change", "failed", "applied", "discarded"] }, reply: nullable({ type: "string" }),
+    changes: { type: "array", items: exact({ op: { type: "string", enum: ["replace", "insert_after", "delete"] }, id: { type: "string" }, before_text: { type: "string" }, after_text: { type: "string" }, reason: { type: "string" } }) },
+    error_code: nullable({ type: "string" }), applied_revision: nullable({ type: "integer", minimum: 1 }), created_at: time,
+  }),
+  StudioV2EditTurnList: exact({ turns: { type: "array", items: ref("StudioV2EditTurn") } }),
   StudioV2CancelReceipt: exact({ output_id: id, cancel_requested: { type: "boolean" } }),
   StudioV2Provenance: exact({
     output_id: id, revision_no: { type: "integer" }, type_id: { type: "string" }, format_id: nullable({ type: "string" }),
@@ -100,13 +111,14 @@ Object.assign(schemas, {
 });
 
 const envelope = (name) => ({ type: "object", additionalProperties: false, required: ["data", "meta"], properties: { data: ref(name), meta: ref("StudioV2Meta") } });
-for (const name of ["AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
+for (const name of ["EditTurnReceipt", "EditTurnApplyReceipt", "EditTurnList", "AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
   "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
 
 const parameters = {
   WorkspaceId: { name: "id", in: "path", required: true, schema: id },
   NotebookId: { name: "notebook_id", in: "path", required: true, schema: id },
   OutputId: { name: "output_id", in: "path", required: true, schema: { type: "string", pattern: "^sv2-[0-9a-f]{32}$" } },
+  TurnId: { name: "turn_id", in: "path", required: true, schema: { type: "string", pattern: "^svt-[0-9a-f]{32}$" } },
   UnitKey: { name: "unit_key", in: "path", required: true, schema: { type: "string", maxLength: 128 } },
   RefId: { name: "ref_id", in: "path", required: true, schema: id },
   FormatName: { name: "format_name", in: "path", required: true, schema: { type: "string", enum: ["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4"] } },
@@ -147,6 +159,12 @@ const paths = {
   },
   [`${S}/outputs/{output_id}/revisions`]: { post: op("createStudioV2Revision", [...out, P("IdempotencyKey")], { "201": okJson("StudioV2RevisionReceiptEnvelope", "Created") }, json("StudioV2RevisionRequest")) },
   [`${S}/outputs/{output_id}/regenerate`]: { post: op("regenerateStudioV2Output", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted") }, json("StudioV2RegenerateRequest")) },
+  [`${S}/outputs/{output_id}/edit-turns`]: {
+    get: op("listStudioV2EditTurns", out, { "200": okJson("StudioV2EditTurnListEnvelope") }),
+    post: op("createStudioV2EditTurn", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2EditTurnReceiptEnvelope", "Accepted") }, json("StudioV2EditTurnRequest")),
+  },
+  [`${S}/outputs/{output_id}/edit-turns/{turn_id}/apply`]: { post: op("applyStudioV2EditTurn", [...out, P("TurnId")], { "201": okJson("StudioV2EditTurnApplyReceiptEnvelope", "Created") }) },
+  [`${S}/outputs/{output_id}/edit-turns/{turn_id}/discard`]: { post: op("discardStudioV2EditTurn", [...out, P("TurnId")], { "204": { description: "Discarded" } }) },
   [`${S}/outputs/{output_id}/cancel`]: { post: op("cancelStudioV2Output", out, { "202": okJson("StudioV2CancelReceiptEnvelope", "Accepted") }) },
   [`${S}/outputs/{output_id}/provenance`]: { get: op("getStudioV2Provenance", [...out, P("Revision")], { "200": okJson("StudioV2ProvenanceEnvelope") }) },
   [`${S}/outputs/{output_id}/exports/{format_name}`]: { get: op("exportStudioV2Output", [...out, P("FormatName"), P("Revision")], { "200": binary("Attachment") }) },
