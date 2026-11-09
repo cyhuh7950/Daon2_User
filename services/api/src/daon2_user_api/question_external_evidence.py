@@ -16,6 +16,7 @@ from .mcp_client import McpError
 
 PER_PACKAGE_LIMIT = 5
 EXTERNAL_LIMIT = 5
+MAX_SEARCH_QUESTION_CHARS = 500  # Daon2-RAG 검색이 받는 질문 길이 상한
 LOCAL_LIMIT_WITH_EXTERNAL = 5
 _TEXT_FIELDS = ("document_id", "version_id", "run_id", "block_id", "text")
 
@@ -82,7 +83,7 @@ class NotebookKnowledgeEvidence:
                 if (item["project_id"], item["work_package_id"]) not in approved:
                     continue
                 result = self._connectors.call(connector_context, connector_id, "search_document_evidence", {
-                    "project_id": item["project_id"], "work_package_id": item["work_package_id"], "question": question, "limit": PER_PACKAGE_LIMIT})
+                    "project_id": item["project_id"], "work_package_id": item["work_package_id"], "question": question.strip()[:MAX_SEARCH_QUESTION_CHARS], "limit": PER_PACKAGE_LIMIT})
                 rows = result.structured.get("result") if isinstance(result.structured, Mapping) and not result.is_error else None
                 if not isinstance(rows, list):
                     raise _unavailable()
