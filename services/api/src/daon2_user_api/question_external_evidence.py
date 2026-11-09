@@ -357,8 +357,10 @@ class NotebookKnowledgeEvidence:
 
     @classmethod
     def _rulesets(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int) -> list[ExternalEvidence]:
-        rows = call("ruleset_list", {"limit": 5}).get("rulesets")
-        published = [row for row in rows if isinstance(row, Mapping) and row.get("published") is True] if isinstance(rows, list) else []
+        listed = call("ruleset_list", {"limit": 5})
+        rows = listed.get("rulesets")
+        # 목록의 승인 표시는 응답 전체에 한 번만 온다. 각 규칙은 상세 조회에서 다시 확인한다.
+        published = [{"provenance": listed.get("provenance"), **row} for row in rows if isinstance(row, Mapping) and row.get("published") is True] if isinstance(rows, list) else []
         found: list[ExternalEvidence] = []
         for row in cls._readable(published, "ruleset_id", "ruleset_id", budget):
             rule = call("ruleset_get", {"ruleset_id": row["ruleset_id"]})

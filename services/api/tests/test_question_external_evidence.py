@@ -207,7 +207,7 @@ class Daon2KnowledgeTests(unittest.TestCase):
         self.assertEqual(self.ontology(provenance="DRAFT").run(daon2_target("A"), (("P1", "보험금", "ontology"),)), ())
 
     def test_ruleset_request_returns_rule_as_evidence(self):
-        finder = self.finder(ruleset_list={"rulesets": [{"ruleset_id": "r1", "published": True, "provenance": "EXPERT_APPROVED"}, {"ruleset_id": "r2", "published": False, "provenance": "EXPERT_APPROVED"}]}, ruleset_get=RULE)
+        finder = self.finder(ruleset_list={"rulesets": [{"ruleset_id": "r1", "published": True}, {"ruleset_id": "r2", "published": False}], "provenance": "EXPERT_APPROVED"}, ruleset_get=RULE)
         found = finder.run(daon2_target("A"), (("P1", "제외기간", "ruleset"),))
         self.assertEqual([c[2] for c in self.connectors.calls], ["ruleset_list", "ruleset_get"])
         self.assertEqual(found[0].document_name, "규칙 · 제외기간 규칙")
