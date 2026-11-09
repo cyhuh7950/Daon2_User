@@ -62,7 +62,8 @@ def render_pieces(pieces: Sequence[Piece]) -> str:
     lines = []
     for piece in pieces:
         shown = {"kind": "section"} if piece.kind == "section" else piece.content
-        lines.append(f'<piece id="{piece.id}">{json.dumps(shown, ensure_ascii=False)}</piece>')
+        data = json.dumps(shown, ensure_ascii=False).replace("</", "<\/")  # 본문이 태그 경계를 닫지 못하게 한다
+        lines.append(f'<piece id="{piece.id}">{data}</piece>')
     return "\n".join(lines)
 
 

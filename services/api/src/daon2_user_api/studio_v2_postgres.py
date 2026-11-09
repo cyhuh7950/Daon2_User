@@ -345,10 +345,10 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         scope = (context.tenant_id, context.workspace_id, output_id)
         queued = connection.execute(
             "UPDATE studio_v2_jobs SET state='cancelled',completed_at=now(),updated_at=now(),version=version+1 "
-            "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND state='queued' RETURNING job_id", scope).fetchall()
+            "WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND state='queued' AND coalesce(request_json->>'mode','')<>'chat_edit' RETURNING job_id", scope).fetchall()
         running = connection.execute(
             "UPDATE studio_v2_jobs SET cancel_requested=true,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s "
-            "AND output_id=%s AND state IN ('leased','generating') RETURNING job_id", scope).fetchall()
+            "AND output_id=%s AND state IN ('leased','generating') AND coalesce(request_json->>'mode','')<>'chat_edit' RETURNING job_id", scope).fetchall()
         return len(queued) + len(running)
 
     def request_cancel(self, context: StudioContext, output_id: str) -> dict[str, object]:

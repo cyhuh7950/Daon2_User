@@ -197,5 +197,17 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "CHAT_EDIT_STATE_INVALID")
 
 
+class CancelTests(unittest.TestCase):
+    def test_output_cancel_leaves_chat_edit_jobs_alone(self):
+        import inspect
+        from daon2_user_api.studio_v2_postgres import PostgresStudioV2Repository
+        sql = []
+        connection = SimpleNamespace(execute=lambda statement, params=(): (sql.append(statement), SimpleNamespace(fetchone=lambda: None, fetchall=lambda: []))[1])
+        method = inspect.getattr_static(PostgresStudioV2Repository, "_cancel_jobs")
+        (method.__func__ if isinstance(method, staticmethod) else method)(*([connection, CTX, OID] if isinstance(method, staticmethod) else [None, connection, CTX, OID]))
+        self.assertTrue(sql)
+        self.assertTrue(all("request_json->>'mode'" in statement and "chat_edit" in statement for statement in sql))
+
+
 if __name__ == "__main__":
     unittest.main()

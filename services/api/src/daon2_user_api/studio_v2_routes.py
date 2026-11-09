@@ -257,7 +257,7 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
     @app.get(base + "/outputs/{output_id}/edit-turns")
     async def studio_v2_edit_turns(id: str, notebook_id: str, output_id: str, request: Request) -> JSONResponse:
         _require_query_keys(request, frozenset())
-        ctx = _ctx(request, id, notebook_id, Action.VIEW)
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
         turns = await run(service.list_edit_turns, ctx, _output_id(output_id))
         return JSONResponse({"data": {"turns": turns}, "meta": _meta(request, id)})
 

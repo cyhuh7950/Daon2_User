@@ -176,6 +176,22 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(created.json()["meta"]["replayed"], False)
         self.assertEqual(applied.json()["data"], {"output_id": OID, "turn_id": TURN, "revision_no": 4})
 
+    async def test_edit_turn_routes_use_edit_action(self):
+        from daon2_user_api.authorization import Action
+        seen = []
+        original = self.dependencies.authorization_service.authorize_action
+        def spy(**kwargs):
+            seen.append(kwargs["action"])
+            return original(**kwargs)
+        key = {"Idempotency-Key": "studio-v2-key-000001"}
+        path = BASE + "/outputs/" + OID + "/edit-turns"
+        with self.authenticated(), patch.object(self.dependencies.authorization_service, "authorize_action", side_effect=spy):
+            await self.client.post(path, cookies=self.cookies, headers=key, json={"instruction": "고쳐"})
+            await self.client.get(path, cookies=self.cookies)
+            await self.client.post(path + "/" + TURN + "/apply", cookies=self.cookies, json={})
+            await self.client.post(path + "/" + TURN + "/discard", cookies=self.cookies, json={})
+        self.assertEqual(seen, [Action.EDIT] * 4)
+
     async def test_dto_hides_internal_content(self):
         with self.authenticated():
             listed = await self.client.get(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies)
