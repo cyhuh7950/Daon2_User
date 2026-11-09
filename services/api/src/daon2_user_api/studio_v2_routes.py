@@ -368,12 +368,29 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
 class SessionCreateBody(_Strict):
     template_id: str | None = Field(default=None, max_length=64)
     request_text: str | None = Field(default=None, max_length=500)
+    target_pages: int | None = Field(default=None, ge=1, le=100)
 
 
 class AnswersBody(_Strict):
     expected_revision: int = Field(ge=1)
     answers: list[dict[str, Any]] = Field(max_length=10)
     skip_remaining: bool = False
+
+
+class ControlBody(_Strict):
+    action: str = Field(pattern="^(pause|resume)$")
+    expected_revision: int | None = Field(default=None, ge=1)
+
+
+class UnitEditBody(_Strict):
+    expected_revision: int = Field(ge=1)
+    paragraphs: list[str] = Field(min_length=1, max_length=40)
+
+
+class OutlineBody(_Strict):
+    expected_revision: int = Field(ge=1)
+    units: list[dict[str, Any]] = Field(min_length=1, max_length=60)
+    confirm: bool = False
 
 
 class ReviewBody(_Strict):
@@ -434,7 +451,7 @@ def register_authoring_routes(app: FastAPI, dependencies: Any, authoring: Any, e
             raise HTTPException(status_code=400)
         if enqueue_license_check is not None:
             await asyncio.to_thread(enqueue_license_check, _principal(request, dependencies), id, request)
-        data = await asyncio.to_thread(authoring.create, ctx, body.template_id, body.request_text, idempotency_key)
+        data = await asyncio.to_thread(authoring.create, ctx, body.template_id, body.request_text, idempotency_key, body.target_pages)
         return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=201 if data.get("created") else 200)
 
     @app.get(base + "/sessions/{output_id}")
@@ -453,6 +470,27 @@ def register_authoring_routes(app: FastAPI, dependencies: Any, authoring: Any, e
         _studio_idempotency_key(idempotency_key)
         ctx = _ctx(request, id, notebook_id, Action.EDIT)
         data = await asyncio.to_thread(authoring.answers, ctx, _out(output_id), body.expected_revision, body.answers, body.skip_remaining)
+        return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
+
+    @app.post(base + "/sessions/{output_id}/control", status_code=202)
+    async def authoring_control(id: str, notebook_id: str, output_id: str, body: ControlBody, request: Request) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        data = await asyncio.to_thread(authoring.control, ctx, _out(output_id), body.action, body.expected_revision)
+        return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
+
+    @app.put(base + "/sessions/{output_id}/units/{unit_key}", status_code=202)
+    async def authoring_edit_unit(id: str, notebook_id: str, output_id: str, unit_key: str, body: UnitEditBody, request: Request) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        data = await asyncio.to_thread(authoring.edit_unit, ctx, _out(output_id), body.expected_revision, _out(unit_key), body.paragraphs)
+        return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
+
+    @app.put(base + "/sessions/{output_id}/outline", status_code=202)
+    async def authoring_outline(id: str, notebook_id: str, output_id: str, body: OutlineBody, request: Request) -> JSONResponse:
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        data = await asyncio.to_thread(authoring.outline, ctx, _out(output_id), body.expected_revision, body.units, confirm=body.confirm)
         return JSONResponse({"data": data, "meta": meta(request, id)}, status_code=202)
 
     @app.put(base + "/sessions/{output_id}/review", status_code=202)

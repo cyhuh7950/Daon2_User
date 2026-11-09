@@ -303,8 +303,9 @@ export async function listAuthoringTemplates(workspaceId, { notebookId, signal, 
   return data.templates;
 }
 
-export async function createAuthoringSession(workspaceId, { notebookId, templateId, requestText, idempotencyKey, signal, fetchImpl } = {}) {
+export async function createAuthoringSession(workspaceId, { notebookId, templateId, requestText, targetPages, idempotencyKey, signal, fetchImpl } = {}) {
   const body = {};
+  if (targetPages) body.target_pages = targetPages;
   if (templateId) body.template_id = templateId;
   if (requestText) body.request_text = requestText;
   const { data } = await json(await request("POST", `${base(workspaceId, notebookId)}/authoring/sessions`, { body, idempotent: true, idempotencyKey, signal, fetchImpl }),
@@ -332,6 +333,25 @@ export async function reviewAuthoringSession(workspaceId, outputId, { notebookId
   if (outputFormats) body.output_formats = outputFormats;
   const { data } = await json(await request("PUT", `${base(workspaceId, notebookId)}/authoring/sessions/${outputId}/review`, { body, signal, fetchImpl }),
     (d) => isObject(d) && Number.isSafeInteger(d.revision_no));
+  return data;
+}
+
+export async function controlAuthoringSession(workspaceId, outputId, { notebookId, action, expectedRevision, signal, fetchImpl } = {}) {
+  const body = { action };
+  if (expectedRevision) body.expected_revision = expectedRevision;
+  const { data } = await json(await request("POST", `${base(workspaceId, notebookId)}/authoring/sessions/${outputId}/control`, { body, signal, fetchImpl }), isObject);
+  return data;
+}
+
+export async function editAuthoringUnit(workspaceId, outputId, unitKey, { notebookId, expectedRevision, paragraphs, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("PUT", `${base(workspaceId, notebookId)}/authoring/sessions/${outputId}/units/${encodeURIComponent(unitKey)}`,
+    { body: { expected_revision: expectedRevision, paragraphs }, signal, fetchImpl }), isObject);
+  return data;
+}
+
+export async function updateAuthoringOutline(workspaceId, outputId, { notebookId, expectedRevision, units, confirm = false, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("PUT", `${base(workspaceId, notebookId)}/authoring/sessions/${outputId}/outline`,
+    { body: { expected_revision: expectedRevision, units, confirm }, signal, fetchImpl }), isObject);
   return data;
 }
 

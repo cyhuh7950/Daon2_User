@@ -306,6 +306,11 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([i.work_package_id for i in found], ["w2"])
         self.assertEqual(found[0].work_package_name, "B")
 
+    def test_caller_can_ask_for_more_evidence(self):
+        pages = {"w1": {"result": [hit(f"a{i}", 0.9 - i * 0.01) for i in range(5)]}, "w2": {"result": [hit(f"b{i}", 0.5 - i * 0.01) for i in range(5)]}}
+        found = NotebookKnowledgeEvidence(_Scopes([]), _Connectors(pages)).run(target("A", "B"), (("P1", "가"), ("P2", "나")), limit=8)
+        self.assertEqual(len(found), 8)
+
     def test_each_planned_query_keeps_at_least_its_best_evidence(self):
         pages = {"w1": {"result": [hit(f"a{i}", 0.9 - i * 0.01) for i in range(5)]}, "w2": {"result": [hit("low", 0.2)]}}
         found = NotebookKnowledgeEvidence(_Scopes([]), _Connectors(pages)).run(target("A", "B"), (("P1", "자격 요건"), ("P2", "제출 서류")))

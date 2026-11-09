@@ -13,11 +13,11 @@ from typing import Any, Mapping, Sequence
 from .templates import AuthoringError, AuthoringTemplate
 
 SESSION_SCHEMA = "studio.authoring_session.v1"
-STATES = ("collecting", "analyzing", "review", "generating", "completed", "failed", "cancelled")
+STATES = ("collecting", "analyzing", "review", "generating", "paused", "completed", "failed", "cancelled")
 MAX_QUESTIONS = 3
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TRANSITIONS = {"collecting": {"analyzing", "cancelled"}, "analyzing": {"review", "failed", "cancelled"}, "review": {"generating", "analyzing", "cancelled"},
-                "generating": {"completed", "failed", "cancelled"}, "failed": {"analyzing", "generating"}, "completed": set(), "cancelled": set()}
+                "generating": {"completed", "failed", "cancelled", "paused"}, "paused": {"generating", "cancelled"}, "failed": {"analyzing", "generating"}, "completed": set(), "cancelled": set()}
 
 
 def transition(session: Mapping[str, Any], new_state: str) -> dict[str, Any]:
@@ -36,10 +36,12 @@ def _question(item: Mapping[str, Any]) -> dict[str, Any]:
 def pending(template: AuthoringTemplate, session: Mapping[str, Any]) -> list[dict[str, Any]]:
     """아직 확정되지 않은 입력 중 다음에 물을 최대 3개. 필수가 먼저, 선택 입력은 필수가 다 찬 뒤 한 번만 제안한다."""
     done = set(session["inputs"]) | {a["key"] for a in session["assumptions"]}
-    required = [i for i in template.inputs if i["required"] and i["key"] not in done]
+    # 소목차 방식은 노트북에서 고른 지식을 쓰므로 지식 문서를 따로 묻지 않는다.
+    asked = [i for i in template.inputs if not (session.get("mode") == "agent" and i["kind"] == "knowledge_ref")]
+    required = [i for i in asked if i["required"] and i["key"] not in done]
     if required:
         return [_question(i) for i in required[:MAX_QUESTIONS]]
-    optional = [i for i in template.inputs if not i["required"] and i["key"] not in done]
+    optional = [i for i in asked if not i["required"] and i["key"] not in done]
     return [_question(i) for i in optional[:MAX_QUESTIONS]]
 
 
@@ -49,10 +51,12 @@ def requests_for(questions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]
     return [{"request": mapping[q["kind"]], "key": q["key"]} for q in questions if q["kind"] in mapping]
 
 
-def new_session(template: AuthoringTemplate, *, request_text: str | None = None) -> dict[str, Any]:
+def new_session(template: AuthoringTemplate, *, request_text: str | None = None, mode: str = "legacy", target_pages: int | None = None) -> dict[str, Any]:
     session: dict[str, Any] = {"schema": SESSION_SCHEMA, "template_id": template.template_id, "template_version": template.version, "analysis": template.analysis, "style": template.style, "output_choices": list(template.output["formats"]), "state": "collecting",
                                "request_text": (request_text or "")[:500], "inputs": {}, "assumptions": [], "pending_questions": [], "requests": [],
                                "requirements": [], "plan": None, "output_formats": list(template.output["default"]), "error_code": None}
+    if mode == "agent":
+        session.update({"mode": "agent", "target_pages": target_pages, "units": [], "knowledge": [], "pause_requested": False, "pause_reason": None})
     session["pending_questions"] = pending(template, session)
     session["requests"] = requests_for(session["pending_questions"])
     return session
@@ -120,6 +124,76 @@ def apply_answers(template: AuthoringTemplate, session: Mapping[str, Any], answe
         updated["assumptions"].append({"key": question["key"], "reason": "user_skipped", "default": "[작성 필요]"})
     updated["pending_questions"], updated["requests"] = [], []
     updated["state"] = "analyzing"
+    return updated
+
+
+def _unit_index(session: Mapping[str, Any], key: str) -> int:
+    for index, unit in enumerate(session.get("units") or []):
+        if unit["key"] == key:
+            return index
+    raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+
+
+def resume(session: Mapping[str, Any]) -> dict[str, Any]:
+    """사람이 빠지면 다음 미완료 소목차부터 이어진다. 확인을 기다리던 소목차는 확인된 것으로, 실패한 소목차는 다시 쓴다."""
+    updated = transition(session, "generating")
+    updated.update({"pause_requested": False, "pause_reason": None})
+    for unit in updated["units"]:
+        if unit["status"] == "needs_review":
+            unit["status"] = "done"
+        elif unit["status"] == "failed":
+            unit.update({"status": "pending", "error_code": None})
+    return updated
+
+
+def edit_unit(session: Mapping[str, Any], key: str, paragraphs: Sequence[str]) -> dict[str, Any]:
+    """사람이 고친 본문은 기준값으로 고정한다. 이후 LLM이 덮어쓰지 않는다."""
+    if session["state"] != "paused":
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+    texts = [text.strip() for text in paragraphs if isinstance(text, str) and text.strip()]
+    if not texts or len(texts) > 40 or any(len(text) > 4000 for text in texts):
+        raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+    updated = copy.deepcopy(dict(session))
+    unit = updated["units"][_unit_index(updated, key)]
+    unit.update({"status": "done", "locked": True, "error_code": None, "paragraphs": [{"text": text, "refs": [], "origin": "user"} for text in texts],
+                 "summary": " ".join(texts)[:300]})
+    return updated
+
+
+def _changed(unit: Mapping[str, Any], item: Mapping[str, Any]) -> bool:
+    return any(field in item and item[field] != unit[field] for field in ("title", "purpose", "target_chars"))
+
+
+def outline_impact(session: Mapping[str, Any], change: Sequence[Mapping[str, Any]]) -> list[str]:
+    """바뀐 소목차 중 사람이 고정하지 않고 이미 쓴 것을 돌려준다. 이 목록을 보여 주고 확정받는다."""
+    known = {unit["key"]: unit for unit in session["units"]}
+    return [item["key"] for item in change if item.get("key") in known and _changed(known[item["key"]], item)
+            and not known[item["key"]]["locked"] and known[item["key"]]["status"] != "pending"]
+
+
+def apply_outline(session: Mapping[str, Any], change: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """사람이 구조를 바꾸면 영향받는 소목차만 다시 대기로 돌린다."""
+    if session["state"] != "paused":
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+    known = {unit["key"]: unit for unit in session["units"]}
+    keys = [item.get("key") for item in change]
+    if not change or len(change) > 60 or len(set(keys)) != len(keys) or any(key not in known for key in keys):
+        raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+    affected = set(outline_impact(session, change))
+    updated = copy.deepcopy(dict(session))
+    units = []
+    for item in change:
+        unit = copy.deepcopy(known[item["key"]])
+        title = item.get("title", unit["title"])
+        purpose = item.get("purpose", unit["purpose"])
+        size = item.get("target_chars", unit["target_chars"])
+        if not isinstance(title, str) or not title.strip() or len(title) > 120 or not isinstance(purpose, str) or len(purpose) > 300 or type(size) is not int or not 100 <= size <= 2400:
+            raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+        unit.update({"title": title.strip(), "purpose": purpose, "target_chars": size})
+        if unit["key"] in affected:
+            unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
+        units.append(unit)
+    updated["units"] = units
     return updated
 
 

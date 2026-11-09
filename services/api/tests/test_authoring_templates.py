@@ -87,7 +87,7 @@ class DiffTests(unittest.TestCase):
 
 class TemplateRegistryTests(unittest.TestCase):
     def test_three_templates_with_distinct_analysis_and_classification(self):
-        self.assertEqual([t["template_id"] for t in REGISTRY.list()], ["rfp_response_proposal", "insurance_terms_draft", "contract_draft"])
+        self.assertEqual([t["template_id"] for t in REGISTRY.list()], ["rfp_response_proposal", "insurance_terms_draft", "contract_draft", "general_document"])
         self.assertEqual(REGISTRY.get("insurance_terms_draft").analysis, "base_document")
         self.assertEqual(REGISTRY.get("contract_draft").style, "contract")
         self.assertIsNone(REGISTRY.get("contract_draft").source_input)

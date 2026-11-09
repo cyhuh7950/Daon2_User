@@ -78,7 +78,7 @@ def parse_template(raw: Mapping[str, Any]) -> AuthoringTemplate:
         raise _fail("no sections")
     analysis = raw.get("analysis", "rfp_requirements")
     style = raw.get("style", "proposal")
-    if analysis not in ("rfp_requirements", "base_document") or style not in ("proposal", "terms", "contract"):
+    if analysis not in ("rfp_requirements", "base_document", "free_outline") or style not in ("proposal", "terms", "contract"):
         raise _fail("analysis/style")
     source_input = raw.get("source_input", "rfp_document" if analysis == "rfp_requirements" else None)
     if analysis == "rfp_requirements" and (source_input not in seen or next(i for i in raw["inputs"] if i["key"] == source_input)["kind"] != "source_ref"):

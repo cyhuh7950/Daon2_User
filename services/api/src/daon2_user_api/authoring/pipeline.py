@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import re
+from dataclasses import replace
 from typing import Any, Callable, Mapping, Sequence
 
 from ..knowledge_connector_service import ConnectorContext, ConnectorError, KnowledgeConnectorService
@@ -15,6 +17,8 @@ from ..studio_text_generation import StudioPrompt, StudioTextGenerator
 from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
 from ..studio_workspace import StudioError
+from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan
+from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
 from .rfp import extract_requirements
@@ -22,6 +26,7 @@ from .session import SESSION_SCHEMA, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
+INLINE_REF = re.compile(r"[ \t]*\[[SK][0-9]+(?:[ \t]*,[ \t]*[SK][0-9]+)*\]")
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
 _TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
@@ -142,7 +147,7 @@ def evidence_for(used: Sequence[str], pack: ContextPack, knowledge: Sequence[Map
             continue
         rows.append({"ref_id": ref, "source_version_id": None, "evidence_span_id": None, "locator_kind": "page", "locator_value": str(p["page"]),
                      "quote_sha256": hashlib.sha256(p["text"].encode()).hexdigest(), "origin": "mcp_daon_rag",
-                     "external_ref": {"connector_id": p["connector_id"], "tool": "read_document_section", "document_id": p["document_id"], "version_id": p["version_id"],
+                     "external_ref": {"connector_id": p["connector_id"], "tool": p.get("tool", "read_document_section"), "document_id": p["document_id"], "version_id": p["version_id"],
                                       "project_id": p.get("project_id"), "work_package_id": p.get("work_package_id"),
                                       "block_id": p["block_id"], "name": p["heading"], "excerpt": p["text"], "resource_uri": p["resource_uri"]}})
     return rows
@@ -150,9 +155,10 @@ def evidence_for(used: Sequence[str], pack: ContextPack, knowledge: Sequence[Map
 
 class AuthoringPipeline:
     def __init__(self, registry: TemplateRegistry, reader: StudioSourceReader, llm: StudioTextGenerator, connectors: KnowledgeConnectorService,
-                 get_session: Callable[[Any, str], dict[str, Any]], *, context_chars: int = 16_000) -> None:
+                 get_session: Callable[[Any, str], dict[str, Any]], *, context_chars: int = 16_000, evidence: Any = None, checkpoint: Any = None) -> None:
         self._registry, self._reader, self._llm, self._connectors = registry, reader, llm, connectors
         self._get_session = get_session
+        self._evidence, self._checkpoint = evidence, checkpoint
         self._context_chars = context_chars
 
     def _connector_ctx(self, ctx: GenerationContext) -> ConnectorContext:
@@ -165,6 +171,8 @@ class AuthoringPipeline:
     # ------------------------------------------------------------------ 분석(요구사항 + 계획)
     def analyze(self, ctx: GenerationContext, session: dict[str, Any]) -> dict[str, Any]:
         template = self._registry.get(session["template_id"], ctx.context.tenant_id, session.get("template_version"))
+        if session.get("mode") == "agent":
+            return self._analyze_units(ctx, session, template)
         collector = KnowledgeCollector(self._connectors)
         if template.analysis == "base_document":
             ctx.progress(15, "기준 문서 수집")
@@ -191,6 +199,181 @@ class AuthoringPipeline:
         updated = copy.deepcopy(session)
         updated.update({"requirements": requirements, "plan": plan, "knowledge": knowledge, "analysis_warnings": warnings})
         return transition(updated, "review")
+
+    def _analyze_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate) -> dict[str, Any]:
+        """LLM이 이번 문서에 맞는 소목차를 정한다(K-3, K-4). 사람은 review 상태에서 확정한다."""
+        requirements: list[dict[str, Any]] = []
+        if template.analysis == "rfp_requirements":
+            ctx.progress(15, "RFP 읽기")
+            requirements = session["requirements"] or extract_requirements(self._rfp_pack(ctx, session), self._llm, ctx.context, progress=ctx.progress)
+        ctx.cancel_check()
+        ctx.progress(55, "목차 설계")
+        goal = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
+        sections = "\n".join(f"- {s['key']}: {s['title']} ({s.get('guidance', '')})" for s in template.sections)
+        pages = session.get("target_pages")
+        prompt = StudioPrompt(system=OUTLINE_SYSTEM, user=(
+            f"[요청] {session.get('request_text') or ''}\n[입력] {goal or '없음'}\n[목표 분량] {str(pages) + '페이지' if pages else '지정 없음'}\n"
+            f"[템플릿 절. 이 절은 없앨 수 없고 key를 그대로 씁니다]\n{sections}\n"
+            "[요구사항]\n" + ("\n".join(f"- {r['id']}: {r['text'][:120]}" for r in requirements[:60]) or "- 없음") +
+            "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요."),
+            json_schema=OUTLINE_SCHEMA, max_output_tokens=2000, prompt_version="authoring-outline-v1", schema_name="authoring_outline")
+        try:
+            outline = self._llm.generate(ctx.context, prompt).data
+        except (StudioError, ValueError, KeyError, TypeError):
+            outline = {}  # 설계 호출이 실패하면 템플릿 절을 그대로 소목차로 쓴다.
+        units = build_units(template, outline, target_pages=pages)
+        plan = plan_sections(units)
+        if plan and requirements:
+            plan[0]["requirement_ids"] = [r["id"] for r in requirements]
+        updated = copy.deepcopy(session)
+        updated.update({"requirements": requirements, "plan": {"sections": plan, "assumptions": []}, "units": units, "knowledge": [], "analysis_warnings": []})
+        return transition(updated, "review")
+
+    def _plan_unit(self, ctx: GenerationContext, unit: Mapping[str, Any], target: Any) -> tuple[tuple[str, ...], ...]:
+        """이 소목차를 쓰려면 어떤 자료가 필요한지 LLM에 묻는다(K-2). 답을 못 받으면 소목차 제목으로 찾는다."""
+        question = f"{unit['section_title']} / {unit['title']}: {unit['purpose']}"
+        prompt = StudioPrompt(system=UNIT_PLAN_SYSTEM, user=build_plan_prompt(question, (), target), json_schema=UNIT_PLAN_SCHEMA, max_output_tokens=400,
+                              prompt_version="authoring-unit-plan-v1", schema_name="authoring_unit_plan")
+        fallback = default_requests(target, f"{unit['title']} {unit['purpose']}")
+        try:
+            data = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data
+        except (StudioError, ValueError, KeyError, TypeError):
+            return fallback
+        requests = parse_plan(json.dumps(data, ensure_ascii=False), target)
+        return fallback if requests is None else requests
+
+    def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
+        target = self._evidence.prepare(ctx.context) if self._evidence is not None else None
+        found = tuple(self._evidence.run(target, self._plan_unit(ctx, unit, target), limit=evidence_limit(unit["target_chars"]))) if target is not None else ()
+        by_block = {(row["connector_id"], row["version_id"], row["block_id"]): row for row in knowledge}
+        material: list[dict[str, Any]] = []
+        for item in found:
+            key = (item.connector_id, item.document_version_id, item.block_id)
+            row = by_block.get(key)
+            if row is None:
+                row = by_block[key] = knowledge_row(item, f"K{len(knowledge) + 1}")
+                knowledge.append(row)
+            material.append(row)
+        done = [other for other in session["units"] if other["status"] in ("done", "needs_review") and other["key"] != unit["key"]]
+        inputs = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
+        requirements = {r["id"]: r for r in session["requirements"]}
+        section_ids = next((s["requirement_ids"] for s in session["plan"]["sections"] if s["key"] == unit["section_key"]), [])
+        requirement_lines = "\n".join(f"- {requirements[r]['text']}" for r in section_ids if r in requirements)
+        earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
+        terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
+        prompt = StudioPrompt(system=UNIT_SYSTEM, user=(
+            f"[작성할 소목차] {unit['title']}\n[절] {unit['section_title']}\n[목적] {unit['purpose']}\n[목표 글자 수] 약 {unit['target_chars']}자\n"
+            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}\n\n"
+            f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
+            json_schema=UNIT_SCHEMA, max_output_tokens=min(1800, max(400, unit["target_chars"] * 2)), prompt_version="authoring-unit-v1", schema_name="authoring_unit")
+        generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
+        written = self._written_chars(generation.data)
+        if written > unit["target_chars"] * OVERSIZE_RATIO:
+            # 분량은 제품이 관리한다. 넘치면 1회만 줄여 달라고 하고, 실패하면 처음 답을 쓴다.
+            shorter = replace(prompt, user=f"{prompt.user}\n\n[분량 초과] 앞 답변이 {written}자였습니다. 근거를 유지하면서 약 {unit['target_chars']}자로 줄여 다시 쓰세요.")
+            try:
+                again = self._llm.generate(ctx.context, shorter, cancel_check=ctx.cancel_check)
+                if 0 < self._written_chars(again.data) < written:
+                    generation = again
+            except (StudioError, ValueError, KeyError, TypeError):
+                pass
+        known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
+        warnings = Warnings()
+        paragraphs: list[dict[str, Any]] = []
+        for index, para in enumerate(generation.data.get("paragraphs", [])[:12]):
+            text = text_field(para.get("text"), 2500) if isinstance(para, Mapping) else ""
+            if not text:
+                continue
+            # 본문에 쓴 근거 번호는 근거로 옮기고 지운다. 번호의 숫자가 숫자 검증에 걸리지 않게 먼저 처리한다.
+            inline = [label for found in INLINE_REF.findall(text) for label in re.findall(r"[SK][0-9]+", found)]
+            text = re.sub(r"[ \t]{2,}", " ", INLINE_REF.sub("", text)).strip()
+            refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
+            if not text:
+                continue
+            if refs:
+                evidence_pack = ContextPack(tuple(p for p in pack.passages if p.ref in refs) + tuple(
+                    Passage(row["ref"], "", "", "", None, "page", str(row["page"]), None, row["text"]) for row in material if row["ref"] in refs), False, 0)
+                check_anchors(text, refs, evidence_pack, warnings, f"units.{unit['key']}.p{index}")
+            elif NO_MATERIAL not in text:
+                text = f"{text} {NO_MATERIAL}"  # 근거 없는 문단은 제품이 표시한다(4.4).
+            paragraphs.append({"text": text, "refs": refs, "origin": "sourced" if refs else "new"})
+        if not paragraphs:
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
+        return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
+                "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
+                "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
+                "warnings": list(warnings.items), "error_code": None, "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
+
+    @staticmethod
+    def _written_chars(data: Mapping[str, Any]) -> int:
+        return sum(len(str(item.get("text", ""))) for item in data.get("paragraphs", []) if isinstance(item, Mapping))
+
+    def generate_units(self, ctx: GenerationContext, session: dict[str, Any]) -> GenerationResult:
+        """소목차마다 묻고, 찾고, 쓰고, 검증하고, 저장한다. 멈췄다가도 저장소의 다음 미완료 소목차부터 이어진다(K-7)."""
+        template = self._registry.get(session["template_id"], ctx.context.tenant_id, session.get("template_version"))
+        pack = self._rfp_pack(ctx, session) if template.source_input else ContextPack((), False, 0)
+        total = max(1, len(session["units"]))
+        current = session
+        provider: tuple[str, str, str] = ("", "", "")
+        for index in range(total):
+            ctx.cancel_check()
+            unit = current["units"][index]
+            if unit["status"] != "pending":
+                continue
+            ctx.progress(5 + int(85 * index / total), f"소목차 작성 {index + 1}/{total}: {unit['title']}")
+            knowledge = copy.deepcopy(current.get("knowledge") or [])
+            try:
+                result = self._write_unit(ctx, current, template, unit, pack, knowledge)
+                provider = result.pop("provider")
+            except (ExternalEvidenceError, StudioError) as error:
+                result = {"status": "failed", "error_code": getattr(error, "code", "STUDIO_JOB_PROCESSING_FAILED")}
+            current = self._save_unit(ctx, current, unit["key"], result, knowledge)
+            if current.get("pause_requested"):
+                return self._paused(current, "user")
+            if result["status"] == "needs_review":
+                return self._paused(current, "needs_review")
+        if any(unit["status"] == "failed" for unit in current["units"]):
+            return self._paused(current, "unit_failed")
+        return self._finish_units(ctx, current, template, pack, provider)
+
+    def _save_unit(self, ctx: GenerationContext, session: dict[str, Any], key: str, result: Mapping[str, Any], knowledge: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        def merge(content: dict[str, Any]) -> dict[str, Any]:
+            content["knowledge"] = list(knowledge)
+            for unit in content["units"]:
+                if unit["key"] == key:
+                    unit.update(result)
+            return content
+
+        return self._checkpoint(ctx.context, ctx.output_id, merge) if self._checkpoint is not None else merge(copy.deepcopy(session))
+
+    @staticmethod
+    def _paused(session: Mapping[str, Any], reason: str) -> GenerationResult:
+        paused = transition(session, "paused")
+        paused.update({"pause_requested": False, "pause_reason": reason})
+        return GenerationResult(content={**paused, "language": "ko", "warnings": []}, generated_with={"prompt_version": "authoring-unit-v1"})
+
+    def _finish_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate, pack: ContextPack, provider: tuple[str, str, str]) -> GenerationResult:
+        ctx.progress(92, "점검")
+        knowledge = session.get("knowledge") or []
+        document_sections = [{"key": u["key"], "title": u["title"], "paragraphs": u["paragraphs"], "open_items": u["open_items"]} for u in session["units"]]
+        by_section: dict[str, dict[str, Any]] = {}
+        for unit in session["units"]:
+            by_section.setdefault(unit["section_key"], {"key": unit["section_key"], "paragraphs": []})["paragraphs"] += unit["paragraphs"]
+        coverage = self.coverage(session["requirements"], session["plan"], list(by_section.values())) if template.analysis == "rfp_requirements" else []
+        checks: list[dict[str, Any]] = []
+        if coverage:
+            checks.append({"id": "rfp_requirement_coverage", "title": "요구사항 대응표", "status": "done", "summary": {s: sum(1 for c in coverage if c["status"] == s) for s in ("covered", "partial", "missing")}})
+        checks.append(evidence_integrity(document_sections, {p.ref for p in pack.passages} | {str(k["ref"]) for k in knowledge}))
+        warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]
+        open_items = list(dict.fromkeys(item for unit in session["units"] for item in unit["open_items"]))
+        final = transition(session, "completed")
+        final["document"] = {"template_id": template.template_id, "title": f"{template.title} 초안", "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
+                             "checks": checks, "assumptions": session["assumptions"], "open_items": open_items, "notice": NOTICES[template.style], "style": template.style}
+        used = [ref for unit in session["units"] for p in unit["paragraphs"] for ref in p["refs"]]
+        sources = [{"source_version_id": session["inputs"][template.source_input]["source_version_id"]}] if template.source_input else []
+        return GenerationResult(content={**final, "language": "ko", "warnings": warnings}, warnings=warnings, sources=sources, evidence=evidence_for(used, pack, knowledge),
+                                generated_with={"provider": provider[0], "model": provider[1], "connection": provider[2], "prompt_version": "authoring-unit-v1"})
 
     @staticmethod
     def _plan_from_template(template: AuthoringTemplate, knowledge: Sequence[Mapping[str, Any]], previous: Mapping[str, Any] | None) -> dict[str, Any]:

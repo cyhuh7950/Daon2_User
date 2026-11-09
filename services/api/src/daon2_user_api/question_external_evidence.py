@@ -253,13 +253,13 @@ def _evidence_rank(item: ExternalEvidence) -> tuple[float, str]:
     return -item.chunk.score, item.block_id
 
 
-def _select_evidence(groups: Iterable[Sequence[ExternalEvidence]]) -> tuple[ExternalEvidence, ...]:
+def _select_evidence(groups: Iterable[Sequence[ExternalEvidence]], limit: int = EXTERNAL_LIMIT) -> tuple[ExternalEvidence, ...]:
     """검색어마다 가까운 근거부터 번갈아 고른다. 점수 높은 검색어 하나가 다른 검색어의 근거를 밀어내지 않게 한다."""
     queues = [sorted(group, key=_evidence_rank) for group in groups]
     chosen: dict[str, ExternalEvidence] = {}
-    while any(queues) and len(chosen) < EXTERNAL_LIMIT:
+    while any(queues) and len(chosen) < limit:
         for queue in queues:
-            while queue and len(chosen) < EXTERNAL_LIMIT:
+            while queue and len(chosen) < limit:
                 item = queue.pop(0)
                 if item.block_id not in chosen:
                     chosen[item.block_id] = item
@@ -293,7 +293,7 @@ class NotebookKnowledgeEvidence:
     def _source_tenant(row: Mapping[str, Any]) -> Mapping[str, str]:
         return {"tenant_id": row["tenant_id"]} if isinstance(row.get("tenant_id"), str) else {}
 
-    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, str]]) -> tuple[ExternalEvidence, ...]:
+    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], limit: int = EXTERNAL_LIMIT) -> tuple[ExternalEvidence, ...]:
         packages = {package["alias"]: package for package in target.packages}
         by_query: dict[tuple[str, str], list[ExternalEvidence]] = {}
         budget = MAX_PLAN_CALLS
@@ -316,7 +316,7 @@ class NotebookKnowledgeEvidence:
                 if not isinstance(rows, list):
                     raise _unavailable()
                 by_query.setdefault((kind, query), []).extend(self._evidence(target.connector_id, package, row, similarity) for row, similarity in map(_parsed, rows))
-        return _select_evidence(by_query.values())
+        return _select_evidence(by_query.values(), limit)
 
     def _daon2_evidence(self, target: EvidenceTarget, package: Mapping[str, str], query: str, kind: str, budget: int) -> tuple[list[ExternalEvidence], int]:
         """온톨로지와 규칙을 근거 형태로 가져온다. 전문가 승인·게시된 것만 쓰고, 지식이 준비되지 않은 패키지는 건너뛴다."""

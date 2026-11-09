@@ -111,6 +111,9 @@ test("작성(Authoring)과 지식 Connector 경로는 정확한 세그먼트·�
     [get("/authoring/sessions/sv2-1"), seg("authoring", "sessions", "sv2-1"), "/authoring/sessions/sv2-1"],
     [write("POST", "/authoring/sessions/sv2-1/answers"), seg("authoring", "sessions", "sv2-1", "answers"), "/authoring/sessions/sv2-1/answers"],
     [write("PUT", "/authoring/sessions/sv2-1/review"), seg("authoring", "sessions", "sv2-1", "review"), "/authoring/sessions/sv2-1/review"],
+    [write("POST", "/authoring/sessions/sv2-1/control"), seg("authoring", "sessions", "sv2-1", "control"), "/authoring/sessions/sv2-1/control"],
+    [write("PUT", "/authoring/sessions/sv2-1/outline"), seg("authoring", "sessions", "sv2-1", "outline"), "/authoring/sessions/sv2-1/outline"],
+    [write("PUT", "/authoring/sessions/sv2-1/units/s1__u1"), seg("authoring", "sessions", "sv2-1", "units", "s1__u1"), "/authoring/sessions/sv2-1/units/s1__u1"],
   ];
   for (const [request, segments, suffix] of ok) {
     const response = await proxy(request, segments);

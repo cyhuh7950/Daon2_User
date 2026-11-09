@@ -501,6 +501,20 @@ class PostgresStudioV2Repository:
                                  {"step": enqueue_step}, list(source_version_ids), notebook_id)
         return {"output_id": output_id, "revision_no": number, "state": content.get("state"), "queued": enqueue_step is not None}
 
+    def authoring_merge(self, context: StudioContext, output_id: str, mutate) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        """작업 중에도 쓰는 저장: 최신 리비전에 변경을 합쳐 새 리비전을 쌓는다. 소목차 저장과 일시 정지 요청이 서로 덮어쓰지 않는다."""
+        with self._cloud_store._transaction(self._cloud(context, "studio.v2.write")) as connection:
+            row = self._owned_output(connection, context, output_id, lock=True)
+            if row[1] != "authored_document":
+                raise StudioError("RESOURCE_UNAVAILABLE", 404)
+            current = connection.execute(
+                "SELECT content_json FROM studio_v2_revisions WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s",
+                (context.tenant_id, context.workspace_id, output_id, row[8])).fetchone()
+            import copy as _copy
+            content = mutate(_copy.deepcopy(current[0]))
+            self.add_revision(context, output_id, "generated", content, connection=connection)
+        return content
+
     def latest_content(self, context: StudioContext, output_id: str) -> tuple[int, str, Mapping[str, object]]:
         """(리비전, 출력 상태, 내용). 세션 화면 복원과 워커가 쓴다."""
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:

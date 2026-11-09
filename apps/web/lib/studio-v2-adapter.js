@@ -5,7 +5,7 @@ import {
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, issueExportStepUp,
-  listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, listKnowledgeConnectors, listConnectorDocuments,
+  listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
 
 // 노트북 범위(workspaceId, notebookId)를 미리 묶은 Studio v2 어댑터. 셸·패널은 이 객체만 쓴다.
@@ -52,6 +52,9 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
       getSession: (outputId, options) => getAuthoringSession(workspaceId, outputId, scope(options)),
       answer: (outputId, input) => answerAuthoringSession(workspaceId, outputId, scope(input)),
       review: (outputId, input) => reviewAuthoringSession(workspaceId, outputId, scope(input)),
+      control: (outputId, input) => controlAuthoringSession(workspaceId, outputId, scope(input)),
+      editUnit: (outputId, unitKey, input) => editAuthoringUnit(workspaceId, outputId, unitKey, scope(input)),
+      outline: (outputId, input) => updateAuthoringOutline(workspaceId, outputId, scope(input)),
       listConnectors: (options) => listKnowledgeConnectors({ ...options, fetchImpl }),
       listDocuments: (connectorId, options) => listConnectorDocuments(connectorId, { ...options, fetchImpl }),
     }),
