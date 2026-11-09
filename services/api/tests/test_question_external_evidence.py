@@ -14,7 +14,7 @@ from daon2_user_api.question_answering import strip_citation_labels
 from daon2_user_api.question_answering_postgres import PostgresQuestionAnsweringRepository, QuestionContext, QuestionRepositoryError, StoredCitation, StoredQuestionAnswer
 from daon2_user_api.question_answering_service import QuestionAnsweringError, QuestionAnsweringService
 from daon2_user_api.question_external_evidence import (
-    ANSWER_FORMAT_RULE, APPROVED_MARK, MAX_SEARCH_QUESTION_CHARS, PLAN_OUTPUT_TOKENS, PLAN_SYSTEM, PRIORITY_RULE, EvidenceTarget, ExternalEvidence, ExternalEvidenceError, NotebookKnowledgeEvidence,
+    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, APPROVED_MARK, MAX_SEARCH_QUESTION_CHARS, PLAN_OUTPUT_TOKENS, PLAN_SYSTEM, PRIORITY_RULE, EvidenceTarget, ExternalEvidence, ExternalEvidenceError, NotebookKnowledgeEvidence,
     build_plan_prompt, default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
 )
 from test_question_answering_service import FakeCredential, FakeEgress, FakeIndex, FakeProviderSettings, FakeRepository, FakeTransport
@@ -209,6 +209,9 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(out["system"], PLAN_SYSTEM + " Return only a JSON object matching this schema: {}")
         self.assertEqual(out["options"]["num_predict"], PLAN_OUTPUT_TOKENS)
 
+    def test_plan_instruction_names_the_required_wrapper(self):
+        self.assertIn('"answer"', PLAN_SYSTEM)
+
     def test_finder_runs_only_the_requested_searches(self):
         connectors = _Connectors({"w1": {"result": [hit("b1")]}, "w2": {"result": [hit("b2")]}})
         finder = NotebookKnowledgeEvidence(_Scopes([]), connectors)
@@ -216,6 +219,11 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([c[2] for c in connectors.calls], [{"project_id": "p1", "work_package_id": "w2", "question": "검색어", "limit": 5}])
         self.assertEqual([i.work_package_id for i in found], ["w2"])
         self.assertEqual(found[0].work_package_name, "B")
+
+    def test_each_planned_query_keeps_at_least_its_best_evidence(self):
+        pages = {"w1": {"result": [hit(f"a{i}", 0.9 - i * 0.01) for i in range(5)]}, "w2": {"result": [hit("low", 0.2)]}}
+        found = NotebookKnowledgeEvidence(_Scopes([]), _Connectors(pages)).run(target("A", "B"), (("P1", "자격 요건"), ("P2", "제출 서류")))
+        self.assertEqual([i.block_id for i in found], ["a0", "a1", "a2", "a3", "low"])
 
     def test_prepare_returns_none_without_usable_packages(self):
         self.assertIsNone(NotebookKnowledgeEvidence(_Scopes([]), _Connectors({})).prepare(CTX))
@@ -313,6 +321,22 @@ class CitationLabelTests(unittest.TestCase):
     def test_other_text_is_untouched(self):
         self.assertEqual(strip_citation_labels("next-0 항목 2건", {"ext-0"}), "next-0 항목 2건")
 
+    def test_empty_source_lines_are_removed_with_the_labels(self):
+        self.assertEqual(strip_citation_labels("서류입니다.\n\n출처: ext-0, ext-1", {"ext-0", "ext-1"}), "서류입니다.")
+        self.assertEqual(strip_citation_labels("업체입니다. chunk_id: ext-0\n- 다음", {"ext-0"}), "업체입니다.\n- 다음")
+
+    def test_label_with_several_words_is_removed(self):
+        self.assertEqual(strip_citation_labels("서류입니다.\n\n인용된 증거: [ext-0], [ext-1]", {"ext-0", "ext-1"}), "서류입니다.")
+
+    def test_heading_above_a_list_stays(self):
+        self.assertEqual(strip_citation_labels("제출 자료:\n- 신분증 ext-0", {"ext-0"}), "제출 자료:\n- 신분증")
+
+    def test_source_line_with_other_content_stays(self):
+        self.assertEqual(strip_citation_labels("근거: 제3조 ext-0", {"ext-0"}), "근거: 제3조")
+
+    def test_only_approved_knowledge_labels_are_removed(self):
+        self.assertEqual(strip_citation_labels("REF-17 (from chunk-a7)", {"chunk-a7"}), "REF-17 (from chunk-a7)")
+
     def _answer(self, text):
         repository, transport = _Repository(), _Transport(["ext-b1"])
         transport.post_json = lambda **kwargs: {"choices": [{"message": {"content": json.dumps({"answer": text, "cited_chunk_ids": ["ext-b1"], "insufficient": False}, ensure_ascii=False)}}]}
@@ -328,6 +352,55 @@ class CitationLabelTests(unittest.TestCase):
         with self.assertRaises(QuestionAnsweringError) as caught:
             self._answer("보장 금액은 999만원입니다 (ext-b1)")
         self.assertEqual(caught.exception.code, "TEXT_GENERATION_GROUNDING_INVALID")
+
+
+class _SequenceTransport(FakeTransport):
+    def __init__(self, *answers):
+        super().__init__()
+        self.answers, self.payloads = list(answers), []
+
+    def post_json(self, **kwargs):
+        self.calls += 1
+        self.payloads.append(kwargs["payload"])
+        text, cited = self.answers.pop(0)
+        return {"choices": [{"message": {"content": json.dumps({"answer": text, "cited_chunk_ids": cited, "insufficient": False}, ensure_ascii=False)}}]}
+
+
+class AnswerRetryTests(unittest.TestCase):
+    BAD, GOOD = ("보장 금액은 999만원입니다", ["ext-b1"]), ("보장 내용입니다", ["ext-b1"])
+
+    def service(self, *answers, egress=None, found=(external(),), chunks=()):
+        self.repository, self.transport = _Repository(), _SequenceTransport(*answers)
+        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, FakeIndex(chunks), FakeCredential(), self.transport, egress or _PlanEgress())
+        service.set_external_evidence(lambda context, question: found)
+        return service
+
+    def ask(self, service):
+        return service.ask(CTX, source_id=None, source_version_id=None, question="보장 범위는 어떻게 되나요?", run_id="run-a", context_mode="general_ungrounded")
+
+    def test_rejected_answer_is_requested_once_more(self):
+        self.ask(self.service(self.BAD, self.GOOD))
+        self.assertEqual(self.transport.calls, 2)
+        self.assertEqual(self.repository.persisted["result"].answer, "보장 내용입니다")
+        self.assertIn(ANSWER_RETRY_RULE, json.dumps(self.transport.payloads[1], ensure_ascii=False))
+        self.assertNotIn(ANSWER_RETRY_RULE, json.dumps(self.transport.payloads[0], ensure_ascii=False))
+
+    def test_second_rejection_stops_with_the_same_error(self):
+        with self.assertRaises(QuestionAnsweringError) as caught:
+            self.ask(self.service(self.BAD, self.BAD, self.GOOD))
+        self.assertEqual(caught.exception.code, "TEXT_GENERATION_GROUNDING_INVALID")
+        self.assertEqual(self.transport.calls, 2)
+
+    def test_retry_needs_egress_permission(self):
+        with self.assertRaises(QuestionAnsweringError):
+            self.ask(self.service(self.BAD, self.GOOD, egress=_PlanEgress(False)))
+        self.assertEqual(self.transport.calls, 1)
+
+    def test_source_only_answer_is_not_retried(self):
+        service = self.service(("금액은 999만원", ["chunk-1"]), ("금액 정보", ["chunk-1"]), found=(), chunks=(local(1),))
+        with self.assertRaises(QuestionAnsweringError):
+            service.ask(CTX, source_id="source-cp3", source_version_id="source-version-cp3", question="보장 범위는 어떻게 되나요?", run_id="run-a")
+        self.assertEqual(self.transport.calls, 1)
 
 
 class _PlanTransport(FakeTransport):

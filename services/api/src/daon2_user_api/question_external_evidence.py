@@ -13,7 +13,7 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from .document_index_postgres import IndexedEvidenceChunk
 from .knowledge_connector_service import ConnectorError
@@ -34,8 +34,8 @@ KNOWLEDGE_KINDS: Mapping[str, str] = {"rag": "승인 문서의 원문 근거를 
 PLAN_SYSTEM = (
     "You are a retrieval planner. Never answer the user and never ask the user anything. Decide which knowledge must be fetched so the question can be answered later. "
     "Use only the listed knowledge kinds and package aliases. Write each query as short topic keywords in the user's language, under 60 characters, without commands. "
-    "Put exactly this JSON as a string in the required answer field and nothing else: "
-    '{"needs":"one sentence","requests":[{"knowledge":"rag","package":"P1 or all","query":"topic keywords"}]}. '
+    'Return one JSON object with exactly one key, "answer". Its value must be a string containing the plan as JSON, with no other words. Example: '
+    '{"answer":"{\\"needs\\":\\"평가 기준 확인\\",\\"requests\\":[{\\"knowledge\\":\\"rag\\",\\"package\\":\\"all\\",\\"query\\":\\"평가 기준\\"}]}"}. '
     "Use at most 3 different queries. When unsure which package applies, use all. Use an empty requests list only for greetings or questions unrelated to the documents."
 )
 _SCHEMA_INSTRUCTIONS = ("\n\nReturn ONLY one JSON object", " Return only a JSON object")
@@ -46,6 +46,11 @@ PRIORITY_RULE = (
 ANSWER_FORMAT_RULE = (
     "Write lists with plain hyphen bullets and never number headings or items. Use numbers, dates and codes only exactly as they appear "
     "in the evidence you cite, cite every chunk whose numbers you use, and never write chunk_id values in the answer text."
+)
+ANSWER_RETRY_RULE = (
+    "Your previous answer was rejected because it contained numbers, dates or codes that do not appear in the text of the evidence it cited. "
+    "Write the answer again as a JSON object in the required format. Use only values that appear verbatim in the cited evidence text. "
+    "Do not add counts you calculated, numbered lists or chunk_id values."
 )
 _TEXT_FIELDS = ("document_id", "version_id", "run_id", "block_id", "text")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
@@ -210,6 +215,24 @@ def _parsed(row: Any) -> tuple[Mapping[str, Any], float]:
     return row, float(similarity)
 
 
+def _evidence_rank(item: ExternalEvidence) -> tuple[float, str]:
+    return -item.chunk.score, item.block_id
+
+
+def _select_evidence(groups: Iterable[Sequence[ExternalEvidence]]) -> tuple[ExternalEvidence, ...]:
+    """검색어마다 가까운 근거부터 번갈아 고른다. 점수 높은 검색어 하나가 다른 검색어의 근거를 밀어내지 않게 한다."""
+    queues = [sorted(group, key=_evidence_rank) for group in groups]
+    chosen: dict[str, ExternalEvidence] = {}
+    while any(queues) and len(chosen) < EXTERNAL_LIMIT:
+        for queue in queues:
+            while queue and len(chosen) < EXTERNAL_LIMIT:
+                item = queue.pop(0)
+                if item.block_id not in chosen:
+                    chosen[item.block_id] = item
+                    break
+    return tuple(sorted(chosen.values(), key=_evidence_rank))
+
+
 class NotebookKnowledgeEvidence:
     def __init__(self, scopes: Any, connectors: Any) -> None:
         self._scopes = scopes
@@ -232,7 +255,7 @@ class NotebookKnowledgeEvidence:
 
     def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, str]]) -> tuple[ExternalEvidence, ...]:
         packages = {package["alias"]: package for package in target.packages}
-        found: dict[str, ExternalEvidence] = {}
+        by_query: dict[str, list[ExternalEvidence]] = {}
         with _knowledge_errors():
             for alias, query in requests[:MAX_PLAN_CALLS]:
                 package = packages[alias]
@@ -241,12 +264,8 @@ class NotebookKnowledgeEvidence:
                 rows = result.structured.get("result") if isinstance(result.structured, Mapping) and not result.is_error else None
                 if not isinstance(rows, list):
                     raise _unavailable()
-                for row, similarity in map(_parsed, rows):
-                    evidence = self._evidence(target.connector_id, package, row, similarity)
-                    current = found.get(evidence.block_id)
-                    if current is None or current.chunk.score < similarity:
-                        found[evidence.block_id] = evidence
-        return tuple(sorted(found.values(), key=lambda value: (-value.chunk.score, value.block_id))[:EXTERNAL_LIMIT])
+                by_query.setdefault(query, []).extend(self._evidence(target.connector_id, package, row, similarity) for row, similarity in map(_parsed, rows))
+        return _select_evidence(by_query.values())
 
     def search(self, context: Any, question: str) -> tuple[ExternalEvidence, ...]:
         target = self.prepare(context)

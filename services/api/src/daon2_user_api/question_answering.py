@@ -47,13 +47,21 @@ def classify_question_intent(value: str) -> str:
 
 
 def strip_citation_labels(answer: str, chunk_ids: Iterable[str]) -> str:
-    """LLM이 본문에 그대로 쓴 내부 인용 번호를 지운다. 사실 검사가 아니라 표시 정리이며 숫자·날짜 검사는 그대로다."""
-    cleaned = answer
-    for chunk_id in sorted(chunk_ids, key=len, reverse=True):
-        cleaned = re.sub(rf"(?<![\w-]){re.escape(chunk_id)}(?![\w-])", "", cleaned)
+    """LLM이 본문에 그대로 쓴 승인 지식 인용 번호를 지운다. 표시 정리일 뿐 숫자·날짜 검사는 그대로이고, 소스 답변 검증도 바꾸지 않는다."""
+    labels = sorted((item for item in chunk_ids if item.startswith("ext-")), key=len, reverse=True)
+    if not labels:
+        return answer
+    label = rf"[(\[（【]?(?:{'|'.join(map(re.escape, labels))})[)\]）】]?"
+    cleaned = re.sub(
+        rf"(?im)[^\n:：.。!?]{{0,12}}(?:출처|근거|증거|참고|문헌|자료|chunk[_ ]?ids?|citations?|sources?)[ \t]*[:：][ \t]*{label}(?:[ \t]*[,，][ \t]*{label})*[ \t]*$",
+        "", answer,
+    )
+    for item in labels:
+        cleaned = re.sub(rf"(?<![\w-]){re.escape(item)}(?![\w-])", "", cleaned)
     if cleaned == answer:
         return answer
     cleaned = re.sub(r"[(\[（【][\s,，]*[)\]）】]", "", cleaned)
+    cleaned = re.sub(r"[ \t]+(?=\n)", "", cleaned)
     return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 

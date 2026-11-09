@@ -88,6 +88,7 @@
 | WO-M0 | `docs/work_orders/WO-M0-mcp-virtual.md` | F4-*, S5-01~S5-04, F0-17 (MCP·가상 서버) | T-M0-01 스파이크부터 즉시 |
 | WO-A1 | `docs/work_orders/WO-A1-authoring.md` | F6-*, S4-*, S5-05 (작성 엔진) | WO-F2, WO-M0 완료 후 |
 | WO-K2 | `docs/work_orders/WO-K2-notebook-daon-knowledge-scopes.md` | 노트북 Daon 승인 지식 업무 패키지 선택(팝업·다중 선택·승인된 지식만) | 2026-11-09 승인. Daon2-RAG·Daon2 선행 회신 필요 |
+| WO-K4 | `docs/work_orders/WO-K4-knowledge-agent.md` | 승인 지식을 LLM이 판단해 쓰는 공용 엔진(자료 계획·검색·근거 정리). 노트북 채팅 → Daon2 지식 → 문서 작성 → 스튜디오 순 | 2026-11-09 승인. 1단계 구현. ysna 배포와 스위치 켜기는 별도 승인 |
 
 권장 착수 순서: **WO-T0(기준선 결함 수정) → WO-D·WO-F1·WO-M0 병행 → WO-F2·WO-S1 → WO-A1.**
 

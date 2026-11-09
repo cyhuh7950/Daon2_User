@@ -17,7 +17,7 @@ from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
 from .question_answering import strip_citation_labels
 from .question_external_evidence import (
-    ANSWER_FORMAT_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
+    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
     default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
 )
 from .document_index_postgres import IndexedEvidenceChunk
@@ -572,6 +572,20 @@ class QuestionAnsweringService:
         with self._external_lock:
             self._external_cache[key] = (now + EXTERNAL_EVIDENCE_REUSE_SECONDS, found)
         return found
+
+    def _generate_answer(self, context, prepared, cost_session, uses_knowledge: bool):  # type: ignore[no-untyped-def]
+        """승인 지식 답변이 검증에 걸리면 같은 근거로 1회만 다시 요청한다. 검증 기준은 바꾸지 않는다."""
+        try:
+            return self._generate_with_run_cost(prepared, general=False, session=cost_session)
+        except ValueError as error:
+            if (not uses_knowledge or cost_session is not None
+                    or str(error) not in {"TEXT_GENERATION_GROUNDING_INVALID", "TEXT_GENERATION_RESPONSE_INVALID"}):
+                raise
+            retry = replace(prepared, provider_payload=append_system_rule(prepared.provider_payload, ANSWER_RETRY_RULE))
+            authorize = getattr(self._egress, "authorize_plan", None)
+            if not callable(authorize) or not authorize(context, prepared.selection, canonical_json_bytes(retry.provider_payload)):
+                raise
+            return self._generate_with_run_cost(retry, general=False, session=None)
 
     @staticmethod
     def _knowledge_answer_payload(payload, mixed: bool):  # type: ignore[no-untyped-def]
@@ -1265,7 +1279,7 @@ class QuestionAnsweringService:
                     **prepared.provider_payload, "format": ordered_schema})
         recheck()
         try:
-            generated = self._generate_with_run_cost(prepared,general=False,session=cost_session)
+            generated = self._generate_answer(context, prepared, cost_session, bool(external))
         except (ValueError, DocumentUnderstandingError) as error:
             raw_code = error.code if isinstance(error, DocumentUnderstandingError) else str(error)
             code = (
