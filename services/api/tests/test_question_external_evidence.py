@@ -79,6 +79,11 @@ class SearchTests(unittest.TestCase):
         self.assertTrue(item.chunk.chunk_id.startswith("ext-"))
         self.assertEqual((item.chunk.page, item.chunk.text, item.chunk.score), (3, "본문 b1", 0.7))
 
+    def test_long_question_is_cut_to_the_server_limit(self):
+        connectors = _Connectors({"w1": {"result": [hit()]}})
+        search(_Scopes([selected("w1")]), connectors, question="  " + "가" * 800 + "  ")
+        self.assertEqual(connectors.calls[0][2]["question"], "가" * 500)
+
     def test_package_no_longer_approved_is_not_searched(self):
         connectors = _Connectors({"w2": {"result": [hit()]}})
         items = [selected("w1"), selected("w2")]
