@@ -24,6 +24,7 @@ class Passage:
     locator_value: str
     heading: str | None
     text: str
+    external_ref: Mapping[str, object] | None = None  # 승인 지식에서 온 구간의 출처
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,10 @@ class ContextPack:
         for ref in dict.fromkeys(refs):
             p = index.get(ref)
             if p is None:
+                continue
+            if p.external_ref is not None:
+                rows.append({"ref_id": p.ref, "source_version_id": None, "evidence_span_id": None, "locator_kind": p.locator_kind, "locator_value": p.locator_value,
+                             "quote_sha256": hashlib.sha256(p.text.encode("utf-8")).hexdigest(), "origin": "mcp_daon_rag", "external_ref": dict(p.external_ref)})
                 continue
             rows.append({"ref_id": p.ref, "source_version_id": p.source_version_id, "evidence_span_id": p.evidence_span_id,
                          "locator_kind": p.locator_kind, "locator_value": p.locator_value,

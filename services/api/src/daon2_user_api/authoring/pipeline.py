@@ -17,7 +17,7 @@ from ..studio_text_generation import StudioPrompt, StudioTextGenerator
 from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
 from ..studio_workspace import StudioError
-from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan
+from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
@@ -240,11 +240,11 @@ class AuthoringPipeline:
         except (StudioError, ValueError, KeyError, TypeError):
             return fallback
         requests = parse_plan(json.dumps(data, ensure_ascii=False), target)
-        return fallback if requests is None else requests
+        return requests or fallback  # 문서를 만들려면 자료가 필요하므로 빈 계획이어도 찾아 본다
 
     def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
         target = self._evidence.prepare(ctx.context) if self._evidence is not None else None
-        found = tuple(self._evidence.run(target, self._plan_unit(ctx, unit, target), limit=evidence_limit(unit["target_chars"]))) if target is not None else ()
+        found = run_planned(self._evidence, target, self._plan_unit(ctx, unit, target), default_requests(target, f"{unit['title']} {unit['purpose']}"), limit=evidence_limit(unit["target_chars"])) if target is not None else ()
         by_block = {(row["connector_id"], row["version_id"], row["block_id"]): row for row in knowledge}
         material: list[dict[str, Any]] = []
         for item in found:

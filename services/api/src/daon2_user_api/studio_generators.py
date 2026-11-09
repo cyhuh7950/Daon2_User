@@ -28,6 +28,8 @@ PRESET_GUIDES = {
     "custom": "사용자 지시문을 따르는 문서",
 }
 _REFS = {"type": "array", "items": {"type": "string"}}
+STUDIO_LABELS = {"report": "보고서", "data_table": "데이터 표", "mind_map": "마인드맵", "flashcards": "플래시카드", "quiz": "퀴즈", "slides": "슬라이드 자료", "infographic": "인포그래픽",
+                 "audio_overview": "오디오 개요", "video_overview": "동영상 개요"}
 
 
 def _user_block(ctx: GenerationContext) -> str:
@@ -50,6 +52,10 @@ class _Base:
     schema_name = "studio_output"
     max_tokens = 3000
     prompt_version = "studio-v1"
+    _knowledge = None
+
+    def set_knowledge(self, knowledge: object) -> None:
+        self._knowledge = knowledge
 
     def __init__(self, reader: StudioSourceReader, llm: StudioTextGenerator, *, context_chars: int = 24_000) -> None:
         self._reader = reader
@@ -57,8 +63,17 @@ class _Base:
         self._context_chars = context_chars
 
     def _pack(self, ctx: GenerationContext) -> ContextPack:
-        sources = self._reader.read(ctx.context, ctx.source_version_ids)
-        return build_pack(sources, budget_chars=self._context_chars, focus=str(ctx.settings.get("focus", "")) or None)
+        # 승인 지식만 고른 경우 소스 없이 시작한다. 지식도 없으면 아래에서 거부한다.
+        sources = self._reader.read(ctx.context, ctx.source_version_ids) if ctx.source_version_ids or self._knowledge is None else ()
+        focus = str(ctx.settings.get("focus", "")).strip()
+        pack = build_pack(sources, budget_chars=self._context_chars, focus=focus or None)
+        if self._knowledge is None:
+            return pack
+        names = ", ".join(s.filename for s in sources[:5]) or "없음"
+        pack, _ = self._knowledge.extend(ctx, f"{STUDIO_LABELS.get(self.type_id, self.type_id)} 작성. 주제: {focus or '선택한 지식 전체'}. 소스: {names}", pack)
+        if not pack.passages:
+            raise StudioError("STUDIO_NO_READY_SOURCE", 409)
+        return pack
 
     def _ask(self, ctx: GenerationContext, task: str, schema: Mapping[str, object], pack: ContextPack, *, tokens: int | None = None) -> Mapping[str, object]:
         ctx.cancel_check()
@@ -109,6 +124,10 @@ class ReportGenerator(_Base):
         for index, section in enumerate(sections_in):
             ctx.progress(15 + int(75 * index / len(sections_in)), f"섹션 작성 {index + 1}/{len(sections_in)}")
             sub = pack.subset([r for r in V.as_list(section.get("refs"), 12) if isinstance(r, str)])
+            if self._knowledge is not None:
+                # 섹션마다 필요한 자료를 다시 묻는다(WO-K4 단위별 자료 계획).
+                pack, matched = self._knowledge.extend(ctx, f"보고서 섹션 작성: {V.text_field(section.get('heading'), 120)}. 목적: {V.text_field(section.get('purpose'), 200)}", pack)
+                sub = ContextPack(tuple({p.ref: p for p in (*sub.passages, *matched)}.values()), sub.truncated, sub.total_sections)
             data = self._ask(ctx, f"보고서의 섹션 \"{V.text_field(section.get('heading'), 120)}\" 본문을 작성하세요 "
                                   f"(목적: {V.text_field(section.get('purpose'), 200)}). paragraph 또는 bullets 블록 2~5개, 각 블록에 refs를 붙입니다.",
                              self.SECTION, sub, tokens=1400)

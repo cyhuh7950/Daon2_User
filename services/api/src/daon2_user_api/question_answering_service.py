@@ -17,7 +17,7 @@ from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
 from .question_answering import strip_citation_labels
 from .question_external_evidence import (
-    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, MAX_PLAN_CALLS, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt,
+    ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt, run_planned,
     default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
 )
 from .document_index_postgres import IndexedEvidenceChunk
@@ -653,11 +653,7 @@ class QuestionAnsweringService:
         requests = self._plan_requests(context, question, target)
         fallback = default_requests(target, question)
         chosen = fallback if requests is None else requests
-        found = tuple(self._external_planner.run(target, chosen))
-        if found or not chosen or any(len(item) == 2 for item in chosen):
-            return found
-        # 온톨로지·규칙에서 못 찾으면 문서에서 찾는다. 질문당 호출 상한은 합쳐서 지킨다.
-        return tuple(self._external_planner.run(target, fallback[:max(0, MAX_PLAN_CALLS - len(chosen))]))
+        return run_planned(self._external_planner, target, chosen, fallback)
 
     def _plan_requests(self, context: QuestionContext, question: str, target):  # type: ignore[no-untyped-def]
         """LLM에 필요한 자료를 묻는다. 답을 받지 못하면 None이고 호출자는 사용자 문장으로 검색한다."""

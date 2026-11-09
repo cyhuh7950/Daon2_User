@@ -249,6 +249,14 @@ def _parsed(row: Any) -> tuple[Mapping[str, Any], float]:
     return row, float(similarity)
 
 
+def run_planned(finder: Any, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], fallback: Sequence[tuple[str, ...]], **options: Any) -> tuple[ExternalEvidence, ...]:
+    """계획대로 찾는다. 온톨로지·규칙에서 못 찾으면 문서에서 찾고, 질문당 호출 상한은 합쳐서 지킨다."""
+    found = tuple(finder.run(target, requests, **options))
+    if found or not requests or any(len(item) == 2 for item in requests):
+        return found
+    return tuple(finder.run(target, fallback[:max(0, MAX_PLAN_CALLS - len(requests))], **options))
+
+
 def _evidence_rank(item: ExternalEvidence) -> tuple[float, str]:
     return -item.chunk.score, item.block_id
 
