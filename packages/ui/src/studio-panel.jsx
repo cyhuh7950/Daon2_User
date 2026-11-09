@@ -10,6 +10,7 @@ import { ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDial
 import { StudioViewer } from "./studio-viewers.jsx";
 import { AuthoringWizard } from "./authoring-wizard.jsx";
 import { EDITABLE_TYPES, StudioEditor } from "./studio-editor.jsx";
+import { CHAT_EDIT_TYPES, StudioChatEdit } from "./studio-chat-edit.jsx";
 import "./studio-icon.css";
 import "./studio-panel.css";
 
@@ -145,6 +146,8 @@ function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onEr
         onLoadImage={loadImage} onLoadAudio={loadAudio} onLoadVideo={loadVideo} onLoadCaptions={loadCaptions}
         onAttempt={(kind, payload) => studio.recordLearningAttempt?.(outputId, { revisionNo: output.current_revision, kind, payload }).catch(() => {})}
         onSaveMemo={async (content) => { const saved = await studio.createRevision(outputId, { content }); setOutput((o) => ({ ...o, current_revision: saved.revision_no })); }} />}
+      {output && !editing && output.status === "completed" && CHAT_EDIT_TYPES.includes(output.type_id) && typeof studio.listEditTurns === "function"
+        && <StudioChatEdit studio={studio} outputId={outputId} onApplied={async () => setOutput(await studio.getOutput(outputId))} />}
     </div>
   </div>;
 }

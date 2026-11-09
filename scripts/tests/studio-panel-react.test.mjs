@@ -544,3 +544,37 @@ test("표 유형 산출물에는 편집 버튼이 없다", async () => {
     assert.equal(buttonByText(viewTable.container, "편집"), undefined);
   } finally { await viewTable.close(); }
 });
+
+// ---- 대화 수정(WO-K5) ----
+const chatStudio = (over = {}) => {
+  const studio = fakeStudio([item(over)]);
+  studio.getOutput = async (id) => ({ ...item({ output_id: id, ...over }), settings: {}, evidence: [], assets: [], revision: { content: { body: { title: "제목", summary: "요약", sections: [] } } } });
+  studio.listEditTurns = async () => [];
+  return studio;
+};
+async function openFirst(view) {
+  await view.click(findElements(view.container, (n) => n.tagName === "BUTTON" && (n.getAttribute?.("aria-label") ?? "").includes("보고서 1"))[0]);
+  await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+}
+
+test("panel shows chat for completed text outputs only", async () => {
+  const view = await mount(chatStudio());
+  try {
+    await openFirst(view);
+    assert.ok(byLabel(view.container, "대화로 수정 입력"));
+    await view.click(buttonByText(view.container, "편집"));
+    assert.equal(byLabel(view.container, "대화로 수정 입력"), undefined);
+  } finally { await view.close(); }
+});
+
+test("panel hides chat for other types and without the adapter", async () => {
+  for (const [over, drop] of [[{ type_id: "mind_map" }, false], [{}, true]]) {
+    const studio = chatStudio(over);
+    if (drop) delete studio.listEditTurns;
+    const view = await mount(studio);
+    try {
+      await openFirst(view);
+      assert.equal(byLabel(view.container, "대화로 수정 입력"), undefined);
+    } finally { await view.close(); }
+  }
+});

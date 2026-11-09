@@ -286,3 +286,33 @@ test("멈춘 동안 본문을 고치면 그 소목차로 저장한다", async ()
     assert.deepEqual(studio.calls.at(-1), ["edit", "s1__u1", { expectedRevision: 9, paragraphs: ["쓴 본문"] }]);
   } finally { await view.close(); }
 });
+
+test("wizard shows chat when completed and reloads after apply", async () => {
+  const done = { ...base, mode: "agent", state: "completed", pending_questions: [], requests: [], units: [], revision_no: 9, document: DOCUMENT };
+  const studio = fakeStudio([done]);
+  let loads = 0;
+  const original = studio.authoring.getSession;
+  studio.authoring.getSession = async () => { loads += 1; return original(); };
+  const ready = { turn_id: `svt-${"b".repeat(32)}`, output_id: OID, base_revision: 9, instruction: "고쳐", state: "ready", reply: "됨", changes: [], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00" };
+  studio.listEditTurns = async () => [ready];
+  studio.applyEditTurn = async (id, turnId) => { studio.calls.push(["apply", id, turnId]); return { output_id: id, turn_id: turnId, revision_no: 10 }; };
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    const before = loads;
+    await view.click(buttonByText(view.container, "반영"));
+    await view.flush();
+    assert.deepEqual(studio.calls.find((call) => call[0] === "apply"), ["apply", OID, ready.turn_id]);
+    assert.ok(loads > before);
+  } finally { await view.close(); }
+});
+
+test("wizard hides chat until the document is completed", async () => {
+  const studio = fakeStudio([{ ...base, mode: "agent", state: "paused", pause_reason: "user", pending_questions: [], requests: [], units: [], revision_no: 9 }]);
+  studio.listEditTurns = async () => [];
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "대화로 수정 입력")[0], undefined);
+  } finally { await view.close(); }
+});
