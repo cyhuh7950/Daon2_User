@@ -8,6 +8,7 @@ from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_workspace import StudioContext, StudioError
 from . import session as S
 from .pipeline import AuthoringPipeline
+from .agent import GENERAL_TEMPLATE_ID, reconcile_units
 from .templates import AuthoringError, TemplateRegistry
 
 TYPE_ID = "authored_document"
@@ -15,7 +16,7 @@ TYPE_ID = "authored_document"
 
 def _view(content: Mapping[str, Any], revision: int, status: str) -> dict[str, Any]:
     keys = ("template_id", "analysis", "style", "output_choices", "state", "request_text", "inputs", "assumptions", "pending_questions", "requests", "requirements", "plan", "output_formats",
-            "error_code", "document", "analysis_warnings")
+            "error_code", "document", "analysis_warnings", "mode", "units", "pause_requested", "pause_reason", "target_pages")
     data = {k: content.get(k) for k in keys}
     data["knowledge_count"] = len(content.get("knowledge") or [])
     data["revision_no"] = revision
@@ -31,14 +32,15 @@ class AuthoringService:
     def templates(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
         return self._registry.list(tenant_id)
 
-    def create(self, context: StudioContext, template_id: str | None, request_text: str | None, idempotency_key: str) -> dict[str, Any]:
+    def create(self, context: StudioContext, template_id: str | None, request_text: str | None, idempotency_key: str, target_pages: int | None = None) -> dict[str, Any]:
         if template_id is None:
             candidates = self._registry.classify(request_text or "", context.tenant_id)
-            if len(candidates) != 1:
-                return {"template_candidates": candidates or [t["template_id"] for t in self._registry.list(context.tenant_id)], "created": False}
-            template_id = candidates[0]
+            if len(candidates) > 1:
+                return {"template_candidates": candidates, "created": False}
+            # 맞는 템플릿이 없으면 LLM이 목차를 만드는 범용 문서로 시작한다(K-4).
+            template_id = candidates[0] if candidates else GENERAL_TEMPLATE_ID
         template = self._registry.get(template_id, context.tenant_id)
-        session = S.new_session(template, request_text=request_text)
+        session = S.new_session(template, request_text=request_text, mode="agent", target_pages=target_pages)
         made = self._studio.create_authoring_session(context, template.title, session, idempotency_key)
         revision, status, content = self._studio.latest_content(context, made["output_id"])
         return {"created": True, "output_id": made["output_id"], **_view(content, revision, status)}
@@ -95,12 +97,49 @@ class AuthoringService:
 
         def mutate(content: dict[str, Any]) -> dict[str, Any]:
             content.update({"requirements": cleaned, "plan": plan, "output_formats": formats})
+            if content.get("mode") == "agent":
+                content["units"] = reconcile_units(content["units"], plan["sections"])
             return S.transition(content, "generating") if confirm else content
 
         versions = [current["inputs"][template.source_input]["source_version_id"]] if template.source_input else []
         result = self._studio.authoring_apply(context, output_id, expected_revision, mutate, enqueue_step="generate" if confirm else None,
                                               source_version_ids=versions if confirm else ())
         return {"output_id": output_id, **result}
+
+
+    def _versions(self, context: StudioContext, current: Mapping[str, Any]) -> list[str]:
+        template = self._registry.get(current["template_id"], context.tenant_id, current.get("template_version"))
+        return [current["inputs"][template.source_input]["source_version_id"]] if template.source_input and template.source_input in current["inputs"] else []
+
+    def control(self, context: StudioContext, output_id: str, action: str, expected_revision: int | None) -> dict[str, Any]:
+        """pause는 작업 중에도 받는다. 진행 중인 소목차까지 쓰고 멈춘다. resume은 다음 미완료 소목차부터 잇는다."""
+        _, _, current = self._studio.latest_content(context, output_id)
+        if current.get("mode") != "agent":
+            raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+        if action == "pause":
+            if current["state"] != "generating":
+                raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+            merged = self._studio.authoring_merge(context, output_id, lambda content: {**content, "pause_requested": True, "pause_reason": "user"})
+            return {"output_id": output_id, "state": merged["state"], "pause_requested": True}
+        if action == "resume" and expected_revision is not None:
+            result = self._studio.authoring_apply(context, output_id, expected_revision, S.resume, enqueue_step="generate", source_version_ids=self._versions(context, current))
+            return {"output_id": output_id, **result}
+        raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+
+    def edit_unit(self, context: StudioContext, output_id: str, expected_revision: int, key: str, paragraphs: Sequence[str]) -> dict[str, Any]:
+        result = self._studio.authoring_apply(context, output_id, expected_revision, lambda content: S.edit_unit(content, key, paragraphs))
+        return {"output_id": output_id, **result}
+
+    def outline(self, context: StudioContext, output_id: str, expected_revision: int, units: Sequence[Mapping[str, Any]], *, confirm: bool) -> dict[str, Any]:
+        """구조 변경의 영향 범위를 먼저 보여 주고, confirm일 때만 적용한다."""
+        _, _, current = self._studio.latest_content(context, output_id)
+        if current.get("mode") != "agent" or current["state"] != "paused":
+            raise AuthoringError("AUTHORING_STATE_INVALID", 409)
+        affected = S.outline_impact(current, units)
+        if not confirm:
+            return {"output_id": output_id, "affected": affected, "applied": False}
+        result = self._studio.authoring_apply(context, output_id, expected_revision, lambda content: S.apply_outline(content, units))
+        return {"output_id": output_id, "affected": affected, "applied": True, **result}
 
 
 class AuthoringGenerator:
@@ -120,5 +159,5 @@ class AuthoringGenerator:
             ctx.progress(95, "분석 완료")
             return GenerationResult(content={**updated, "language": "ko", "warnings": []}, generated_with={"prompt_version": "authoring-analyze-v1"})
         if step == "generate" and session["state"] == "generating":
-            return self._pipeline.generate(ctx, session)
+            return self._pipeline.generate_units(ctx, session) if session.get("mode") == "agent" else self._pipeline.generate(ctx, session)
         raise StudioError("STUDIO_VERSION_CONFLICT", 409)
