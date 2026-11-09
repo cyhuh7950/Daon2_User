@@ -84,7 +84,11 @@ const schemas = {
 
 Object.assign(schemas, {
   StudioV2AuthoringTemplates: exact({ templates: { type: "array", items: { type: "object" } } }),
-  StudioV2AuthoringCreateRequest: exact({ template_id: { type: "string", maxLength: 64 }, request_text: { type: "string", maxLength: 500 } }, []),
+  StudioV2AuthoringCreateRequest: exact({ template_id: { type: "string", maxLength: 64 }, request_text: { type: "string", maxLength: 500 }, target_pages: { type: "integer", minimum: 1, maximum: 100 } }, []),
+  StudioV2AuthoringControlRequest: exact({ action: { type: "string", enum: ["pause", "resume"] }, expected_revision: { type: "integer", minimum: 1 } }, ["action"]),
+  StudioV2AuthoringUnitEditRequest: exact({ expected_revision: { type: "integer", minimum: 1 }, paragraphs: { type: "array", minItems: 1, maxItems: 40, items: { type: "string" } } }, ["expected_revision", "paragraphs"]),
+  StudioV2AuthoringOutlineRequest: exact({ expected_revision: { type: "integer", minimum: 1 }, units: { type: "array", minItems: 1, maxItems: 60, items: { type: "object" } }, confirm: { type: "boolean" } }, ["expected_revision", "units"]),
+  StudioV2AuthoringControlReceipt: { type: "object", required: ["output_id"], properties: { output_id: id, revision_no: { type: "integer" }, state: { type: "string" }, queued: { type: "boolean" }, pause_requested: { type: "boolean" }, affected: { type: "array", items: { type: "string" } }, applied: { type: "boolean" } } },
   StudioV2AuthoringSession: { type: "object", required: ["state", "template_id", "revision_no"], properties: {
     output_id: id, template_id: { type: "string" }, analysis: { type: ["string", "null"] }, style: { type: ["string", "null"] }, state: { type: "string", enum: ["collecting", "analyzing", "review", "generating", "completed", "failed", "cancelled"] },
     inputs: { type: "object" }, assumptions: { type: "array" }, pending_questions: { type: "array" }, requests: { type: "array" }, requirements: { type: "array" },
@@ -96,13 +100,14 @@ Object.assign(schemas, {
 });
 
 const envelope = (name) => ({ type: "object", additionalProperties: false, required: ["data", "meta"], properties: { data: ref(name), meta: ref("StudioV2Meta") } });
-for (const name of ["AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
+for (const name of ["AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
   "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
 
 const parameters = {
   WorkspaceId: { name: "id", in: "path", required: true, schema: id },
   NotebookId: { name: "notebook_id", in: "path", required: true, schema: id },
   OutputId: { name: "output_id", in: "path", required: true, schema: { type: "string", pattern: "^sv2-[0-9a-f]{32}$" } },
+  UnitKey: { name: "unit_key", in: "path", required: true, schema: { type: "string", maxLength: 128 } },
   RefId: { name: "ref_id", in: "path", required: true, schema: id },
   FormatName: { name: "format_name", in: "path", required: true, schema: { type: "string", enum: ["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4"] } },
   IdempotencyKey: { name: "Idempotency-Key", in: "header", required: true, schema: { type: "string", minLength: 16, maxLength: 128 } },
@@ -162,6 +167,9 @@ const paths = {
   [`${S}/authoring/sessions/{output_id}`]: { get: op("getStudioV2AuthoringSession", out, { "200": okJson("StudioV2AuthoringSessionEnvelope") }) },
   [`${S}/authoring/sessions/{output_id}/answers`]: { post: op("answerStudioV2AuthoringSession", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2AuthoringReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringAnswersRequest")) },
   [`${S}/authoring/sessions/{output_id}/review`]: { put: op("reviewStudioV2AuthoringSession", out, { "202": okJson("StudioV2AuthoringReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringReviewRequest")) },
+  [`${S}/authoring/sessions/{output_id}/control`]: { post: op("controlStudioV2AuthoringSession", out, { "202": okJson("StudioV2AuthoringControlReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringControlRequest")) },
+  [`${S}/authoring/sessions/{output_id}/outline`]: { put: op("updateStudioV2AuthoringOutline", out, { "202": okJson("StudioV2AuthoringControlReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringOutlineRequest")) },
+  [`${S}/authoring/sessions/{output_id}/units/{unit_key}`]: { put: op("editStudioV2AuthoringUnit", [...out, P("UnitKey")], { "202": okJson("StudioV2AuthoringControlReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringUnitEditRequest")) },
   [`${S}/memos`]: { post: op("createStudioV2Memo", [...base, P("IdempotencyKey")], { "201": okJson("StudioV2MemoReceiptEnvelope", "Created") }, json("StudioV2MemoRequest")) },
 };
 
