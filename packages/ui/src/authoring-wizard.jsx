@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StudioIcon } from "./studio-icon.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
+import { StudioChatEdit } from "./studio-chat-edit.jsx";
 import "./studio-icon.css";
 import "./studio-panel.css";
 
@@ -308,6 +309,8 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
         {session.mode === "agent" && session.state === "completed" && <button type="button" className="studio-btn" disabled={busy} onClick={reopen}>{msg("authoring.reopen")}</button>}
         {session.state === "review" && <Review session={session} busy={busy} onConfirm={confirm} />}
         {session.state === "completed" && session.document && <Result document={session.document} formats={session.output_choices ?? ["docx", "pptx"]} onDownload={download} />}
+        {session.mode === "agent" && session.state === "completed" && typeof studio.listEditTurns === "function"
+          && <StudioChatEdit studio={studio} outputId={id} onApplied={async () => { await load(); onChanged?.(); }} />}
         {session.state === "failed" && <p role="alert">{studioErrorMessage(session.error_code)}</p>}
       </>}
     </div>
