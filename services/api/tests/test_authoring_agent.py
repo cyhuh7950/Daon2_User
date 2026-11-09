@@ -296,6 +296,11 @@ class InterventionTests(Base):
         check = next(c for c in final["document"]["checks"] if c["id"] == "term_consistency")
         self.assertEqual((check["status"], check["reason"]), ("skipped", "knowledge_unavailable"))
 
+    def test_next_knowledge_ref_skips_gaps(self):
+        from daon2_user_api.authoring.agent import next_knowledge_ref
+        self.assertEqual(next_knowledge_ref([]), "K1")
+        self.assertEqual(next_knowledge_ref([{"ref": "K1"}, {"ref": "K8"}, {"ref": "L2"}]), "K9")
+
     def test_missing_material_stops_for_a_person(self):
         self.finder.found = ()
         self.llm.paragraphs = [{"text": "확인되지 않은 내용", "refs": []}]

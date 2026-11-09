@@ -115,6 +115,12 @@ def evidence_limit(target_chars: int) -> int:
     return max(MIN_UNIT_EVIDENCE, min(MAX_UNIT_EVIDENCE, target_chars // CHARS_PER_EVIDENCE))
 
 
+def next_knowledge_ref(knowledge: Sequence[Mapping[str, Any]]) -> str:
+    """지금까지의 K 번호 다음 번호. 대화 수정으로 번호에 빈틈이 있어도 겹치지 않는다."""
+    numbers = (int(match.group(1)) for match in (re.fullmatch(r"K(\d+)", str(row.get("ref"))) for row in knowledge) if match)
+    return f"K{max(numbers, default=0) + 1}"
+
+
 def knowledge_row(item: ExternalEvidence, ref: str) -> dict[str, Any]:
     return {"ref": ref, "connector_id": item.connector_id, "document_id": item.document_id, "version_id": item.document_version_id, "block_id": item.block_id, "page": item.page,
             "project_id": item.project_id, "work_package_id": item.work_package_id, "heading": item.document_name or "문서", "text": item.text[:1200], "resource_uri": "", "tool": "search_document_evidence"}
