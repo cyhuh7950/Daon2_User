@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from daon2_user_api.document_index_postgres import IndexedEvidenceChunk
 from daon2_user_api.question_external_evidence import EvidenceTarget, ExternalEvidence, ExternalEvidenceError
 from daon2_user_api.studio_generators import FlashcardsGenerator, ReportGenerator
+from daon2_user_api.studio_context_builder import ContextPack
 from daon2_user_api.studio_knowledge import StudioKnowledge
 from daon2_user_api.studio_source_reader import SourceSection, SourceText
 from daon2_user_api.studio_v2_generation import GenerationContext, GeneratorRegistry
@@ -84,6 +85,30 @@ def report(finder, reader=None):
 
 
 class StudioKnowledgeTests(unittest.TestCase):
+    def test_empty_plan_does_not_fallback(self):
+        finder, llm = Finder(), LLM()
+        llm.generate = lambda context, prompt, cancel_check=None: SimpleNamespace(data={"requests": []})
+        found, matched = StudioKnowledge(llm, finder).extend_if_requested(CTX, "문장을 다듬어 줘", ContextPack((), False, 0))
+        self.assertEqual((found.passages, matched, finder.runs), ((), (), []))
+
+    def test_requested_material_is_numbered_after_existing_refs(self):
+        finder = Finder()
+        pack, matched = StudioKnowledge(LLM(), finder).extend_if_requested(CTX, "최신 약관", ContextPack((), False, 0), first_number=7)
+        self.assertEqual(len(finder.runs), 1)
+        self.assertEqual([p.ref for p in pack.passages], ["S7"])
+        self.assertEqual([p.ref for p in matched], ["S7"])
+
+    def test_extend_still_falls_back_on_empty_plan(self):
+        finder, llm = Finder(), LLM()
+        llm.generate = lambda context, prompt, cancel_check=None: SimpleNamespace(data={"requests": []})
+        job = GenerationContext(CTX, "o", "report", None, {}, (), "", "ko", "create", lambda p, n: None, lambda: None)
+        StudioKnowledge(llm, finder).extend(job, "질문", ContextPack((), False, 0))
+        self.assertEqual(len(finder.runs), 1)
+
+    def test_available_follows_the_selection(self):
+        self.assertTrue(StudioKnowledge(LLM(), Finder()).available(CTX))
+        self.assertFalse(StudioKnowledge(LLM(), Finder(packages=False)).available(CTX))
+
     def test_report_searches_for_the_output_and_for_each_section(self):
         finder = Finder()
         generator, llm = report(finder)

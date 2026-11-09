@@ -124,6 +124,13 @@ class EnqueueTests(unittest.TestCase):
                 self.assert_code("STUDIO_INPUT_INVALID", Repo().enqueue_edit_turn, CTX, OID, value, KEY)
 
 
+class MaterialScopeTests(unittest.TestCase):
+    def test_scope_has_linked_versions_and_current_refs(self):
+        repo = Repo()
+        repo.row = (*repo.row[:7], ["sv-1"], repo.row[8])
+        self.assertEqual(repo.chat_material_scope(CTX, OID), {"versions": ["sv-1"], "refs": {"S1"}})
+
+
 class ResultTests(unittest.TestCase):
     def test_changes_mean_ready_and_empty_means_no_change(self):
         repo = Repo()

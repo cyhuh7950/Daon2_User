@@ -75,6 +75,14 @@ class StudioV2EditTurnsMixin:
             rows = connection.execute(_SELECT + "output_id=%s ORDER BY created_at DESC LIMIT %s", (context.tenant_id, context.workspace_id, output_id, limit)).fetchall()
         return [_public(_record(row)) for row in reversed(rows)]
 
+    def chat_material_scope(self, context: StudioContext, output_id: str) -> dict[str, Any]:
+        """자료 찾기 범위: 자료에 연결된 Source와 이미 쓰인 근거 번호."""
+        with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:  # type: ignore[attr-defined]
+            row = self._owned_output(connection, context, output_id)  # type: ignore[attr-defined]
+            refs = connection.execute("SELECT ref_id FROM studio_v2_evidence WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s AND revision_no=%s",
+                                      (context.tenant_id, context.workspace_id, output_id, row[8])).fetchall()
+        return {"versions": list(row[7] or []), "refs": {str(ref[0]) for ref in refs}}
+
     def edit_turn_for_job(self, context: StudioContext, turn_id: str) -> dict[str, Any]:
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:  # type: ignore[attr-defined]
             return self._turn(connection, context, turn_id)

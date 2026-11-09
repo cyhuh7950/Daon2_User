@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from .authoring.agent import UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM
 from .question_external_evidence import EXTERNAL_LIMIT, ExternalEvidence, ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .studio_context_builder import ContextPack, Passage
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import GenerationContext
-from .studio_workspace import StudioError
+from .studio_workspace import StudioContext, StudioError
 
 
 MAX_UNITS = 5
@@ -53,6 +53,27 @@ class StudioKnowledge:
         titles = [str(row["title"]).strip()[:80] for row in rows if isinstance(row, Mapping) and str(row.get("title") or "").strip()] if isinstance(rows, list) else []
         return tuple(titles[:MAX_UNITS])
 
+    def available(self, context: StudioContext) -> bool:
+        try:
+            return self._finder.prepare(context) is not None
+        except ExternalEvidenceError:
+            return False
+
+    def find_requested(self, context: StudioContext, question: str, *, limit: int = EXTERNAL_LIMIT, cancel_check: Callable[[], None] | None = None) -> tuple[ExternalEvidence, ...]:
+        """LLM이 찾으라고 한 것만 찾는다. 계획이 비어 있으면 찾지 않는다."""
+        target = self._finder.prepare(context)
+        if target is None:
+            return ()
+        try:
+            requests = self._plan(context, question, target, cancel_check)
+        except (StudioError, ValueError, KeyError, TypeError):
+            return ()
+        return tuple(run_planned(self._finder, target, requests, default_requests(target, question), limit=limit)) if requests else ()
+
+    def extend_if_requested(self, context: StudioContext, question: str, pack: ContextPack, *, limit: int = EXTERNAL_LIMIT, first_number: int = 1,
+                            cancel_check: Callable[[], None] | None = None) -> tuple[ContextPack, tuple[Passage, ...]]:
+        return self._merge(pack, self.find_requested(context, question, limit=limit, cancel_check=cancel_check), first_number)
+
     def extend(self, ctx: GenerationContext, question: str, pack: ContextPack, *, limit: int = EXTERNAL_LIMIT) -> tuple[ContextPack, tuple[Passage, ...]]:
         """(새 구간까지 합친 묶음, 이번 질문에 맞는 구간). 같은 근거는 라벨 하나를 계속 쓴다."""
         try:
@@ -62,8 +83,12 @@ class StudioKnowledge:
             found = run_planned(self._finder, target, self._requests(ctx, question, target), default_requests(target, question), limit=limit)
         except ExternalEvidenceError as error:
             raise StudioError("PROVIDER_UNAVAILABLE", 503) from error
+        return self._merge(pack, found)
+
+    @staticmethod
+    def _merge(pack: ContextPack, found: Sequence[ExternalEvidence], first_number: int = 1) -> tuple[ContextPack, tuple[Passage, ...]]:
         known = {_key(p.external_ref): p for p in pack.passages if p.external_ref}
-        number = _next_number(pack)
+        number = max(_next_number(pack), first_number)
         matched: list[Passage] = []
         added: list[Passage] = []
         for item in found:
@@ -78,11 +103,14 @@ class StudioKnowledge:
 
     def _requests(self, ctx: GenerationContext, question: str, target: Any) -> tuple[tuple[str, ...], ...]:
         fallback = default_requests(target, question)
-        prompt = StudioPrompt(system=UNIT_PLAN_SYSTEM, user=build_plan_prompt(question, (), target), json_schema=UNIT_PLAN_SCHEMA, max_output_tokens=400,
-                              prompt_version="studio-knowledge-plan-v1", schema_name="authoring_unit_plan")
         try:
-            data = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data
+            requests = self._plan(ctx.context, question, target, ctx.cancel_check)
         except (StudioError, ValueError, KeyError, TypeError):
             return fallback
-        requests = parse_plan(json.dumps(data, ensure_ascii=False), target)
         return requests or fallback  # 문서를 만들려면 자료가 필요하므로 빈 계획이어도 찾아 본다
+
+    def _plan(self, context: StudioContext, question: str, target: Any, cancel_check: Callable[[], None] | None) -> tuple[tuple[str, ...], ...]:
+        prompt = StudioPrompt(system=UNIT_PLAN_SYSTEM, user=build_plan_prompt(question, (), target), json_schema=UNIT_PLAN_SCHEMA, max_output_tokens=400,
+                              prompt_version="studio-knowledge-plan-v1", schema_name="authoring_unit_plan")
+        data = self._llm.generate(context, prompt, cancel_check=cancel_check).data
+        return parse_plan(json.dumps(data, ensure_ascii=False), target)

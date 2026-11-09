@@ -234,15 +234,17 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
     from .knowledge_connector_egress import ConnectorEgressGate
     connectors = KnowledgeConnectorService(cloud_store, cipher, egress_gate=ConnectorEgressGate(EgressPolicyService(PostgresEgressPolicyRepository(cloud_store))), **settings_from_env())
     repository = PostgresStudioV2Repository(cloud_store)
-    from .studio_chat_edit_runner import ChatEditRunner
-    registry.attach_chat_editor(ChatEditRunner(llm, repository))
     from .knowledge_scope_service import KnowledgeScopeService
     from .question_external_evidence import NotebookKnowledgeEvidence
     knowledge_evidence = None
+    studio_knowledge = None
     if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") == "true":
         knowledge_evidence = NotebookKnowledgeEvidence(KnowledgeScopeService(cloud_store, connectors, os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None), connectors)
         from .studio_knowledge import StudioKnowledge
-        registry.attach_knowledge(StudioKnowledge(llm, knowledge_evidence))
+        studio_knowledge = StudioKnowledge(llm, knowledge_evidence)
+        registry.attach_knowledge(studio_knowledge)
+    from .studio_chat_edit_runner import ChatEditRunner
+    registry.attach_chat_editor(ChatEditRunner(llm, repository, reader=reader, knowledge=studio_knowledge))
     registry.register(AuthoringGenerator(AuthoringPipeline(TemplateRegistry(org_provider=OrgTemplateProvider(OrgTemplateStore(cloud_store))), reader, llm, connectors, repository.latest_content,
                                                            context_chars=context_chars, evidence=knowledge_evidence, checkpoint=repository.authoring_merge)))
     return registry
