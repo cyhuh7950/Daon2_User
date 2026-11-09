@@ -261,3 +261,12 @@ for (const [name, payload] of [
     await assert.rejects(request(payload), { message: "QUESTION_RESPONSE_INVALID" });
   });
 }
+
+test("승인 지식 인용 종류는 질문 응답에서 허용되고 알 수 없는 종류는 거부된다", async () => {
+  const answer = (origin) => {
+    const external = { ...citation, citation_id: "extcit-1", origin, locator: { kind: "section", value: "span-1" } };
+    return request(envelope({ ...answerData, citations: [external] }));
+  };
+  assert.equal((await answer("mcp_daon_rag")).citations[0].origin, "mcp_daon_rag");
+  await assert.rejects(answer("mcp_unknown"));
+});

@@ -7,6 +7,7 @@ import json
 import logging
 import hashlib
 import re
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, replace
@@ -14,6 +15,7 @@ from typing import ContextManager, Mapping, Protocol, cast
 
 from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
+from .question_external_evidence import LOCAL_LIMIT_WITH_EXTERNAL, ExternalEvidence, ExternalEvidenceError, merge_evidence
 from .document_index_postgres import IndexedEvidenceChunk
 from .document_understanding_adapter import DocumentUnderstandingError, _evidence_anchors
 from .question_answering import (
@@ -474,6 +476,9 @@ class _QaMediaBridgeDiagnosticAdapter(OpenAICompatibleTextGenerationAdapter):
         return response
 
 
+EXTERNAL_EVIDENCE_REUSE_SECONDS = 180.0
+
+
 @dataclass(frozen=True, slots=True)
 class QuestionInputSource:
     origin: str
@@ -525,6 +530,33 @@ class QuestionAnsweringService:
         self._qa_structured_ollama_workspace_id = qa_structured_ollama_workspace_id
         self._run_cost_sessions = run_cost_sessions
         self._customization_provider = None
+
+    _external_search = None
+
+    def set_external_evidence(self, search) -> None:
+        """search(context, question) -> 선택한 업무 패키지의 승인 근거. 설정하지 않으면 지금까지처럼 소스만 쓴다."""
+        self._external_search = search
+        self._external_cache: dict[tuple[str, ...], tuple[float, tuple[ExternalEvidence, ...]]] = {}
+        self._external_lock = threading.Lock()
+
+    def _external_evidence(self, context: QuestionContext, question: str) -> tuple[ExternalEvidence, ...]:
+        if self._external_search is None or context.notebook_id is None or is_chat_question(question):
+            return ()
+        # 인증 확인과 실제 질문이 같은 근거를 쓰도록 짧게 재사용한다. 근거가 달라지면 전송 내용 지문이 어긋난다.
+        key = (context.tenant_id, context.workspace_id, context.notebook_id, context.actor_id, question)
+        now = time.monotonic()
+        with self._external_lock:
+            self._external_cache = {k: v for k, v in self._external_cache.items() if v[0] > now}
+            cached = self._external_cache.get(key)
+        if cached is not None:
+            return cached[1]
+        try:
+            found = tuple(self._external_search(context, question))
+        except ExternalEvidenceError as error:
+            raise QuestionAnsweringError(error.code, status=error.status, retryable=error.retryable) from None
+        with self._external_lock:
+            self._external_cache[key] = (now + EXTERNAL_EVIDENCE_REUSE_SECONDS, found)
+        return found
 
     def set_model_selection_reader(self, reader) -> None:
         """노트북·사용자별 모델 선택(reader(tenant, workspace, notebook, actor) -> dict|None). 없으면 작업공간 기본 모델."""
@@ -800,19 +832,22 @@ class QuestionAnsweringService:
             evidence = self._search_context(context, sources, question)
             if not evidence:
                 general = True
+        external = self._external_evidence(context, question)
+        evidence = merge_evidence(evidence, external)
+        use_general = general and not external
         model_context = WorkspaceModelContext(
             context.tenant_id, context.workspace_id, context.actor_id,
         )
         try:
             with self._resolve_selected(context, model_context) as (selection, _explicit):
-                if general and not is_chat_question(question):
+                if use_general and not is_chat_question(question):
                     # 지식 질문인데 근거가 없으면 모델을 호출하지 않으므로 전송할 payload도 없다.
                     return PreparedQuestionAuthorization(selection, b"", 0)
                 prepared = (
                     self._adapter_registry.prepare_general(
                         selection, question, context.trace_id, self._transport,
                     )
-                    if general else self._adapter_registry.prepare(
+                    if use_general else self._adapter_registry.prepare(
                         selection, evidence, question, context.trace_id, self._transport,
                     )
                 )
@@ -874,6 +909,7 @@ class QuestionAnsweringService:
             else:
                 source_id = sources[0].source_id
                 source_version_id = sources[0].source_version_id
+        external = self._external_evidence(context, question)
         model_context = WorkspaceModelContext(
             context.tenant_id, context.workspace_id, context.actor_id,
         )
@@ -919,7 +955,7 @@ class QuestionAnsweringService:
                         question=question, run_id=run_id,
                         approved_authorization=approved_authorization,
                         context_mode=context_mode, request_fingerprint=request_fingerprint,
-                        failure_capture=capture,
+                        failure_capture=capture, external=external,
                     )
                 except QuestionAnsweringError as error:
                     if self._run_cost_sessions is not None and self._run_cost_sessions.applies(
@@ -942,7 +978,7 @@ class QuestionAnsweringService:
                                 question=question, run_id=run_id,
                                 approved_authorization=approved_authorization,
                                 context_mode=context_mode, request_fingerprint=request_fingerprint,
-                                failure_capture=capture,
+                                failure_capture=capture, external=external,
                             )
                     except WorkspaceModelUnavailable:
                         raise error
@@ -1003,6 +1039,7 @@ class QuestionAnsweringService:
         approved_authorization: Mapping[str, str] | None,
         context_mode: str, request_fingerprint: str,
         failure_capture: list[_FinalQuestionFailure] | None = None,
+        external: tuple[ExternalEvidence, ...] = (),
     ) -> StoredQuestionAnswer:
         cost_session=None if self._run_cost_sessions is None else self._run_cost_sessions.for_call(
             context,selection,run_kind='question',run_id=run_id,
@@ -1024,7 +1061,7 @@ class QuestionAnsweringService:
         # General fallback deliberately stores no evidence, but the selected
         # sources still need an access lock in its result-commit transaction.
         access_options = {'access_source_version_ids': versions} if versions else {}
-        if general and not is_chat_question(question):
+        if general and not external and not is_chat_question(question):
             # 소스가 제공한 지식만으로 답한다. 지식 질문인데 지식이 없으면 모델을 호출하지 않고 안내만 저장한다.
             return self._complete_without_model(
                 context, selection=selection, run_id=run_id, question=question,
@@ -1032,7 +1069,7 @@ class QuestionAnsweringService:
                 approved_authorization=approved_authorization, access_options=access_options,
                 recheck=recheck,
             )
-        if general:  # 지식 질문이 아닌 일반 대화만 모델이 답한다(소스 없이)
+        if general and not external:  # 지식 질문이 아닌 일반 대화만 모델이 답한다(소스 없이)
             try:
                 prepare_general = getattr(self._adapter_registry, "prepare_general", None)
                 prepared = (
@@ -1099,7 +1136,10 @@ class QuestionAnsweringService:
                 request_fingerprint=request_fingerprint,
                 **access_options,
             )
-        evidence = self._search_context(context, sources, question)
+        local_evidence = () if general else self._search_context(context, sources, question)
+        evidence = merge_evidence(local_evidence, external)
+        if general:  # 소스 없이 선택한 승인 지식만으로 답한다. 실행 기록은 소스 없는 질문으로 남긴다.
+            context_mode, sources, source_id, source_version_id = "general_ungrounded", (), None, None
         if not evidence:
             return self._complete_without_model(
                 context, selection=selection, run_id=run_id, question=question,
@@ -1203,10 +1243,18 @@ class QuestionAnsweringService:
                 status=503 if retryable else 502, retryable=retryable,
             ) from None
         recheck()
+        external_storage: dict[str, object] = {}
+        if external:
+            local_ids = {item.chunk_id for item in local_evidence}
+            external_by_id = {item.chunk.chunk_id: item for item in external}
+            external_storage = {"external_citations": tuple(external_by_id[chunk_id] for chunk_id in generated.cited_chunk_ids if chunk_id in external_by_id)}
+            generated = replace(generated, cited_chunk_ids=tuple(chunk_id for chunk_id in generated.cited_chunk_ids if chunk_id in local_ids))
+            evidence = tuple(local_evidence[:LOCAL_LIMIT_WITH_EXTERNAL])
         return self._repository.persist_completed(
             context, run_id=run_id, source_id=source_id,
             source_version_id=source_version_id, question=question,
             selection=selection, evidence=evidence, result=generated,
+            **external_storage,
             provider_called=True,
             egress_authorization=egress_authorization,
             context_mode=context_mode, context_sources=sources,

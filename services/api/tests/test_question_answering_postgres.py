@@ -88,6 +88,8 @@ class FakeConnection:
             return Cursor(self.ready_row)
         if sql.startswith("SELECT rr.record_id,rr.canonical_json"):
             return Cursor(rows=self.completed_rows)
+        if sql.startswith("SELECT run_result_id,citation_id,document_id"):
+            return Cursor(rows=[])
         if sql.startswith("SELECT r.canonical_json->>'request_fingerprint'"):
             return Cursor(self.replay_fingerprint_row)
         if sql.startswith("SELECT c.canonical_json->>'source_id'"):
@@ -228,7 +230,7 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                 self.cloud.connection.cost_calls.clear()
                 self._complete_cost()
                 self.assertEqual(len(self.cloud.connection.cost_calls),1)
-        self.cloud.connection.revision='0082'
+        self.cloud.connection.revision='0083'
         with self.assertRaisesRegex(QuestionRepositoryError,'QUESTION_DATABASE_UNAVAILABLE'):
             self._complete_cost()
 

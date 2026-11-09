@@ -379,7 +379,7 @@ class PostgresCloudStore:
         def compatible(connection, revision, vector):
             if vector is None:
                 return False
-            if revision in ("0074","0075","0076","0077","0078","0079","0080","0081"):
+            if revision in ("0074","0075","0076","0077","0078","0079","0080","0081","0082"):
                 return (self._organization_storage_is_protected(connection)
                     and self._notification_storage_is_protected(connection)
                     and self._registered_restore_storage_is_protected(connection,expected_revision=revision)
@@ -387,7 +387,7 @@ class PostgresCloudStore:
                     and self._document_readiness_storage_is_protected(connection,expected_revision=revision)
                     and self._operations_cost_capacity_storage_is_protected(connection,expected_revision=revision)
                     and self._studio_v2_storage_is_protected(connection)
-                    and (revision not in ("0075","0076","0077","0078","0079","0080","0081") or self._knowledge_connectors_storage_is_protected(connection)))
+                    and (revision not in ("0075","0076","0077","0078","0079","0080","0081","0082") or self._knowledge_connectors_storage_is_protected(connection)))
             if revision == "0073":
                 return (self._organization_storage_is_protected(connection)
                     and self._notification_storage_is_protected(connection)
@@ -449,7 +449,7 @@ class PostgresCloudStore:
     @staticmethod
     def _registered_restore_storage_is_protected(connection,*,expected_revision="0070") -> bool:
         """0070 원 보호를 정확0071에서도 재검사. 구 revision 의미·DB 변경0."""
-        if expected_revision not in {"0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081"}:return False
+        if expected_revision not in {"0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082"}:return False
         from .notification_postgres import _normalize_expression
         def values(row):return tuple(row.values()) if isinstance(row,dict) else tuple(row)
         def normalize(value):return None if value is None else _normalize_expression(value.replace("public.",""))
@@ -525,7 +525,7 @@ class PostgresCloudStore:
     @staticmethod
     def _telemetry_storage_is_protected(connection,*,expected_revision="0071") -> bool:
         """0071 읽기 전용 catalog 검증. 0071SQL/권한/원장 생성·수정0."""
-        if expected_revision not in {"0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081"}:return False
+        if expected_revision not in {"0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082"}:return False
         def values(row):return tuple(row.values()) if isinstance(row,dict) else tuple(row)
         def yes(row):return row is not None and values(row)==(True,)
         try:
@@ -743,7 +743,7 @@ class PostgresCloudStore:
     @staticmethod
     def _document_readiness_storage_is_protected(connection,*,expected_revision="0072") -> bool:
         """0072 초안의 닫힌 catalog 계약. 조회만 수행하며 실제 적용/PG 시험을 대신하지 않는다."""
-        if expected_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081"}:return False
+        if expected_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082"}:return False
         def values(row):return tuple(row.values()) if isinstance(row,dict) else tuple(row)
         def yes(row):return row is not None and values(row)==(True,)
         normalize=_telemetry_expression

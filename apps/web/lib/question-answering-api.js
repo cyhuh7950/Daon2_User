@@ -55,7 +55,7 @@ function isGroundedCitation(value) {
     && isSafeId(value.source_id)
     && isSafeId(value.source_version_id)
     && isSafeId(value.evidence_span_id)
-    && ["raw_source", "daon_knowledge"].includes(value.origin)
+    && ["raw_source", "daon_knowledge", "mcp_daon_rag"].includes(value.origin)
     && isSafeId(value.context_item_id)
     && isCitationLocator(value.locator)
     && Number.isSafeInteger(value.page)

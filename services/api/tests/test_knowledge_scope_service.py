@@ -149,6 +149,12 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(service._connectors.calls, [])  # noqa: SLF001
         self.assertTrue(any(s.startswith("DELETE FROM notebook_knowledge_scopes") for s, _ in self.store.statements))
 
+    def test_more_than_eight_packages_are_rejected(self):
+        items = [{"project_id": "p1", "work_package_id": f"w{i}"} for i in range(9)]
+        with self.assertRaises(KnowledgeScopeError) as caught:
+            self.service(approved=[]).replace(CTX, "nb-1", items)
+        self.assertEqual(caught.exception.code, "KNOWLEDGE_SCOPE_SELECTION_INVALID")
+
     def test_duplicates_are_rejected(self):
         item = {"project_id": "p1", "work_package_id": "w1"}
         with self.assertRaises(KnowledgeScopeError) as caught:

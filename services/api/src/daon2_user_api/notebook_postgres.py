@@ -433,6 +433,10 @@ class PostgresNotebookRepository:
                     "ORDER BY c.record_id",
                     (context.tenant_id, context.workspace_id, notebook_id, context.actor_id, notebook_id, context.actor_id),
                 ).fetchall()
+                external_rows = connection.execute(
+                    "SELECT citation_id,document_id,document_version_id,block_id,page,work_package_id FROM question_external_citations "
+                    "WHERE tenant_id=%s AND workspace_id=%s AND run_result_id=%s ORDER BY citation_id",
+                    (context.tenant_id, context.workspace_id, str(conversation_rows[0][2]))).fetchall() if conversation_rows else []
                 binding_version = 1 + int(connection.execute(
                     "SELECT count(*) FROM notebook_source_unbindings WHERE tenant_id=%s AND workspace_id=%s AND notebook_id=%s",
                     (context.tenant_id, context.workspace_id, notebook_id),
@@ -480,6 +484,10 @@ class PostgresNotebookRepository:
                     )
                     for row in conversation_rows if row[4] is not None
                     for payload in (cast(Mapping[str, object], row[5]),)
+                ) + tuple(
+                    NotebookConversationCitation(str(row[0]), str(row[1]), str(row[2]), str(row[3]), int(row[4]), "mcp_daon_rag", str(row[5]),
+                                                 {"kind": "section", "value": str(row[3])})
+                    for row in external_rows
                 )
                 conversation = NotebookConversationView(
                     str(conversation_rows[0][0]), str(conversation_rows[0][1]),

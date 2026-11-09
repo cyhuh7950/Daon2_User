@@ -18,7 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .cloud_storage import CloudAccessContext, CloudDatabaseError
 from .knowledge_connector_service import ConnectorContext
 
-MAX_SELECTED = 200
+MAX_SELECTED = 8
+MAX_SELECTION_BODY = 200
 PAGE_SIZE = 200
 MAX_PAGES = 100
 _TEXT_FIELDS = ("tenant_id", "project_id", "project_name", "work_package_id", "work_package_name")
@@ -68,13 +69,24 @@ class KnowledgeScopeService:
     def _scope(context: KnowledgeScopeContext, capability: str) -> CloudAccessContext:
         return CloudAccessContext(context.tenant_id, context.workspace_id, context.actor_id, capability)
 
+    def evidence_target(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, str, dict[tuple[str, str], Mapping[str, Any]]]:
+        """질문 경로가 쓴다: 호출 문맥, 실제 Daon2-RAG Connector, 지금 승인된 업무 패키지."""
+        connector_context, connector = self._rag_connector(context)
+        return connector_context, connector["connector_id"], self._read_approved(connector_context, connector)
+
     def _approved_scopes(self, context: KnowledgeScopeContext) -> dict[tuple[str, str], Mapping[str, Any]]:
+        return self._read_approved(*self._rag_connector(context))
+
+    def _rag_connector(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, Mapping[str, Any]]:
         connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version)
         # 가상(시험용) 서버의 값은 승인 지식이 아니므로 쓰지 않는다.
         connector = next((item for item in self._connectors.list(connector_context)
                           if item["kind"] == "daon2_rag" and item["status"] == "verified" and not item.get("virtual")), None)
         if connector is None:
             raise KnowledgeScopeError("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409)
+        return connector_context, connector
+
+    def _read_approved(self, connector_context: ConnectorContext, connector: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
         found: dict[tuple[str, str], Mapping[str, Any]] = {}
         cursor: str | None = None
         seen: set[str] = set()
@@ -154,7 +166,7 @@ class ScopeItem(_Strict):
 
 
 class SelectionBody(_Strict):
-    items: list[ScopeItem] = Field(max_length=MAX_SELECTED)
+    items: list[ScopeItem] = Field(max_length=MAX_SELECTION_BODY)
 
 
 def register_knowledge_scope_routes(app: FastAPI, dependencies: Any, service: KnowledgeScopeService) -> None:
