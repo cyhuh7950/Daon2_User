@@ -1239,12 +1239,12 @@ class PostgresQuestionAnsweringRepository:
             raise QuestionRepositoryError('QUESTION_DATABASE_UNAVAILABLE',status=503)
         revision=rows[0][0]
         if revision in {'0062','0063','0064','0066','0067','0068','0069','0070'}:return
-        if revision not in {'0071','0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'}:
+        if revision not in {'0071','0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'}:
             raise QuestionRepositoryError('QUESTION_DATABASE_UNAVAILABLE',status=503)
         try:
             receipt=None if result is None else result.price_card_receipt
             if receipt is not None:
-                if (revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082'} or selection.provider_code!='UPSTAGE'
+                if (revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'} or selection.provider_code!='UPSTAGE'
                     or selection.base_url!='https://api.upstage.ai/v1' or selection.model_id!='solar-pro4'
                     or receipt.provider_connection_id!=selection.connection_id or receipt.basis!='price_card'
                     or model_attempt_id is None):raise ValueError('RUN_COST_RECEIPT_BINDING_INVALID')

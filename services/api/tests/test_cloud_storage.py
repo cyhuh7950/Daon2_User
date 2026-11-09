@@ -426,12 +426,12 @@ class CloudStorageContractTests(unittest.TestCase):
             document=PostgresDocumentProcessingRepository(store,object())
             studio=PostgresStudioWorkspaceRepository(store)
             self.assertIs(document._cloud_store,store);self.assertIs(studio._cloud_store,store);self.assertIs(studio._generation_queue._cloud_store,store)
-            for value in ("0069","0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083"):
+            for value in ("0069","0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083","0084"):
                 revision[0]=value
-                with self.subTest(revision=value):self.assertEqual(runtime._organization_management_ready(dependencies),value!="0083")
+                with self.subTest(revision=value):self.assertEqual(runtime._organization_management_ready(dependencies),value!="0084")
             revision[0]="0071";vector[0]=None
             self.assertFalse(runtime._organization_management_ready(dependencies))
-            self.assertEqual(checked,["0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082"])
+            self.assertEqual(checked,["0070","0071","0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083"])
             studio._generation_queue._pool.close();store.close()
 
     def test_r4_readiness_0070_requires_all_protections_in_both_pool_states(self):
