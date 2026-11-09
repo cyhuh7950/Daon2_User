@@ -104,11 +104,14 @@ def piece_text(content: Mapping[str, Any]) -> str:
     if "items" in content:
         return "\n".join(str(item) for item in content["items"])
     if "front" in content:
-        return "\n".join(str(content.get(key, "")) for key in ("front", "back"))
+        return "\n".join(str(content[key]) for key in ("front", "back", "hint") if content.get(key))
     if "q" in content:
-        return "\n".join([str(content.get("q", "")), *(str(option) for option in content.get("options", [])), str(content.get("explanation", ""))])
+        options = (("✓ " if index == content.get("answer_index") else "") + str(option) for index, option in enumerate(content.get("options", [])))
+        return "\n".join(line for line in (str(content.get("q", "")), *options, str(content.get("explanation", ""))) if line)
     if "bullets" in content or "layout" in content:
-        return "\n".join([str(content.get("title", "")), *(str(item) for item in content.get("bullets", [])), *(" | ".join(str(cell) for cell in row) for row in (content.get("table") or {}).get("rows", []))])
+        table = content.get("table") if content.get("layout") == "table" else None
+        rows = [" | ".join(str(cell) for cell in row) for row in (table or {}).get("rows", [])]
+        return "\n".join(line for line in (str(content.get("title", "")), *(str(item) for item in content.get("bullets", [])), *rows, str(content.get("notes", ""))) if line)
     if "rows" in content:
         return "\n".join(" | ".join(str(cell) for cell in row) for row in content["rows"])
     return str(content.get("text", ""))

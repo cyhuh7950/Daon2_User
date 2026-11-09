@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from daon2_user_api.studio_chat_edit import CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes, authored_known_refs, describe_changes, flatten, render_pieces
+from daon2_user_api.studio_chat_edit import CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes, authored_known_refs, describe_changes, flatten, piece_text, render_pieces
 
 REPORT = {"body": {"title": "제목", "summary": "요약", "sections": [
     {"heading": "1장", "blocks": [{"type": "paragraph", "text": "가", "refs": ["S1"]}, {"type": "paragraph", "text": "나", "refs": []}]},
@@ -147,6 +147,25 @@ class OtherTypeTests(unittest.TestCase):
         self.assertIn("풀이", question["before_text"])
         slide = describe_changes("slides", SLIDES, [{"op": "delete", "id": "s1"}])[0]
         self.assertEqual(slide["before_text"], "첫 장\n가")
+
+
+class ComparisonTextTests(unittest.TestCase):
+    """확인 후 반영이므로 저장될 변경은 전·후 비교에 보여야 한다."""
+
+    def test_slide_notes_are_visible(self):
+        self.assertIn("발표 메모", piece_text({"layout": "bullets", "title": "장", "bullets": [], "notes": "발표 메모"}))
+
+    def test_slide_table_only_when_layout_is_table(self):
+        table = {"columns": ["열"], "rows": [["값"]]}
+        self.assertNotIn("값", piece_text({"layout": "bullets", "title": "장", "bullets": [], "notes": "", "table": table}))
+        self.assertIn("값", piece_text({"layout": "table", "title": "장", "bullets": [], "notes": "", "table": table}))
+
+    def test_card_hint_is_visible(self):
+        self.assertIn("힌트", piece_text({"front": "앞", "back": "뒤", "hint": "힌트"}))
+
+    def test_quiz_answer_change_is_visible(self):
+        first = {"q": "문제", "options": ["1", "2", "3", "4"], "answer_index": 0, "explanation": ""}
+        self.assertNotEqual(piece_text(first), piece_text({**first, "answer_index": 1}))
 
 
 class AuthoredTests(unittest.TestCase):

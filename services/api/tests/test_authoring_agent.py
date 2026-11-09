@@ -280,6 +280,22 @@ class InterventionTests(Base):
         self.assertEqual(final["document"]["sections"][0]["paragraphs"][0]["text"], "대화로 고친 문단")
         self.assertTrue(final["document"]["checks"])
 
+    def test_recheck_survives_when_knowledge_is_unavailable(self):
+        from daon2_user_api.question_external_evidence import ExternalEvidenceError
+        self.generating()
+        finished = self.run_job().content
+
+        def broken(context):
+            raise ExternalEvidenceError("KNOWLEDGE_EVIDENCE_UNAVAILABLE")
+
+        self.finder.concepts = lambda target, queries: []
+        self.finder.prepare = broken
+        self.store.session = S.resume(S.reopen(finished))
+        final = self.run_job().content
+        self.assertEqual(final["state"], "completed")
+        check = next(c for c in final["document"]["checks"] if c["id"] == "term_consistency")
+        self.assertEqual((check["status"], check["reason"]), ("skipped", "knowledge_unavailable"))
+
     def test_missing_material_stops_for_a_person(self):
         self.finder.found = ()
         self.llm.paragraphs = [{"text": "확인되지 않은 내용", "refs": []}]

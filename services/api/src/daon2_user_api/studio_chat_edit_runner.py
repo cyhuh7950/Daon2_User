@@ -45,7 +45,10 @@ class ChatEditRunner:
         revision, status, content = self._repository.latest_content(context, output_id)
         if status != "completed" or revision != int(turn["base_revision"]):
             raise StudioError("STUDIO_VERSION_CONFLICT", 409)
-        pieces = flatten(type_id, content)
+        try:
+            pieces = flatten(type_id, content)
+        except ChatEditInvalid:
+            raise StudioError("CHAT_EDIT_UNSUPPORTED", 409) from None
         if pieces_size(pieces) > MAX_PIECE_CHARS:
             raise StudioError("CHAT_EDIT_TOO_LARGE", 413)
         history = _history(self._repository.list_edit_turns(context, output_id), turn_id)
