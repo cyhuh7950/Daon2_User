@@ -16,6 +16,7 @@ MAX_UNIT_CHARS = 2400
 MAX_UNITS = 60
 MAX_SUBSECTIONS = 8
 NO_MATERIAL = "[자료 없음]"
+OVERSIZE_RATIO = 1.4
 _SECTION_KEY = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 
 OUTLINE_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {

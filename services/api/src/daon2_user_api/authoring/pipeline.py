@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import re
+from dataclasses import replace
 from typing import Any, Callable, Mapping, Sequence
 
 from ..knowledge_connector_service import ConnectorContext, ConnectorError, KnowledgeConnectorService
@@ -17,7 +18,7 @@ from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
 from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan
-from .agent import NO_MATERIAL, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, knowledge_row, plan_sections
+from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
 from .rfp import extract_requirements
@@ -265,6 +266,18 @@ class AuthoringPipeline:
             f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
             json_schema=UNIT_SCHEMA, max_output_tokens=min(1800, max(400, unit["target_chars"] * 2)), prompt_version="authoring-unit-v1", schema_name="authoring_unit")
         generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
+        written = self._written_chars(generation.data)
+        if written > unit["target_chars"] * OVERSIZE_RATIO:
+            # 분량은 제품이 관리한다. 넘치면 1회만 줄여 달라고 하고, 실패하면 처음 답을 쓴다.
+            shorter = replace(prompt, user=f"{prompt.user}
+
+[분량 초과] 앞 답변이 {written}자였습니다. 근거를 유지하면서 약 {unit['target_chars']}자로 줄여 다시 쓰세요.")
+            try:
+                again = self._llm.generate(ctx.context, shorter, cancel_check=ctx.cancel_check)
+                if 0 < self._written_chars(again.data) < written:
+                    generation = again
+            except (StudioError, ValueError, KeyError, TypeError):
+                pass
         known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
         warnings = Warnings()
         paragraphs: list[dict[str, Any]] = []
@@ -287,6 +300,10 @@ class AuthoringPipeline:
                 "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
                 "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
                 "warnings": list(warnings.items), "error_code": None, "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
+
+    @staticmethod
+    def _written_chars(data: Mapping[str, Any]) -> int:
+        return sum(len(str(item.get("text", ""))) for item in data.get("paragraphs", []) if isinstance(item, Mapping))
 
     def generate_units(self, ctx: GenerationContext, session: dict[str, Any]) -> GenerationResult:
         """소목차마다 묻고, 찾고, 쓰고, 검증하고, 저장한다. 멈췄다가도 저장소의 다음 미완료 소목차부터 이어진다(K-7)."""

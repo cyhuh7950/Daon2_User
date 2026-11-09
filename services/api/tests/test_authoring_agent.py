@@ -164,6 +164,25 @@ class WritingTests(Base):
         document = result.content["document"]
         self.assertEqual([s["title"] for s in document["sections"]], ["1.1 배경", "1.2 목적", "2.1 평가 기준"])
 
+    def test_too_long_unit_is_asked_once_to_shorten(self):
+        long_text = "평가 기준은 기술 90점이다. " * 200
+        short = [{"text": "평가 기준은 기술 90점이다.", "refs": ["K1"]}]
+        llm = self.llm
+        original = llm.generate
+
+        def generate(context, prompt, cancel_check=None):
+            result = original(context, prompt, cancel_check)
+            if prompt.schema_name == "authoring_unit":
+                result.data["paragraphs"] = short if "[분량 초과]" in prompt.user else [{"text": long_text, "refs": ["K1"]}]
+            return result
+
+        llm.generate = generate
+        self.generating()
+        result = self.run_job()
+        writes = [p for p in llm.prompts if p.schema_name == "authoring_unit"]
+        self.assertEqual(len(writes), 6)
+        self.assertEqual(result.content["units"][0]["paragraphs"][0]["text"], short[0]["text"])
+
     def test_earlier_summary_and_terms_reach_the_next_unit(self):
         self.generating()
         self.run_job()
