@@ -213,6 +213,21 @@ class Daon2KnowledgeTests(unittest.TestCase):
         self.assertEqual(found[0].document_name, "규칙 · 제외기간 규칙")
         self.assertIn("90일 제외기간", found[0].text)
 
+    def test_concepts_for_term_check_include_approved_synonyms(self):
+        finder = self.finder(ontology_search_concepts={"concepts": [{"concept_id": "c1", "snapshot_id": "s1", "provenance": "EXPERT_APPROVED"}]}, ontology_get_concept={**CONCEPT, "synonyms": ["지급 업무"]})
+        found = finder.concepts(daon2_target("A"), ["보험금"])
+        self.assertEqual(found, [{"concept_id": "c1", "label": "보험금 지급", "synonyms": ["지급 업무"]}])
+
+    def test_concept_lookup_reports_when_nothing_is_ready(self):
+        finder = self.finder(ontology_search_concepts=McpError("NOT_READY"))
+        self.assertEqual(finder.concepts(daon2_target("A"), ["보험금"]), [])
+
+    def test_concept_lookup_stops_at_the_call_limit(self):
+        rows = [{"concept_id": f"c{i}", "snapshot_id": "s1", "provenance": "EXPERT_APPROVED"} for i in range(5)]
+        finder = self.finder(ontology_search_concepts={"concepts": rows}, ontology_get_concept=CONCEPT)
+        finder.concepts(daon2_target("A", "B"), [f"용어{i}" for i in range(10)])
+        self.assertLessEqual(len(self.connectors.calls), 20)
+
     def test_package_without_ready_knowledge_is_skipped(self):
         self.assertEqual(self.finder(ontology_search_concepts=McpError("NOT_READY")).run(daon2_target("A"), (("P1", "보험금", "ontology"),)), ())
 

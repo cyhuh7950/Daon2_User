@@ -36,6 +36,8 @@ KNOWLEDGE_KINDS: Mapping[str, str] = {
     "ruleset": "승인된 업무 규칙의 조건과 결과를 찾는다.",
 }
 DAON2_ITEM_LIMIT = 2
+MAX_CONCEPT_QUERIES = 8
+MAX_CONCEPT_CALLS = 20
 DAON2_TEXT_LIMIT = 4000
 DAON2_APPROVED = "EXPERT_APPROVED"
 DAON2_NOT_READY = frozenset({"NOT_READY"})  # 그 업무 패키지에 아직 게시된 지식이 없다는 뜻이라 장애로 보지 않는다
@@ -325,6 +327,32 @@ class NotebookKnowledgeEvidence:
                     raise _unavailable()
                 by_query.setdefault((kind, query), []).extend(self._evidence(target.connector_id, package, row, similarity) for row, similarity in map(_parsed, rows))
         return _select_evidence(by_query.values(), limit)
+
+    def concepts(self, target: EvidenceTarget, queries: Sequence[str]) -> list[dict[str, Any]]:
+        """용어 점검용 승인 개념을 찾는다. 작성은 끝난 뒤이므로 지식이 준비되지 않았거나 호출에 실패하면 빈 목록을 돌려준다."""
+        found: dict[str, dict[str, Any]] = {}
+        budget = MAX_CONCEPT_CALLS
+        for package in target.packages:
+            if not package.get("tenant_id") or target.daon2_connector_id is None:
+                continue
+            scope = {"tenant_id": package.get("tenant_id"), "project_id": package["project_id"], "work_package_id": package["work_package_id"]}
+            for query in list(queries)[:MAX_CONCEPT_QUERIES]:
+                if budget < 1:
+                    return list(found.values())
+                try:
+                    budget -= 1
+                    rows = self._connectors.call(target.daon2_context, target.daon2_connector_id, "ontology_search_concepts", {"scope": scope, "query": query[:200], "limit": DAON2_ITEM_LIMIT}).structured.get("concepts")
+                    for row in self._readable(rows, "concept_id", "snapshot_id", budget + 1):
+                        if row["concept_id"] in found or budget < 1:
+                            continue
+                        budget -= 1
+                        concept = self._connectors.call(target.daon2_context, target.daon2_connector_id, "ontology_get_concept", {"scope": scope, "concept_id": row["concept_id"], "snapshot_id": row["snapshot_id"]}).structured
+                        if concept.get("provenance") == DAON2_APPROVED and isinstance(concept.get("label"), str):
+                            synonyms = concept.get("synonyms")
+                            found[row["concept_id"]] = {"concept_id": row["concept_id"], "label": concept["label"], "synonyms": [s for s in synonyms if isinstance(s, str)] if isinstance(synonyms, list) else []}
+                except (McpError, ConnectorError, AttributeError):
+                    break
+        return list(found.values())
 
     def _daon2_evidence(self, target: EvidenceTarget, package: Mapping[str, str], query: str, kind: str, budget: int) -> tuple[list[ExternalEvidence], int]:
         """온톨로지와 규칙을 근거 형태로 가져온다. 전문가 승인·게시된 것만 쓰고, 지식이 준비되지 않은 패키지는 건너뛴다."""
