@@ -18,7 +18,7 @@ from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
 from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan
-from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, knowledge_row, plan_sections
+from .agent import NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
 from .rfp import extract_requirements
@@ -244,7 +244,7 @@ class AuthoringPipeline:
 
     def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
         target = self._evidence.prepare(ctx.context) if self._evidence is not None else None
-        found = tuple(self._evidence.run(target, self._plan_unit(ctx, unit, target))) if target is not None else ()
+        found = tuple(self._evidence.run(target, self._plan_unit(ctx, unit, target), limit=evidence_limit(unit["target_chars"]))) if target is not None else ()
         by_block = {(row["connector_id"], row["version_id"], row["block_id"]): row for row in knowledge}
         material: list[dict[str, Any]] = []
         for item in found:

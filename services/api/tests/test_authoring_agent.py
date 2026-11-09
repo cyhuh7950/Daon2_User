@@ -27,14 +27,15 @@ def evidence(block="b1", text="평가 기준은 기술 90점과 가격 10점이�
 
 class Finder:
     def __init__(self, found=None, error=None):
-        self.found, self.error, self.runs = (evidence(),) if found is None else found, error, []
+        self.found, self.error, self.runs, self.limits = (evidence(),) if found is None else found, error, [], []
 
     def prepare(self, context):
         package = {"alias": "P1", "project_id": "p1", "project_name": "프로젝트", "work_package_id": "w1", "work_package_name": "제안서 작업"}
         return EvidenceTarget(SimpleNamespace(tenant_id="tenant-1"), "kc-rag", (package,))
 
-    def run(self, target, requests):
+    def run(self, target, requests, limit=5):
         self.runs.append(tuple(requests))
+        self.limits.append(limit)
         if self.error:
             raise self.error
         return self.found
@@ -163,6 +164,12 @@ class WritingTests(Base):
         self.assertEqual([e["origin"] for e in result.evidence], ["mcp_daon_rag"])
         document = result.content["document"]
         self.assertEqual([s["title"] for s in document["sections"]], ["1.1 배경", "1.2 목적", "2.1 평가 기준"])
+
+    def test_larger_units_get_more_evidence(self):
+        self.generating(target_pages=None)
+        self.store.session["units"][0]["target_chars"] = 2400
+        self.run_job()
+        self.assertEqual(self.finder.limits[0], 10)
 
     def test_too_long_unit_is_asked_once_to_shorten(self):
         long_text = "평가 기준은 기술 90점이다. " * 200

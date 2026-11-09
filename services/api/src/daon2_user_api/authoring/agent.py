@@ -17,6 +17,9 @@ MAX_UNITS = 60
 MAX_SUBSECTIONS = 8
 NO_MATERIAL = "[자료 없음]"
 OVERSIZE_RATIO = 1.4
+MIN_UNIT_EVIDENCE = 5
+MAX_UNIT_EVIDENCE = 10
+CHARS_PER_EVIDENCE = 200
 _SECTION_KEY = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 
 OUTLINE_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
@@ -105,6 +108,11 @@ def reconcile_units(units: Sequence[Mapping[str, Any]], sections: Sequence[Mappi
         mine = [dict(unit, section_title=section.get("title") or unit["section_title"]) for unit in units if unit["section_key"] == section["key"]]
         result += mine or [_unit(section["key"], section["title"], 1, section["title"], str(section.get("purpose") or ""), DEFAULT_UNIT_CHARS)]
     return result
+
+
+def evidence_limit(target_chars: int) -> int:
+    """쓸 분량에 맞춰 근거 수를 정한다. 요청이 커져 응답 시간 제한에 걸리지 않게 상한을 둔다."""
+    return max(MIN_UNIT_EVIDENCE, min(MAX_UNIT_EVIDENCE, target_chars // CHARS_PER_EVIDENCE))
 
 
 def knowledge_row(item: ExternalEvidence, ref: str) -> dict[str, Any]:
