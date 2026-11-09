@@ -269,9 +269,7 @@ class AuthoringPipeline:
         written = self._written_chars(generation.data)
         if written > unit["target_chars"] * OVERSIZE_RATIO:
             # 분량은 제품이 관리한다. 넘치면 1회만 줄여 달라고 하고, 실패하면 처음 답을 쓴다.
-            shorter = replace(prompt, user=f"{prompt.user}
-
-[분량 초과] 앞 답변이 {written}자였습니다. 근거를 유지하면서 약 {unit['target_chars']}자로 줄여 다시 쓰세요.")
+            shorter = replace(prompt, user=f"{prompt.user}\n\n[분량 초과] 앞 답변이 {written}자였습니다. 근거를 유지하면서 약 {unit['target_chars']}자로 줄여 다시 쓰세요.")
             try:
                 again = self._llm.generate(ctx.context, shorter, cancel_check=ctx.cancel_check)
                 if 0 < self._written_chars(again.data) < written:
