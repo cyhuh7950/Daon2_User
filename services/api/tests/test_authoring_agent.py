@@ -266,6 +266,20 @@ class InterventionTests(Base):
         self.assertEqual(final.content["state"], "completed")
         self.assertEqual(len([p for p in self.llm.prompts if p.schema_name == "authoring_unit"]), 3)
 
+    def test_authored_resume_rechecks_without_rewriting(self):
+        from daon2_user_api.studio_chat_edit import apply_changes
+        self.generating()
+        finished = self.run_job().content
+        written = len([p for p in self.llm.prompts if p.schema_name == "authoring_unit"])
+        key = finished["units"][0]["key"]
+        changed = apply_changes("authored_document", finished, [{"op": "replace", "id": f"{key}.p1", "content": {"text": "대화로 고친 문단", "refs": ["K1"]}}], {"K1"})
+        self.store.session = S.resume(S.reopen(changed))
+        final = self.run_job().content
+        self.assertEqual(final["state"], "completed")
+        self.assertEqual(len([p for p in self.llm.prompts if p.schema_name == "authoring_unit"]), written)
+        self.assertEqual(final["document"]["sections"][0]["paragraphs"][0]["text"], "대화로 고친 문단")
+        self.assertTrue(final["document"]["checks"])
+
     def test_missing_material_stops_for_a_person(self):
         self.finder.found = ()
         self.llm.paragraphs = [{"text": "확인되지 않은 내용", "refs": []}]
