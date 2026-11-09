@@ -5174,7 +5174,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     if knowledge_connector_service is not None:
         register_knowledge_connector_routes(app, dependencies, knowledge_connector_service)
         from .knowledge_scope_service import KnowledgeScopeService, register_knowledge_scope_routes
-        knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service)
+        knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service, os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None)
         register_knowledge_scope_routes(app, dependencies, knowledge_scope_service)
         # Daon2-RAG 검색의 승인 기준이 확인되기 전에는 켜지 않는다(WO-K3 E1).
         if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") == "true" and hasattr(question_answering_service, "set_external_evidence"):

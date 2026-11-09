@@ -72,6 +72,16 @@ class CatalogTests(unittest.TestCase):
             {"work_package_id": "w1", "work_package_name": "w1 이름", "updated_at": "2026-11-09T00:00:00Z"},
             {"work_package_id": "w2", "work_package_name": "w2 이름", "updated_at": "2026-11-09T00:00:00Z"}]}]})
 
+    def test_shared_connection_is_looked_up_at_its_owner_but_egress_stays_with_the_caller(self):
+        self.connectors = _Connectors([{"scopes": [scope()], "next_cursor": None}])
+        KnowledgeScopeService(_Store(), self.connectors, shared_connector_tenant="admin").catalog(CTX)
+        context = self.connectors.calls[0][0]
+        self.assertEqual((context.tenant_id, context.owner_tenant_id, context.workspace_id), ("tenant-a", "admin", "ws-a"))
+
+    def test_without_shared_tenant_the_organization_uses_its_own_connection(self):
+        self.service([{"scopes": [scope()], "next_cursor": None}]).catalog(CTX)
+        self.assertIsNone(self.connectors.calls[0][0].owner_tenant_id)
+
     def test_call_carries_workspace_for_egress_decision(self):
         self.service([{"scopes": [], "next_cursor": None}]).catalog(CTX)
         context = self.connectors.calls[0][0]

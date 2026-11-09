@@ -31,6 +31,8 @@ services:
     environment:
       # 노트북 채팅에서 선택한 Daon 승인 지식을 사용한다(WO-K4 1단계).
       DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED: "true"
+      # 모든 조직이 admin 조직에 등록된 Daon 지식 연결을 함께 쓴다(WO-K4 D4).
+      DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT: admin
       # 개발·WSL QA에서는 인수테스트 전까지 라이선스 없이 모든 기능을 검증한다.
       DAON_DEVELOPMENT_STAGE: "true"
       # 개발 단계 기본 외부 전송 정책("추가 인증 없이 허용")의 허용 목적지. 새 Workspace의 시드 차단 정책을 이 값으로 올린다.

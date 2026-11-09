@@ -61,9 +61,10 @@ def _approved(row: Mapping[str, Any]) -> bool:
 
 
 class KnowledgeScopeService:
-    def __init__(self, store: Any, connectors: Any) -> None:
+    def __init__(self, store: Any, connectors: Any, shared_connector_tenant: str | None = None) -> None:
         self._store = store
         self._connectors = connectors
+        self._shared_connector_tenant = shared_connector_tenant  # 조직마다 등록하지 않고 쓰는 시스템 공용 연결(WO-K4 D4)
 
     @staticmethod
     def _scope(context: KnowledgeScopeContext, capability: str) -> CloudAccessContext:
@@ -78,7 +79,7 @@ class KnowledgeScopeService:
         return self._read_approved(*self._rag_connector(context))
 
     def _rag_connector(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, Mapping[str, Any]]:
-        connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version)
+        connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version, self._shared_connector_tenant)
         # 가상(시험용) 서버의 값은 승인 지식이 아니므로 쓰지 않는다.
         connector = next((item for item in self._connectors.list(connector_context)
                           if item["kind"] == "daon2_rag" and item["status"] == "verified" and not item.get("virtual")), None)

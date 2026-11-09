@@ -32,6 +32,48 @@ class SettingsFromEnvTests(unittest.TestCase):
             self.assertFalse(settings_from_env()["production"])
 
 
+class SharedConnectionTests(unittest.TestCase):
+    class _Connection:
+        def __init__(self, seen):
+            self.seen = seen
+
+        def execute(self, sql, params=()):
+            self.seen.append(params)
+            return self
+
+        def fetchall(self):
+            return []
+
+    def service(self):
+        from contextlib import contextmanager
+        outer = self
+        self.scopes, self.params = [], []
+
+        class Store:
+            @contextmanager
+            def _transaction(self, scope):
+                outer.scopes.append(scope)
+                yield outer._Connection(outer.params)
+
+        service = KnowledgeConnectorService.__new__(KnowledgeConnectorService)
+        service._store = Store()  # noqa: SLF001
+        return service
+
+    def test_shared_connection_is_read_from_its_owner(self):
+        self.service().list(ConnectorContext("tenant-a", "user-a", owner_tenant_id="admin"))
+        self.assertEqual(self.scopes[0].tenant_id, "admin")
+        self.assertEqual(self.params, [("admin",)])
+
+    def test_own_connection_is_unchanged(self):
+        self.service().list(ConnectorContext("tenant-a", "user-a"))
+        self.assertEqual(self.scopes[0].tenant_id, "tenant-a")
+        self.assertEqual(self.params, [("tenant-a",)])
+
+    def test_owner_never_applies_to_writes(self):
+        scope = KnowledgeConnectorService._scope(ConnectorContext("tenant-a", "user-a", owner_tenant_id="admin"), "connector.write")  # noqa: SLF001
+        self.assertEqual(scope.tenant_id, "tenant-a")
+
+
 class EndpointValidationTests(unittest.TestCase):
     def test_endpoint_rules(self):
         self.assertEqual(validate_endpoint("https://example.com/mcp", allow_private=False), "https://example.com/mcp")
