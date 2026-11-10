@@ -143,6 +143,26 @@ test("실패 Source 실제 React 재처리 클릭은 새 Run POST 후 상태를 
   }
 });
 
+test("실패 Source는 실패할 때만 사유를 따로 조회해 목록 아래에 보인다", async () => {
+  for (const [code, expected] of [["PDF_TEXT_NOT_FOUND", /PDF에서 글자를 찾지 못했습니다/u], [null, /재처리를 눌러 다시 시도해 주세요/u]]) {
+    let workspace;
+    const reasonCalls = [];
+    try {
+      workspace = await mountSourceRetryWorkspace({
+        ...adapter,
+        async listSources() { return [{ source_id: "source-1", source_version_id: "version-1", filename: "scan.pdf", source_state: "failed", processing_state: "failed", job_state: "dead_letter" },
+          { source_id: "source-2", source_version_id: "version-2", filename: "ok.pdf", source_state: "ready", processing_state: "completed", job_state: "completed" }]; },
+        async listSourceFailureReasons(options) { reasonCalls.push(options); return [{ source_id: "source-1", source_version_id: "version-1", filename: "scan.pdf",
+          source_state: "failed", processing_state: "failed", job_state: "dead_letter", ...(code ? { safe_error_code: code } : {}) }]; },
+        async listStudioOutputs() { return []; },
+      }, `source-failure-reason-${code}`);
+      assert.match(workspace.container.textContent, expected);
+      assert.equal(reasonCalls.length, 1);
+      assert.equal(findElements(workspace.container, (node) => node.tagName === "P" && node.getAttribute?.("role") === "status" && expected.test(node.textContent)).length, 1);
+    } finally { if (workspace) await workspace.cleanup(); }
+  }
+});
+
 test("DOCX 검토 필요 completed 자료만 실제 재처리 클릭으로 새 Run을 요청한다",async(t)=>{
   for(const scenario of ['docx','pptx','xlsx','pdf','text','image','active-job','active-run','ready'])await t.test(scenario,async()=>{
     let workspace;const calls=[];let finished=false;

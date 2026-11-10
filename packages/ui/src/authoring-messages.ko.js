@@ -68,6 +68,8 @@ export const AUTHORING_MESSAGES = {
   "authoring.group.proposal": "기존 제안서",
   "authoring.group.insurance_terms": "기준 약관",
   "authoring.group.contract": "기준 계약서",
+  "authoring.source_failed": "소스 처리에 실패했습니다. Source 목록에서 사유를 확인하고 재처리해 주세요.",
+  "authoring.source_processing": "소스를 처리하는 중입니다. 처리가 끝나면 여기에서 선택할 수 있습니다.",
   "authoring.review.base_only": "기준 문서에서 모은 조문으로 아래 계획대로 초안을 만듭니다. 순서를 바꾸거나 필요 없는 항목은 지운 뒤 확정하세요.",
   "authoring.review.requirements": "요구사항 확인 ({count}건)",
   "authoring.review.requirements_help": "잘못 뽑힌 항목은 고치거나 지우고, 빠진 항목은 추가하세요. 확정 후에 초안을 만듭니다.",

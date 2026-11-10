@@ -109,6 +109,7 @@ export const STUDIO_ERRORS = Object.freeze({
   CHAT_EDIT_INVALID: "수정안을 만들지 못했습니다. 지시를 바꿔 다시 시도하세요.",
   CHAT_EDIT_TOO_LARGE: "자료가 너무 길어 대화로 수정할 수 없습니다.",
   CHAT_EDIT_STATE_INVALID: "이미 처리된 수정안입니다.",
+  REQUEST_TOO_LARGE: "한 번에 보내기에 내용이 너무 많습니다. 항목을 줄여 다시 시도하세요.",
   STUDIO_NO_READY_SOURCE: "사용할 수 있는 소스가 없습니다. 소스 처리가 끝났는지 확인하세요.",
   STUDIO_TYPE_UNAVAILABLE: "아직 제공하지 않는 유형입니다.",
   STUDIO_VERSION_CONFLICT: "다른 곳에서 먼저 변경되었습니다. 새로 고친 뒤 다시 시도하세요.",

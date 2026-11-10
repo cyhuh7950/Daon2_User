@@ -301,10 +301,10 @@ function validateWebsiteContract(document) {
     && keys(schema.properties, [...required, ...optional]);
   const opaque = (value) => value?.$ref === "#/components/schemas/OpaqueId";
   const parameters = (operation, expected) => Array.isArray(operation?.parameters)
-    && operation.parameters.length === expected.length && expected.every(([name, location, required]) => {
+    && operation.parameters.length === expected.length && expected.every(([name, location, required, schemaValid = opaque]) => {
       const matches = operation.parameters.map(p => p.$ref ? resolveRef(document, p.$ref) : p)
         .filter(p => p.name === name && p.in === location);
-      return matches.length === 1 && matches[0].required === required && opaque(matches[0].schema);
+      return matches.length === 1 && matches[0].required === required && schemaValid(matches[0].schema);
     });
   const responseSchema = (operation, status) => responseObject(document, operation?.responses?.[status])
     ?.content?.["application/json"]?.schema?.$ref;
@@ -351,10 +351,11 @@ function validateWebsiteContract(document) {
   const snapshotEnvelope = schemas.WebsiteSnapshotEnvelope;
   check(exactObject(snapshotEnvelope, ["data", "meta"]) && traceMeta(snapshotEnvelope.properties.meta)
     && snapshotEnvelope.properties.data.$ref === "#/components/schemas/WebsiteSnapshotView", "snapshot envelope mismatch");
-  check(parameters(sources, [["id", "path", true], ["notebook_id", "query", true], ["website_source_version_id", "query", false]]), "Source query mismatch");
+  check(parameters(sources, [["id", "path", true], ["notebook_id", "query", true], ["website_source_version_id", "query", false], ["include_failure_reason", "query", false, (schema) => keys(schema, ["type"]) && schema.type === "boolean"]]), "Source query mismatch");
   const projection = schemas.WorkspaceSourceProjection;
-  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website"])
-    && projection.properties.website.$ref === "#/components/schemas/WebsiteSourceOriginal", "Source default6/optional mismatch");
+  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website", "safe_error_code"])
+    && projection.properties.website.$ref === "#/components/schemas/WebsiteSourceOriginal"
+    && projection.properties.safe_error_code.type === "string" && projection.properties.safe_error_code.pattern === "^[A-Z][A-Z0-9_]{2,63}$", "Source default6/optional mismatch");
   const original = schemas.WebsiteSourceOriginal;
   check(exactObject(original, [...fields, "text"])
     && fields.every(key => original.properties[key].$ref === `#/components/schemas/WebsiteSnapshotView/properties/${key}`)

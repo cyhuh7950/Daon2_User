@@ -304,6 +304,20 @@ class StudioReportPostgresTests(unittest.TestCase):
         self.assertIn("binding_kind='source'", sql)
         self.assertEqual(connection.statements[0][1], ("notebook-1",))
 
+    def test_source_list_reports_the_failure_code_of_the_latest_job(self) -> None:
+        connection = FakeConnection(source_rows=((
+            "source-1", "source-version-1", "scan.pdf", "failed", "failed", "dead_letter", False, "PDF_TEXT_NOT_FOUND",
+        ),))
+        source = PostgresStudioReportRepository(FakeCloud(connection)).list_sources(self.context)[0]
+        self.assertEqual(source.safe_error_code, "PDF_TEXT_NOT_FOUND")
+        self.assertIn("oq.last_safe_error_code", connection.statements[0][0])
+
+    def test_source_list_hides_the_code_of_a_source_that_recovered(self) -> None:
+        connection = FakeConnection(source_rows=((
+            "source-1", "source-version-1", "ok.pdf", "ready", "completed", "completed", False, "OLD_CODE",
+        ),))
+        self.assertIsNone(PostgresStudioReportRepository(FakeCloud(connection)).list_sources(self.context)[0].safe_error_code)
+
     def test_source_list_never_combines_processing_and_job_state_from_different_runs(self) -> None:
         connection = SourceLineageConnection()
         source = PostgresStudioReportRepository(FakeCloud(connection)).list_sources(self.context)[0]

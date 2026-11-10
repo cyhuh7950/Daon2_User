@@ -28,6 +28,7 @@ export function createWebProductWorkspaceAdapter(workspaceId, notebookId) {
   return Object.freeze({
     studioV2: createStudioV2Adapter(workspaceId, notebookId),
     listSources: (options) => listWorkspaceSources(workspaceId, notebookOptions(options)),
+    listSourceFailureReasons: (options) => listWorkspaceSources(workspaceId, { ...notebookOptions(options), includeFailureReason: true }),
     searchOpenLaw: (input,options={}) => searchOpenLaw(workspaceId,{...input,notebook_id:notebookId ?? options.notebookId},options),
     previewOpenLaw: (input,options={}) => previewOpenLaw(workspaceId,{...input,notebook_id:notebookId ?? options.notebookId},options),
     importOpenLaw: (input,options={}) => importOpenLaw(workspaceId,{...input,notebook_id:notebookId ?? options.notebookId},options),

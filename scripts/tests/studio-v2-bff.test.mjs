@@ -201,3 +201,18 @@ test("노트북 복사·채팅 기록 삭제·조직 템플릿·내보내기 정
     assert.equal(response.status, 405, `${method} ${url}`);
   }
 });
+
+test("요구사항이 많은 작성 확정 요청도 전달하고 다른 쓰기 경로의 크기 제한은 유지한다", async () => {
+  const captured = [];
+  const large = JSON.stringify({ requirements: "가".repeat(100_000) });
+  const proxy = makeProxy(captured);
+  assert.ok(new TextEncoder().encode(large).length > 65_536);
+  const review = await proxy(write("PUT", "/authoring/sessions/sv2-1/review", large), seg("authoring", "sessions", "sv2-1", "review"));
+  assert.equal(review.status, 200);
+  assert.equal(new TextDecoder().decode(captured.at(-1).body), large);
+
+  const other = await proxy(write("PUT", "/authoring/sessions/sv2-1/outline", large), seg("authoring", "sessions", "sv2-1", "outline"));
+  assert.equal(other.status, 413);
+  const huge = await proxy(write("PUT", "/authoring/sessions/sv2-1/review", JSON.stringify("a".repeat(1_048_577))), seg("authoring", "sessions", "sv2-1", "review"));
+  assert.equal(huge.status, 413);
+});

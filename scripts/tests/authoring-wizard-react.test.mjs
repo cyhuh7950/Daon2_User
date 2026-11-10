@@ -354,3 +354,19 @@ test("wizard hides chat until the document is completed", async () => {
     assert.equal(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "대화로 수정 입력")[0], undefined);
   } finally { await view.close(); }
 });
+
+test("고를 소스가 없을 때 처리 상태에 맞는 안내를 보인다", async () => {
+  const session = { ...base, state: "collecting", pending_questions: REQUIRED, requests: [{ request: "select_source", key: "rfp_document" }] };
+  const cases = [
+    [[], "먼저 제안요청서를 소스로 추가하세요"],
+    [[{ sourceVersionId: "a", filename: "a.pdf", ready: false, sourceState: "failed" }], "처리에 실패했습니다"],
+    [[{ sourceVersionId: "a", filename: "a.pdf", ready: false, sourceState: "processing" }], "처리하는 중입니다"],
+  ];
+  for (const [sources, expected] of cases) {
+    const view = await mount(fakeStudio([session]), { outputId: OID, sources });
+    try {
+      await view.flush();
+      assert.ok(text(view).includes(expected), expected);
+    } finally { await view.close(); }
+  }
+});

@@ -134,7 +134,7 @@ class PostgresStudioReportRepository:
                     "THEN iv.canonical_json->'chunks' ELSE '[]'::jsonb END) chunk "
                     "WHERE chunk->>'evidence_span_id'=es.record_id AND chunk->>'source_id'=s.record_id "
                     "AND chunk->>'source_version_id'=sv.record_id "
-                    "AND length(chunk->>'text')>0 AND chunk->>'text'=es.canonical_json->>'text')))) AS approved_knowledge "
+                    "AND length(chunk->>'text')>0 AND chunk->>'text'=es.canonical_json->>'text')))) AS approved_knowledge,oq.last_safe_error_code "
                     "FROM sources s "
                     "JOIN source_versions sv ON sv.tenant_id=s.tenant_id AND sv.workspace_id=s.workspace_id "
                     "AND sv.source_id=s.record_id JOIN notebook_bindings nb ON nb.tenant_id=sv.tenant_id "
@@ -148,7 +148,7 @@ class PostgresStudioReportRepository:
                     "LEFT JOIN LATERAL (SELECT state,record_id FROM processing_runs "
                     "WHERE tenant_id=sv.tenant_id AND workspace_id=sv.workspace_id "
                     "AND source_version_id=sv.record_id ORDER BY created_at DESC,record_id DESC LIMIT 1) pr ON true "
-                    "LEFT JOIN LATERAL (SELECT state FROM document_processing_jobs "
+                    "LEFT JOIN LATERAL (SELECT state,last_safe_error_code FROM document_processing_jobs "
                     "WHERE tenant_id=sv.tenant_id AND workspace_id=sv.workspace_id AND source_version_id=sv.record_id "
                     "AND processing_run_id=pr.record_id "
                     "ORDER BY created_at DESC LIMIT 1) oq ON true WHERE NOT EXISTS (SELECT 1 FROM source_versions newer "
@@ -170,8 +170,9 @@ class PostgresStudioReportRepository:
         # never create a fake ProcessingRun/job or upgrade an unready upload.
         return tuple(WorkspaceSourceProjection(
             *(str(item) for item in row[:4]),
-            *(('completed', 'completed') if len(row) == 7 and row[6] is True and row[3] == 'ready'
+            *(('completed', 'completed') if len(row) >= 7 and row[6] is True and row[3] == 'ready'
               else (str(row[4]), str(row[5]))),
+            str(row[7]) if len(row) >= 8 and row[7] and row[3] != 'ready' else None,
         ) for row in rows)
 
     def create_report(self, context: StudioReportContext, request: StudioReportCreateRequest,

@@ -1993,6 +1993,10 @@ def _enum_json(value: object) -> object:
     return value
 
 
+_AUTHORING_REVIEW_PATH = re.compile(r"/api/v1/workspaces/[^/]+/notebooks/[^/]+/studio/authoring/sessions/[^/]+/review")
+_AUTHORING_REVIEW_MAX_BYTES = 1024 * 1024  # 요구사항 전체를 한 번에 확정한다.
+
+
 def _dataclass_json(value: object) -> dict[str, object]:
     return {
         item.name: _enum_json(getattr(value, item.name))
@@ -2926,20 +2930,21 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
                 ):
                     return _error_response(415, "UNSUPPORTED_MEDIA_TYPE", trace_id)
                 declared = request.headers.get("content-length")
+                body_limit = (
+                    _AUTHORING_REVIEW_MAX_BYTES
+                    if request.method == "PUT" and _AUTHORING_REVIEW_PATH.fullmatch(request.url.path)
+                    else dependencies.settings.max_body_bytes
+                )
                 if declared is not None:
                     try:
-                        limit = (
-                            dependencies.settings.source_upload_max_bytes
-                            if is_source_upload
-                            else dependencies.settings.max_body_bytes
-                        )
+                        limit = dependencies.settings.source_upload_max_bytes if is_source_upload else body_limit
                         if int(declared) > limit:
                             return _error_response(413, "REQUEST_TOO_LARGE", trace_id)
                     except ValueError:
                         return _error_response(400, "INVALID_REQUEST", trace_id)
                 if not is_source_upload:
                     body = await request.body()
-                    if len(body) > dependencies.settings.max_body_bytes:
+                    if len(body) > body_limit:
                         return _error_response(413, "REQUEST_TOO_LARGE", trace_id)
             allowed_restricted_request = (request.method, request.url.path) in {
                 ("GET", "/api/v1/session"),
@@ -4349,8 +4354,9 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     @app.get("/api/v1/workspaces/{id}/sources")
     async def list_workspace_sources(
         id: str, request: Request, notebook_id: str = Query(), website_source_version_id: str | None = Query(default=None),
+        include_failure_reason: bool = Query(default=False),
     ) -> JSONResponse:
-        _require_query_keys(request, frozenset({"notebook_id", "website_source_version_id"}))
+        _require_query_keys(request, frozenset({"notebook_id", "website_source_version_id", "include_failure_reason"}))
         if website_source_version_id is not None:
             _website_query(request,{'notebook_id','website_source_version_id'})
         principal = _principal(request, dependencies)
@@ -4375,7 +4381,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             if (source.source_id, source.source_version_id) in selected_sources
         )
         content = {
-            "data": {"sources": [_dataclass_json(source) for source in sources]},
+            "data": {"sources": [_dataclass_json(source if include_failure_reason else replace(source, safe_error_code=None)) for source in sources]},
             "meta": {"trace_id": request.state.trace_id, "workspace_id": id},
         }
         if website_source_version_id is not None:
