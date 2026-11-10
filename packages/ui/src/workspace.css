@@ -432,3 +432,13 @@ select { width: 100%; min-height: var(--daon-target-desktop-control); margin-top
 .website-original dl { margin: 8px 0; }
 .website-original dd { margin: 0 0 6px; overflow-wrap: anywhere; }
 .website-original pre { max-height: 360px; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+
+/* 매뉴얼 보기: 표·그림·네 단계 제목 */
+.manual-reader-body h5 { margin: 12px 0 4px; font-size: 13px; color: var(--workspace-violet); }
+.manual-reader-table { max-width: 100%; margin: 6px 0 10px; overflow-x: auto; }
+.manual-reader-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.manual-reader-table th, .manual-reader-table td { padding: 5px 8px; border: 1px solid var(--workspace-border); text-align: left; vertical-align: top; }
+.manual-reader-table th { background: var(--workspace-surface-soft); font-weight: 700; }
+.manual-reader-figure { margin: 8px 0 12px; }
+.manual-reader-figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--workspace-border); border-radius: 6px; }
+.manual-reader-figure figcaption { margin-top: 4px; color: var(--workspace-muted); font-size: 11px; }

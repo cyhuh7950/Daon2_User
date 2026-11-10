@@ -3,8 +3,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from docx import Document
@@ -20,13 +24,20 @@ from docx.shared import Inches, Pt, RGBColor
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "docs" / "manual" / "dist"
 PUBLIC = ROOT / "apps" / "web" / "public" / "manual"
-RELEASE = "1.0.0"
-RELEASED_AT = "2026-08-20"
+RELEASE = "2.0.0"
+RELEASED_AT = "2026-11-11"
 DOCS = (
-    ("daon-getting-started", "Daon Getting Started", "Notebook의 첫 작업 흐름과 안전한 운영"),
-    ("daon-user-manual", "Daon 사용자 설명서", "Workspace 화면·설정·운영 절차"),
-    ("daon-knowledge-llm-guide", "Daon 지식·LLM 활용 가이드", "지식·Provider·Citation 품질 운영 기준"),
+    ("daon-user-manual", "Daon 사용자 설명서", "처음 시작하기부터 화면별 설명과 관리자 절차까지"),
 )
+# 2.0.0에서 한 권으로 합치며 은퇴한 문서. 공개 사본에 남아 있으면 지운다.
+RETIRED = ("daon-getting-started", "daon-knowledge-llm-guide")
+SOFFICE_CANDIDATES = (
+    r"C:\Program Files\LibreOffice\program\soffice.exe",
+    r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    "/usr/bin/soffice",
+    "/usr/bin/libreoffice",
+)
+IMAGE_NAME = re.compile(r"^[a-z0-9-]+\.png$")
 MIMES = {
     "markdown": "text/markdown; charset=utf-8",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -198,14 +209,14 @@ def add_metadata_table(document, title):
 def parse_headings(lines):
     headings = []
     for line in lines:
-        match = re.match(r"^(#{2,3})\s+(.+)$", line)
+        match = re.match(r"^(#{2,4})\s+(.+)$", line)
         if match:
             headings.append((len(match.group(1)), match.group(2).strip(), f"toc_{len(headings) + 1}"))
     return headings
 
 
 def add_cover(document, title, summary):
-    document.add_paragraph("DAON RELEASE 1", style=None).alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.add_paragraph(f"DAON RELEASE {RELEASE.split('.')[0]}", style=None).alignment = WD_ALIGN_PARAGRAPH.CENTER
     kicker = document.paragraphs[-1].runs[0]
     set_run_font(kicker, 10, bold=True, color=(46, 116, 181))
     paragraph = document.add_paragraph()
@@ -228,10 +239,10 @@ def add_toc(document, headings):
     add_metadata_table(document, document.core_properties.title)
     document.add_heading("목차", level=1)
     for level, title, anchor in headings:
-        if level != 2:
+        if level not in (2, 3):
             continue
         paragraph = document.add_paragraph()
-        paragraph.paragraph_format.left_indent = Inches(0)
+        paragraph.paragraph_format.left_indent = Inches(0 if level == 2 else 0.3)
         paragraph.paragraph_format.space_after = Pt(0)
         paragraph.paragraph_format.line_spacing = 0.9
         add_internal_link(paragraph, title, anchor)
@@ -281,6 +292,61 @@ def clean_inline(text):
     return re.sub(r"\*\*(.+?)\*\*", r"\1", text.replace("`", ""))
 
 
+def split_row(line):
+    """표 한 줄을 칸으로 나눈다. `\\|`는 칸 구분이 아니라 글자 `|`다."""
+    cells, current, index = [], "", 0
+    body = line.strip()
+    body = body[1:] if body.startswith("|") else body
+    while index < len(body):
+        char = body[index]
+        if char == "\\" and index + 1 < len(body) and body[index + 1] == "|":
+            current += "|"
+            index += 2
+            continue
+        if char == "|":
+            cells.append(current)
+            current = ""
+        else:
+            current += char
+        index += 1
+    if current.strip():
+        cells.append(current)
+    return [clean_inline(cell.strip()) for cell in cells]
+
+
+def parse_table(lines, start):
+    """start부터 이어지는 표 줄을 읽어 (행 목록, 표 다음 줄 번호)를 돌려준다. 구분선 줄은 뺀다."""
+    rows, index = [], start
+    while index < len(lines) and lines[index].strip().startswith("|"):
+        cells = split_row(lines[index])
+        if not all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            rows.append(cells)
+        index += 1
+    return rows, index
+
+
+def add_table(document, rows):
+    columns = max(len(row) for row in rows)
+    table = document.add_table(rows=len(rows), cols=columns)
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for row_index, row in enumerate(rows):
+        for column in range(columns):
+            cell = table.rows[row_index].cells[column]
+            set_cell_margins(cell)
+            cell.text = row[column] if column < len(row) else ""
+            for run in cell.paragraphs[0].runs:
+                set_run_font(run, 9, bold=True if row_index == 0 else None)
+            if row_index == 0:
+                shade = OxmlElement("w:shd")
+                shade.set(qn("w:fill"), "E8EEF5")
+                cell._tc.get_or_add_tcPr().append(shade)
+    header_flag = OxmlElement("w:tblHeader")
+    header_flag.set(qn("w:val"), "true")
+    table.rows[0]._tr.get_or_add_trPr().append(header_flag)
+    document.add_paragraph().paragraph_format.space_after = Pt(2)
+
+
 def add_list_paragraph(document, text, num_id):
     paragraph = document.add_paragraph()
     paragraph.paragraph_format.left_indent = Inches(0.375)
@@ -308,7 +374,7 @@ def add_markdown_body(document, source, lines, headings):
         if not raw or raw.startswith("# "):
             index += 1
             continue
-        heading = re.match(r"^(#{2,3})\s+(.+)$", raw)
+        heading = re.match(r"^(#{2,4})\s+(.+)$", raw)
         if heading:
             list_kind = None
             level = len(heading.group(1)) - 1
@@ -331,6 +397,12 @@ def add_markdown_body(document, source, lines, headings):
                 caption = document.add_paragraph(image.group(1), style="Daon Caption")
                 caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
             index += 1
+            continue
+        if raw.lstrip().startswith("|"):
+            list_kind = None
+            rows, index = parse_table(lines, index)
+            if rows:
+                add_table(document, rows)
             continue
         quote = re.match(r"^>\s*(.+)$", raw)
         if quote:
@@ -388,8 +460,56 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def find_soffice():
+    configured = os.environ.get("DAON_SOFFICE")
+    for candidate in ((configured,) if configured else ()) + SOFFICE_CANDIDATES:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return shutil.which("soffice")
+
+
+def convert_pdf(docx, out_dir, soffice):
+    """임시 폴더에서 변환하고 성공했을 때만 out_dir로 옮긴다. 실패하면 기존 PDF를 그대로 둔다."""
+    with tempfile.TemporaryDirectory() as work:
+        profile = Path(work) / "profile"
+        result = subprocess.run(
+            [soffice, f"-env:UserInstallation={profile.as_uri()}", "--headless", "--convert-to", "pdf", "--outdir", work, str(docx)],
+            capture_output=True, timeout=300, check=False,
+        )
+        produced = Path(work) / f"{docx.stem}.pdf"
+        if result.returncode != 0 or not produced.is_file() or not produced.read_bytes().startswith(b"%PDF-"):
+            raise SystemExit(f"PDF_CONVERSION_FAILED: {docx.name}")
+        target = out_dir / produced.name
+        shutil.move(str(produced), target)
+        return target
+
+
+def build_pdf():
+    soffice = find_soffice()
+    if soffice is None:
+        raise SystemExit("PDF_CONVERTER_NOT_FOUND: LibreOffice soffice가 필요합니다 (DAON_SOFFICE로 지정 가능)")
+    for document_id, _, _ in DOCS:
+        convert_pdf(DIST / f"{document_id}.docx", DIST, soffice)
+
+
+def publish_images(document_id):
+    """원본 images/의 번호 그림(png)만 공개 사본으로 복사하고, 사라진 그림은 공개 사본에서도 지운다."""
+    source = ROOT / "docs" / "manual" / document_id / "images"
+    target = PUBLIC / "images"
+    target.mkdir(parents=True, exist_ok=True)
+    wanted = {path.name for path in source.glob("*.png") if IMAGE_NAME.match(path.name)} if source.is_dir() else set()
+    for path in target.iterdir():
+        if path.name not in wanted:
+            path.unlink()
+    for name in sorted(wanted):
+        shutil.copyfile(source / name, target / name)
+
+
 def build_manifest():
     PUBLIC.mkdir(parents=True, exist_ok=True)
+    for document_id in RETIRED:
+        for extension in ("md", "docx", "pdf"):
+            (PUBLIC / f"{document_id}.{extension}").unlink(missing_ok=True)
     documents = []
     for document_id, title, summary in DOCS:
         source_md = ROOT / "docs" / "manual" / document_id / "index.md"
@@ -397,6 +517,7 @@ def build_manifest():
         shutil.copyfile(source_md, public_md)
         for extension in ("docx", "pdf"):
             shutil.copyfile(DIST / f"{document_id}.{extension}", PUBLIC / f"{document_id}.{extension}")
+        publish_images(document_id)
         assets = {}
         for kind, extension in EXTENSIONS.items():
             path = PUBLIC / f"{document_id}.{extension}"
@@ -428,13 +549,15 @@ def build_manifest():
     (PUBLIC / "manifest.json").write_text(payload, encoding="utf-8", newline="\n")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("docx", "manifest"))
-    args = parser.parse_args()
-    if args.mode == "docx":
+    parser.add_argument("mode", choices=("docx", "pdf", "manifest", "all"))
+    args = parser.parse_args(argv)
+    if args.mode in ("docx", "all"):
         build_docx()
-    else:
+    if args.mode in ("pdf", "all"):
+        build_pdf()
+    if args.mode in ("manifest", "all"):
         build_manifest()
 
 

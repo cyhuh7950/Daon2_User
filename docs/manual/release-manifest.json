@@ -1,98 +1,36 @@
 {
   "schema_version": 1,
-  "release_version": "1.0.0",
-  "released_at": "2026-08-20",
+  "release_version": "2.0.0",
+  "released_at": "2026-11-11",
   "language": "ko-KR",
   "documents": [
     {
-      "document_id": "daon-getting-started",
-      "title": "Daon Getting Started",
-      "summary": "Notebook의 첫 작업 흐름과 안전한 운영",
-      "auth_scope": "public_and_authenticated",
-      "version": "1.0.0",
-      "language": "ko-KR",
-      "assets": {
-        "markdown": {
-          "filename": "daon-getting-started.md",
-          "href": "/manual/daon-getting-started.md",
-          "bytes": 23219,
-          "sha256": "1f81b570497d1dc3fe12a71403640b1e4182c29f97549797f2dcba56bb4a1b74",
-          "mime": "text/markdown; charset=utf-8"
-        },
-        "docx": {
-          "filename": "daon-getting-started.docx",
-          "href": "/manual/daon-getting-started.docx",
-          "bytes": 47484,
-          "sha256": "1cf24e8780cb900c178588bdb310b2fb0983bc3d66c728f4d6afdf2e15a88241",
-          "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        },
-        "pdf": {
-          "filename": "daon-getting-started.pdf",
-          "href": "/manual/daon-getting-started.pdf",
-          "bytes": 365717,
-          "sha256": "505e3981f5435f918cee7beedb92adcf7325d581f85f372684f2eebe231b31b3",
-          "mime": "application/pdf"
-        }
-      }
-    },
-    {
       "document_id": "daon-user-manual",
       "title": "Daon 사용자 설명서",
-      "summary": "Workspace 화면·설정·운영 절차",
+      "summary": "처음 시작하기부터 화면별 설명과 관리자 절차까지",
       "auth_scope": "public_and_authenticated",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "language": "ko-KR",
       "assets": {
         "markdown": {
           "filename": "daon-user-manual.md",
           "href": "/manual/daon-user-manual.md",
-          "bytes": 52051,
-          "sha256": "6b8cb2e72e53945bac194608f2c99274d3416fa7adfa58d2b664633fd83420a0",
+          "bytes": 71570,
+          "sha256": "5ef4add2e3b39e17798570a7144dcd7babb69fa07b12f31f86cf570cbc94bca8",
           "mime": "text/markdown; charset=utf-8"
         },
         "docx": {
           "filename": "daon-user-manual.docx",
           "href": "/manual/daon-user-manual.docx",
-          "bytes": 59082,
-          "sha256": "81156dba6efe4da052d8a9c722cd0dffa484af0d8056ca554062d744854c7091",
+          "bytes": 1439970,
+          "sha256": "82727cdc3593fae9c68d17fe6d415a3c0530cc33945f27ba8a98c366e4cb479b",
           "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         },
         "pdf": {
           "filename": "daon-user-manual.pdf",
           "href": "/manual/daon-user-manual.pdf",
-          "bytes": 610118,
-          "sha256": "ba5a6b01995ebbde5beceb01d672f95d34ba1fe40761b95e8c1cf06d13f79fba",
-          "mime": "application/pdf"
-        }
-      }
-    },
-    {
-      "document_id": "daon-knowledge-llm-guide",
-      "title": "Daon 지식·LLM 활용 가이드",
-      "summary": "지식·Provider·Citation 품질 운영 기준",
-      "auth_scope": "public_and_authenticated",
-      "version": "1.0.0",
-      "language": "ko-KR",
-      "assets": {
-        "markdown": {
-          "filename": "daon-knowledge-llm-guide.md",
-          "href": "/manual/daon-knowledge-llm-guide.md",
-          "bytes": 21798,
-          "sha256": "8f085dc8721cb5854a8fcccdeaf0758c0157ab3f523a4a8b5272f99db7bcda9c",
-          "mime": "text/markdown; charset=utf-8"
-        },
-        "docx": {
-          "filename": "daon-knowledge-llm-guide.docx",
-          "href": "/manual/daon-knowledge-llm-guide.docx",
-          "bytes": 47529,
-          "sha256": "4d8a478343e2c25567ca917062bb1a03fe998088cf438883c1967b1b072bf526",
-          "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        },
-        "pdf": {
-          "filename": "daon-knowledge-llm-guide.pdf",
-          "href": "/manual/daon-knowledge-llm-guide.pdf",
-          "bytes": 356622,
-          "sha256": "4945ff33294e09c6790aa21280509ef2dedced1693a639854384d1f3081daa3a",
+          "bytes": 2139326,
+          "sha256": "076ac7cfb607092312cb7d4e9316bbd46ae2cc08a3ece56ea75f081bb43c1169",
           "mime": "application/pdf"
         }
       }

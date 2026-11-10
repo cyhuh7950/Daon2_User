@@ -15,6 +15,7 @@ import "./studio-icon.css";
 import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
 import { approvedKnowledgeCitationLabel, citationKeys, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
+import { ManualMarkdown } from "./manual-markdown.jsx";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -240,32 +241,6 @@ const ICON_NAMES = Object.freeze({ source: "source_stack", conversation: "chat",
 const PANE_ICONS = Object.freeze({
   "product-pane-sources": "source", "product-pane-conversation": "conversation", "product-pane-studio": "studio",
 });
-
-function readableManualLine(line) {
-  return line
-    .replace(/!\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\*\*([^*]+)\*\*/gu, "$1")
-    .replace(/`([^`]+)`/gu, "$1");
-}
-
-function ManualMarkdown({ text }) {
-  return <div className="manual-reader-body">
-    {text.split("\n").map((line, index) => {
-      const value = readableManualLine(line.trim());
-      if (!value) return <span className="manual-reader-space" aria-hidden="true" key={index} />;
-      if (/^!\[/u.test(line.trim())) return <p className="manual-reader-caption" key={index}>{value}</p>;
-      const heading = /^(#{1,3})\s+(.+)$/u.exec(value);
-      if (heading) return heading[1].length === 1 ? <h3 key={index}>{heading[2]}</h3> : <h4 key={index}>{heading[2]}</h4>;
-      const ordered = /^\d+\.\s+(.+)$/u.exec(value);
-      if (ordered) return <p className="manual-reader-list" key={index}><span>{value.slice(0, value.indexOf(" "))}</span>{ordered[1]}</p>;
-      const bullet = /^-\s+(.+)$/u.exec(value);
-      if (bullet) return <p className="manual-reader-list" key={index}><span>•</span>{bullet[1]}</p>;
-      if (value.startsWith("> ")) return <aside key={index}>{value.slice(2)}</aside>;
-      return <p key={index}>{value}</p>;
-    })}
-  </div>;
-}
 
 const SOURCE_STATE_LABELS = Object.freeze({
   registered: "등록됨",

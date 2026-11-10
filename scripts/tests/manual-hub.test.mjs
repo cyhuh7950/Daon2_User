@@ -7,37 +7,16 @@ const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8
 
 const manifest = {
   schema_version: 1,
-  release_version: "1.0.0",
-  released_at: "2026-08-16",
+  release_version: "2.0.0",
+  released_at: "2026-11-11",
   language: "ko-KR",
   documents: [
     {
-      document_id: "daon-getting-started",
-      title: "Daon Getting Started",
-      summary: "첫 작업 흐름",
-      auth_scope: "public_and_authenticated",
-      version: "1.0.0",
-      language: "ko-KR",
-      assets: {
-        markdown: { filename: "daon-getting-started.md", href: "/manual/daon-getting-started.md", bytes: 4, sha256: "a".repeat(64), mime: "text/markdown; charset=utf-8" },
-        docx: { filename: "daon-getting-started.docx", href: "/manual/daon-getting-started.docx", bytes: 4, sha256: "b".repeat(64), mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-        pdf: { filename: "daon-getting-started.pdf", href: "/manual/daon-getting-started.pdf", bytes: 4, sha256: "c".repeat(64), mime: "application/pdf" },
-      },
-    },
-    {
-      document_id: "daon-user-manual", title: "Daon 사용자 설명서", summary: "전체 절차", auth_scope: "public_and_authenticated", version: "1.0.0", language: "ko-KR",
+      document_id: "daon-user-manual", title: "Daon 사용자 설명서", summary: "전체 절차", auth_scope: "public_and_authenticated", version: "2.0.0", language: "ko-KR",
       assets: {
         markdown: { filename: "daon-user-manual.md", href: "/manual/daon-user-manual.md", bytes: 4, sha256: "d".repeat(64), mime: "text/markdown; charset=utf-8" },
         docx: { filename: "daon-user-manual.docx", href: "/manual/daon-user-manual.docx", bytes: 4, sha256: "e".repeat(64), mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
         pdf: { filename: "daon-user-manual.pdf", href: "/manual/daon-user-manual.pdf", bytes: 4, sha256: "f".repeat(64), mime: "application/pdf" },
-      },
-    },
-    {
-      document_id: "daon-knowledge-llm-guide", title: "Daon 지식·LLM 활용 가이드", summary: "지식 활용", auth_scope: "public_and_authenticated", version: "1.0.0", language: "ko-KR",
-      assets: {
-        markdown: { filename: "daon-knowledge-llm-guide.md", href: "/manual/daon-knowledge-llm-guide.md", bytes: 4, sha256: "1".repeat(64), mime: "text/markdown; charset=utf-8" },
-        docx: { filename: "daon-knowledge-llm-guide.docx", href: "/manual/daon-knowledge-llm-guide.docx", bytes: 4, sha256: "2".repeat(64), mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-        pdf: { filename: "daon-knowledge-llm-guide.pdf", href: "/manual/daon-knowledge-llm-guide.pdf", bytes: 4, sha256: "3".repeat(64), mime: "application/pdf" },
       },
     },
   ],
@@ -57,7 +36,7 @@ async function withoutManualWebCrypto(run) {
 test("S33 WebCrypto 없는 HTTP 조건에서도 배포 원문과 DOCX PDF의 정확한 bytes hash를 검증한다", async (t) => {
   const api = await import("../../apps/web/lib/manual-api.js");
   const current = JSON.parse(await read("apps/web/public/manual/manifest.json"));
-  const document = current.documents.find((item) => item.document_id === "daon-getting-started");
+  const document = current.documents.find((item) => item.document_id === "daon-user-manual");
   await withoutManualWebCrypto(async () => {
     for (const kind of ["markdown", "docx", "pdf"]) await t.test(kind, async () => {
       const asset = document.assets[kind];
@@ -98,7 +77,7 @@ test("S33 HTTP 다운로드는 음성 25MiB 한도를 물려받지 않고 설명
       asset.bytes = size;
       asset.sha256 = createHash("sha256").update(original).digest("hex");
       let calls = 0;
-      const result = await api.downloadManualAsset("daon-getting-started", "pdf", {
+      const result = await api.downloadManualAsset("daon-user-manual", "pdf", {
         manifest: current,
         fetchImpl: async (url) => {
           calls += 1; assert.equal(url, asset.href);
@@ -113,7 +92,7 @@ test("S33 HTTP 다운로드는 음성 25MiB 한도를 물려받지 않고 설명
     await t.test("32MiB+1 declared bytes rejects before fetch", async () => {
       const current = structuredClone(manifest); current.documents[0].assets.pdf.bytes = 32 * 1024 * 1024 + 1;
       let calls = 0;
-      await assert.rejects(api.downloadManualAsset("daon-getting-started", "pdf", {
+      await assert.rejects(api.downloadManualAsset("daon-user-manual", "pdf", {
         manifest: current, fetchImpl: async () => { calls += 1; return new Response(); },
       }), /MANUAL_MANIFEST_INVALID/u);
       assert.equal(calls, 0);
@@ -130,7 +109,7 @@ test("S33 WebCrypto 없는 DOCX PDF도 hash MIME byte 불일치를 계속 거부
       asset.bytes = original.byteLength;
       asset.sha256 = createHash("sha256").update(original).digest("hex");
       const wrong = original.slice(); wrong[0] = 1;
-      await assert.rejects(api.downloadManualAsset("daon-getting-started", kind, {
+      await assert.rejects(api.downloadManualAsset("daon-user-manual", kind, {
         manifest: current, fetchImpl: async () => new Response(fault === "hash" ? wrong : fault === "bytes" ? original.slice(1) : original, {
           headers: { "Content-Type": fault === "mime" ? "application/octet-stream" : asset.mime },
         }),
@@ -142,7 +121,7 @@ test("S33 WebCrypto 없는 DOCX PDF도 hash MIME byte 불일치를 계속 거부
 test("Manual Hub client는 allowlisted same-origin manifest만 읽고 bytes/hash/MIME를 검증한다", async () => {
   const api = await import("../../apps/web/lib/manual-api.js");
   const encoder = new TextEncoder();
-  const markdownText = "# Daon Getting Started\n\n본문";
+  const markdownText = "# Daon 사용자 설명서\n\n본문";
   const body = encoder.encode(markdownText);
   const digest = await crypto.subtle.digest("SHA-256", body);
   const sha256 = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
@@ -156,9 +135,9 @@ test("Manual Hub client는 allowlisted same-origin manifest만 읽고 bytes/hash
     return new Response(body, { headers: { "Content-Type": "text/markdown; charset=utf-8" } });
   };
   const projected = await api.getManualManifest({ fetchImpl });
-  const document = await api.readManualDocument("daon-getting-started", { fetchImpl, manifest: projected });
+  const document = await api.readManualDocument("daon-user-manual", { fetchImpl, manifest: projected });
   assert.equal(document.text, markdownText);
-  assert.deepEqual(requests, ["/manual/manifest.json", "/manual/daon-getting-started.md"]);
+  assert.deepEqual(requests, ["/manual/manifest.json", "/manual/daon-user-manual.md"]);
   await api.getManualManifest({ fetchImpl: async () => new Response(JSON.stringify(safeManifest), { headers: { "Content-Type": "application/json; charset=UTF-8" } }) });
 
   for (const bad of [
@@ -189,14 +168,25 @@ test("Manual Hub client는 allowlisted same-origin manifest만 읽고 bytes/hash
     /MANUAL_MANIFEST_INVALID/u,
   );
 
-  const mixedVersion = structuredClone(safeManifest);
-  mixedVersion.documents[1].version = "9.9.9";
-  await assert.rejects(
-    api.getManualManifest({ fetchImpl: async () => Response.json(mixedVersion) }),
-    /MANUAL_MANIFEST_INVALID/u,
-  );
+  // 2.0.0부터 한 권이다. 은퇴한 문서가 섞이거나 문서가 여러 개이거나 옛 판이면 거부한다.
+  const retired = structuredClone(safeManifest);
+  const extra = structuredClone(retired.documents[0]);
+  extra.document_id = "daon-getting-started";
+  for (const [kind, extension] of [["markdown", "md"], ["docx", "docx"], ["pdf", "pdf"]]) {
+    extra.assets[kind].filename = `daon-getting-started.${extension}`;
+    extra.assets[kind].href = `/manual/daon-getting-started.${extension}`;
+  }
+  retired.documents.push(extra);
+  const onlyRetired = structuredClone(retired);
+  onlyRetired.documents = [extra];
+  const oldRelease = structuredClone(safeManifest);
+  oldRelease.release_version = "1.0.0";
+  oldRelease.documents[0].version = "1.0.0";
+  for (const bad of [retired, onlyRetired, oldRelease]) {
+    await assert.rejects(api.getManualManifest({ fetchImpl: async () => Response.json(bad) }), /MANUAL_MANIFEST_INVALID/u);
+  }
   await assert.rejects(api.readManualDocument("unknown", { fetchImpl, manifest: projected }), /MANUAL_DOCUMENT_NOT_FOUND/u);
-  await assert.rejects(api.readManualDocument("daon-getting-started", {
+  await assert.rejects(api.readManualDocument("daon-user-manual", {
     manifest: projected,
     fetchImpl: async () => new Response(body, { headers: { "Content-Type": "text/html" } }),
   }), /MANUAL_CONTENT_INVALID/u);
@@ -214,7 +204,7 @@ test("Web 읽기는 caller duck manifest를 Network 전에 다시 검증한다",
     mutate(duckManifest);
     let fetchCount = 0;
     await assert.rejects(
-      api.readManualDocument("daon-getting-started", {
+      api.readManualDocument("daon-user-manual", {
         manifest: duckManifest,
         fetchImpl: async () => { fetchCount += 1; return new Response(); },
       }),
@@ -236,7 +226,7 @@ test("DOCX/PDF 다운로드는 caller duck manifest를 Network 전에 다시 검
     mutate(duckManifest);
     let fetchCount = 0;
     await assert.rejects(
-      api.downloadManualAsset("daon-getting-started", "docx", {
+      api.downloadManualAsset("daon-user-manual", "docx", {
         manifest: duckManifest,
         fetchImpl: async () => { fetchCount += 1; return new Response(); },
       }),
