@@ -27,6 +27,14 @@ function StepBar({ state }) {
   </ol>;
 }
 
+const MAX_SOURCE_FILES = 10;
+
+function scanWarning(warning) {
+  const [code, detail] = String(warning).split(":");
+  if (!code.startsWith("REQUIREMENTS_")) return null;
+  return msg(`authoring.review.warning.${code}`, { detail: detail ?? "" });
+}
+
 function Questions({ session, sources, adapter, onSubmit, busy }) {
   const [values, setValues] = useState({});
   const [connectors, setConnectors] = useState(null);
@@ -63,7 +71,7 @@ function Questions({ session, sources, adapter, onSubmit, busy }) {
     event.preventDefault();
     const answers = [];
     for (const q of session.pending_questions) {
-      if (q.kind === "source_ref" && values[q.key]) answers.push({ key: q.key, source_version_id: values[q.key] });
+      if (q.kind === "source_ref" && values[q.key]?.length) answers.push({ key: q.key, source_version_ids: values[q.key] });
       else if (q.kind === "knowledge_ref" && picked.length && connector && scope) {
         answers.push({ key: q.key, knowledge_ref: { connector_id: connector.connector_id, project_id: scope.project_id, work_package_id: scope.work_package_id, document_ids: picked } });
       } else if ((q.kind === "text" || q.kind === "structured") && values[q.key]?.trim()) answers.push({ key: q.key, value: values[q.key] });
@@ -75,8 +83,11 @@ function Questions({ session, sources, adapter, onSubmit, busy }) {
   return <form onSubmit={submit} aria-label={msg("authoring.questions")}>
     {session.pending_questions.map((q) => <fieldset key={q.key} style={{ border: 0, padding: 0, margin: "12px 0" }}>
       <legend><strong>{q.question}</strong>{q.required ? <span aria-label={msg("authoring.required")}> *</span> : <span> {msg("authoring.optional")}</span>}</legend>
-      {q.kind === "source_ref" && <div role="radiogroup" aria-label={q.question}>{sources.filter((s) => s.ready).map((s) => <label key={s.sourceVersionId} style={{ display: "block" }}>
-        <input type="radio" name={q.key} checked={values[q.key] === s.sourceVersionId} onChange={() => setValues((v) => ({ ...v, [q.key]: s.sourceVersionId }))} /> {s.filename ?? s.sourceId}</label>)}
+      {q.kind === "source_ref" && <div role="group" aria-label={q.question}>{sources.filter((s) => s.ready).map((s) => <label key={s.sourceVersionId} style={{ display: "block" }}>
+        <input type="checkbox" checked={(values[q.key] ?? []).includes(s.sourceVersionId)} onChange={() => setValues((v) => {
+          const list = v[q.key] ?? [];
+          return { ...v, [q.key]: list.includes(s.sourceVersionId) ? list.filter((id) => id !== s.sourceVersionId) : [...list, s.sourceVersionId].slice(0, MAX_SOURCE_FILES) };
+        })} /> {s.filename ?? s.sourceId}</label>)}
         {sources.every((s) => !s.ready) && <p>{msg("authoring.no_ready_source")}</p>}</div>}
       {q.kind === "knowledge_ref" && <div>
         {connectors === null ? <p role="status">…</p> : connectors.length === 0 ? <p>{msg("authoring.no_connectors")}</p> : <>
@@ -105,14 +116,18 @@ function Review({ session, onConfirm, busy }) {
   const [formats, setFormats] = useState(session.output_formats ?? ["docx"]);
   const baseOnly = session.analysis === "base_document";
   const choices = session.output_choices ?? ["docx", "pptx"];
+  const hasSourceNames = requirements.some((r) => r.source_name);
+  const scanWarnings = (session.analysis_warnings ?? []).map(scanWarning).filter(Boolean);
   const move = (index, delta) => setSections((list) => { const next = list.slice(); const j = index + delta; if (j < 0 || j >= next.length) return list; [next[index], next[j]] = [next[j], next[index]]; return next; });
   return <div>
     {baseOnly ? <p><small>{msg("authoring.review.base_only")}</small></p> : <>
     <h3>{msg("authoring.review.requirements", { count: requirements.length })}</h3>
     <p><small>{msg("authoring.review.requirements_help")}</small></p>
-    <div style={{ overflowX: "auto" }}><table className="studio-table"><thead><tr><th>ID</th><th>{msg("authoring.review.col.requirement")}</th><th>{msg("authoring.review.col.mandatory")}</th><th><span className="sr-only">{msg("authoring.review.col.delete")}</span></th></tr></thead>
+    {scanWarnings.map((text) => <p key={text} role="status">{text}</p>)}
+    <div style={{ overflowX: "auto" }}><table className="studio-table"><thead><tr><th>ID</th><th>{msg("authoring.review.col.requirement")}</th>{hasSourceNames && <th>{msg("authoring.review.col.source")}</th>}<th>{msg("authoring.review.col.mandatory")}</th><th><span className="sr-only">{msg("authoring.review.col.delete")}</span></th></tr></thead>
       <tbody>{requirements.map((r, i) => <tr key={r.id}><td>{r.id}</td>
         <td><input aria-label={msg("authoring.review.req.content", { id: r.id })} value={r.text} maxLength={1000} style={{ width: "100%" }} onChange={(event) => setRequirements((list) => list.map((x, j) => j === i ? { ...x, text: event.target.value } : x))} /></td>
+        {hasSourceNames && <td><small>{r.source_name ?? ""}</small></td>}
         <td><input type="checkbox" aria-label={msg("authoring.review.req.mandatory", { id: r.id })} checked={r.mandatory} onChange={() => setRequirements((list) => list.map((x, j) => j === i ? { ...x, mandatory: !x.mandatory } : x))} /></td>
         <td><button type="button" className="studio-icon-button" aria-label={msg("authoring.review.req.delete", { id: r.id })} onClick={() => setRequirements((list) => list.filter((_, j) => j !== i))}><StudioIcon name="delete" size={18} /></button></td></tr>)}</tbody></table></div>
     <button type="button" className="studio-btn" onClick={() => setRequirements((list) => [...list, { id: `REQ-${String(list.length + 1).padStart(3, "0")}-N`, text: msg("authoring.review.req.new"), mandatory: true, category: "", refs: [] }])}>{msg("authoring.review.req.add")}</button></>}
