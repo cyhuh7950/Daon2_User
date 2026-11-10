@@ -217,4 +217,3 @@ class PdfTextDocumentAdapter:
                 "trace_id": context.trace_id,
             },
         )
-
