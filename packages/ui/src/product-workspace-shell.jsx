@@ -2040,7 +2040,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     <main className="adaptive-workspace" data-product-workspace-state={viewState.status} data-workspace-id={workspaceId ?? ""}>
       <div className="workspace-surface" inert={modalView ? true : undefined} aria-hidden={modalView ? "true" : undefined}>
       <header className="workspace-header workspace-app-bar">
-        <div className="workspace-brand"><span className="daon-mark" aria-hidden="true">D</span><div><p className="eyebrow">DAON WORKSPACE · NOTEBOOK</p><h1>{notebookTitle || "Workspace"}</h1></div></div>
+        <div className="workspace-brand"><span className="daon-mark" aria-hidden="true">D</span><div><h1>{notebookTitle || "Workspace"}</h1></div></div>
         <div className="workspace-app-actions">
           <span className={`workspace-status status-${viewState.status}`} role="status" data-cloud-status={operationsStatus?.overall_status ?? "unknown"}><span className="status-dot" aria-hidden="true" />{sourceCompactState}<span className="status-connection"> · {cloudCompactState}</span></span>
           {adapter?.studioV2 ? <NotebookTools studio={adapter.studioV2} title={notebookTitle ?? ""} counts={{ sources: Array.isArray(viewState.sources) ? viewState.sources.length : undefined }} onOpenChatSettings={() => openModal("llm", settingsButtonRef.current)} /> : null}
@@ -2135,7 +2135,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 <button type="button" aria-pressed={viewState.selectedSource?.sourceVersionId === source.sourceVersionId} onClick={() => selectSource(source)} disabled={!source.ready}>
                   <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
-                <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}>⋮</button>
+                <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
                 {(new Set(["failed", "waiting_model"]).has(source.sourceState)
                   || (typeof source.filename === "string" && /\.(docx|pptx)$/u.test(source.filename.toLowerCase())
                     && source.sourceState === "needs_review" && source.processingState === "completed" && source.jobState === "completed")) && typeof adapter?.reprocessSource === "function"
@@ -2179,7 +2179,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                     etag: `"deletion:${request.request_id}:${request.version}"`,
                   } });
                   setSourceActionSafeError(null);
-                }}>⋮</button>
+                }}><StudioIcon name="more_vertical" size={18} /></button>
               </li>
             ))}
           </ul>
@@ -2227,7 +2227,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           {(() => {
             const turns = viewState.turns?.length ? viewState.turns
               : (viewState.answer ? [{ id: "legacy", question: null, answer: viewState.answer, error: null, pending: false }] : []);
-            if (!turns.length) return <div className="conversation-empty"><span className="conversation-orbit" aria-hidden="true">✦</span><h3>{viewState.selectedSource || selectedKnowledgeId ? "Source에 대해 무엇이든 물어보세요." : "Source를 추가한 뒤 질문하세요."}</h3><p>{viewState.selectedSource || selectedKnowledgeId ? "선택한 Source의 근거와 Citation을 사용해 답합니다." : "답변은 Source가 제공한 지식으로만 만듭니다. Source가 없으면 모델을 호출하지 않습니다."}</p></div>;
+            if (!turns.length) return <div className="conversation-empty"><span className="conversation-orbit" aria-hidden="true"><StudioIcon name="sparkle" size={28} /></span><h3>{viewState.selectedSource || selectedKnowledgeId ? "Source에 대해 무엇이든 물어보세요." : "Source를 추가한 뒤 질문하세요."}</h3><p>{viewState.selectedSource || selectedKnowledgeId ? "선택한 Source의 근거와 Citation을 사용해 답합니다." : "답변은 Source가 제공한 지식으로만 만듭니다. Source가 없으면 모델을 호출하지 않습니다."}</p></div>;
             const renderCitations = (answerValue) => (
           <div className="citation-row">{answerValue?.citations?.map((citation) => (
             <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => {
@@ -2424,7 +2424,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
       </div>
       {modalView ? <div className="workspace-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeModal(); }}>
         <section ref={modalRef} className={`workspace-modal workspace-modal-${modalView}`} role="dialog" aria-modal="true" aria-labelledby="workspace-modal-title" onKeyDown={(event) => trapDialogFocus(event, closeModal)}>
-          <header className="workspace-modal-header"><div><span className="section-kicker">WORKSPACE SETTINGS</span><h2 id="workspace-modal-title">{modalView === "question-step-up" ? "외부 질문 추가 인증" : modalView === "llm" ? "LLM 설정" : modalView === "output-version" ? "출력·버전" : modalView === "sync" ? "동기화·승인" : modalView === "organization-policy" ? "조직 정책" : modalView === "license" ? "라이선스" : modalView === "manual" ? "사용자 설명서" : "운영상태"}</h2></div><button className="modal-close" type="button" disabled={modalView === "output-version" && outputRequestRef.current?.kind === "save"} onClick={() => closeModal()} aria-label="닫기">×</button></header>
+          <header className="workspace-modal-header"><div><h2 id="workspace-modal-title">{modalView === "question-step-up" ? "외부 질문 추가 인증" : modalView === "llm" ? "LLM 설정" : modalView === "output-version" ? "출력·버전" : modalView === "sync" ? "동기화·승인" : modalView === "organization-policy" ? "조직 정책" : modalView === "license" ? "라이선스" : modalView === "manual" ? "사용자 설명서" : "운영상태"}</h2></div><button className="modal-close" type="button" disabled={modalView === "output-version" && outputRequestRef.current?.kind === "save"} onClick={() => closeModal()} aria-label="닫기">×</button></header>
           {modalView === "question-step-up" ? <div className="workspace-modal-content">
             <p>현재 선택한 자료와 질문의 외부 전송에 추가 인증이 필요합니다.</p>
             <label>현재 비밀번호<input ref={questionPasswordRef} type="password" autoComplete="off" aria-label="외부 질문 추가 인증 비밀번호" disabled={questionAuthPending} /></label>

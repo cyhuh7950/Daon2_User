@@ -452,7 +452,7 @@ export function AdminUserConsole({
   const latestRoleView = rolePanel?.latest?.workspaces.find((item) => item.workspace_id === rolePanel.workspaceId);
 
   return <main className="admin-user-page">
-    <header className="admin-user-header" inert={Boolean(modal)}><div><p>계정 및 권한 설정</p><h1>사용자·계정 관리</h1><small>일반 사용자를 등록하고 승인·수정·중지·삭제합니다.</small></div><div className="admin-user-header-actions"><button type="button" onClick={openCreate}>사용자 등록</button><a href="/notebooks">Notebook으로</a></div></header>
+    <header className="admin-user-header" inert={Boolean(modal)}><div><h1>사용자·계정 관리</h1><small>일반 사용자를 등록하고 승인·수정·중지·삭제합니다.</small></div><div className="admin-user-header-actions"><button type="button" onClick={openCreate}>사용자 등록</button><a href="/notebooks">Notebook으로</a></div></header>
     {!sessionValidated && <section className="admin-user-state" role="status" aria-busy="true">사용자 목록을 불러오는 중입니다.</section>}
     <div ref={protectedRoot} hidden={!sessionValidated} inert={!sessionValidated}
       aria-hidden={!sessionValidated ? "true" : undefined} data-session-validated={sessionValidated ? "true" : "false"}>

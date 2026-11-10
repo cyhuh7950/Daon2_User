@@ -304,3 +304,12 @@ body { word-break: keep-all; overflow-wrap: break-word; }
 select, select option, select optgroup { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); }
 /* 모델·Provider 설정도 관리 화면 폭 기준에 맞춘다(전폭으로 퍼지지 않게) */
 .provider-settings-shell { box-sizing: border-box; width: 100%; max-width: 1280px; margin-inline: auto; }
+
+/* 화면 위쪽 이동 링크(Notebook으로·모델 연결 등)는 눌러야 하는 조작이므로 버튼 크기로 둔다 */
+.organization-settings-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0; }
+.organization-settings-navigation a, .common-settings-header > a, .screen-preference-home, .provider-settings-navigation :is(a, button) { display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-surface); color: var(--daon-color-text-primary); font-size: 14px; text-decoration: none; white-space: nowrap; }
+.organization-settings-navigation a:hover, .common-settings-header > a:hover, .screen-preference-home:hover, .provider-settings-navigation :is(a, button):hover:not(:disabled) { border-color: var(--daon-color-accent); color: var(--daon-color-accent); }
+/* 모델·Provider 설정 화면(전체 페이지)은 본문 14px, 보조 글씨만 12px */
+.provider-settings-shell:not(.is-embedded), .provider-settings-shell:not(.is-embedded) :is(p, label, input, select, textarea, button) { font-size: 14px; }
+.provider-settings-shell:not(.is-embedded) :is(small, .section-kicker) { font-size: 12px; }
+.provider-settings-shell:not(.is-embedded) :is(input, select, button) { min-height: 34px; }

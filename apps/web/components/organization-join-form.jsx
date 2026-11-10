@@ -100,7 +100,7 @@ export function OrganizationJoinForm({ api: suppliedApi = organizationApi }) {
 
   return <main className="organization-join-page" ref={root}>
     <section className="organization-join-card" aria-labelledby="organization-join-title">
-      <p className="eyebrow">DAON WORKSPACE</p><h1 id="organization-join-title">조직 가입</h1>
+      <h1 id="organization-join-title">조직 가입</h1>
       <button type="button" disabled={busy} onClick={() => { void refresh(); }}>상태 새로고침</button>
       {state === "loading" && <p role="status">본인 신청을 조회하는 중입니다.</p>}
       {message && <p role={state === "error" || state === "denied" ? "alert" : "status"}>{message}</p>}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { focusInitialModalControl, setBackgroundInert, trapModalTab } from "./workspace-interaction.js";
 import "./notebook-home.css";
+import { StudioIcon } from "./studio-icon.js";
 
 const STATUS_LABEL = Object.freeze({ empty: "비어 있음", active: "작업 중", attention: "확인 필요" });
 const SAFE_CREATE_ERRORS = new Set([
@@ -95,10 +96,10 @@ function NotebookCard({ notebook, viewMode, onOpenNotebook, onRequestDelete }) {
   const [menu, setMenu] = useState(false);
   return <div className={`notebook-card notebook-card-${viewMode}`}>
     <button className="notebook-card-main" type="button" onClick={() => onOpenNotebook?.({ notebookId: notebook.notebook_id, mode: "existing" })} aria-label={`${safeText(notebook.title)} Notebook 열기`}>
-    <span className="notebook-card-art" aria-hidden="true"><span>✦</span></span>
+    <span className="notebook-card-art" aria-hidden="true"><span><StudioIcon name="sparkle" size={28} /></span></span>
     <span className="notebook-card-body"><strong>{safeText(notebook.title)}</strong><span>Source {notebook.source_count} · 산출물 {notebook.output_count}</span><span>{new Date(notebook.updated_at).toLocaleString("ko-KR")} · {STATUS_LABEL[notebook.status] ?? "확인 필요"}</span></span>
     <span className="notebook-card-arrow" aria-hidden="true">›</span>
-    </button><button type="button" className="notebook-card-menu-button" aria-label={`${safeText(notebook.title)} 메뉴`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>⋮</button>{menu && <div className="notebook-card-menu" role="menu"><button role="menuitem" type="button" onClick={() => { setMenu(false); onRequestDelete?.(notebook); }}>노트북 삭제</button></div>}</div>;
+    </button><button type="button" className="notebook-card-menu-button" aria-label={`${safeText(notebook.title)} 메뉴`} aria-expanded={menu} onClick={() => setMenu((v) => !v)}><StudioIcon name="more_vertical" size={18} /></button>{menu && <div className="notebook-card-menu" role="menu"><button role="menuitem" type="button" onClick={() => { setMenu(false); onRequestDelete?.(notebook); }}>노트북 삭제</button></div>}</div>;
 }
 
 export function NotebookHome({ state = "ready", notebooks = [], errorCode = null, showUserManagement = false, showOrganizationPolicy = false, displayIdentity = null, tenantScope = null, scopeError = null, switchingScope = false, onSwitchTenant, onReload, onCreate, onDelete, onOpenNotebook, onOpenSetting, onLogout }) {
@@ -152,17 +153,17 @@ export function NotebookHome({ state = "ready", notebooks = [], errorCode = null
 
   return <main ref={homeRef} className="notebook-home" aria-busy={state === "loading"}>
     <div ref={surfaceRef} className="notebook-home-surface">
-    <header className="notebook-home-header"><a className="notebook-brand" href="#notebook-home" aria-label="Daon Notebook 홈"><span aria-hidden="true">◒</span>Daon Notebook</a><div className="notebook-session-identity" aria-label="현재 접속자">{displayIdentity || "현재 사용자"}</div><SettingsMenu onOpenSetting={onOpenSetting} onLogout={onLogout} showUserManagement={showUserManagement} showOrganizationPolicy={showOrganizationPolicy} tenantScope={tenantScope} scopeError={scopeError} switchingScope={switchingScope} onSwitchTenant={onSwitchTenant} onReload={onReload} /></header>
+    <header className="notebook-home-header"><a className="notebook-brand" href="#notebook-home" aria-label="Daon Notebook 홈"><span aria-hidden="true">D</span>Daon Notebook</a><div className="notebook-session-identity" aria-label="현재 접속자">{displayIdentity || "현재 사용자"}</div><SettingsMenu onOpenSetting={onOpenSetting} onLogout={onLogout} showUserManagement={showUserManagement} showOrganizationPolicy={showOrganizationPolicy} tenantScope={tenantScope} scopeError={scopeError} switchingScope={switchingScope} onSwitchTenant={onSwitchTenant} onReload={onReload} /></header>
     <section id="notebook-home" className="notebook-home-content" aria-labelledby="notebook-home-title">
       <div className="notebook-home-intro"><div><h1 id="notebook-home-title">지식에서 결과까지, 하나의 Notebook에서</h1></div><button ref={createOpenerRef} className="notebook-create-button" type="button" onClick={() => setCreating(true)}>＋ 새 Notebook</button></div>
       <div className="notebook-home-tools">
-        <label className="notebook-search" htmlFor="notebook-search"><span aria-hidden="true">⌕</span><input id="notebook-search" type="search" placeholder="Notebook 제목 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        <label className="notebook-search" htmlFor="notebook-search"><span aria-hidden="true"><StudioIcon name="search" size={16} /></span><input id="notebook-search" type="search" placeholder="Notebook 제목 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <label className="sr-only" htmlFor="notebook-sort">정렬</label><select id="notebook-sort" value={sortMode} onChange={(event) => setSortMode(event.target.value)}><option value="updated">최근 수정</option><option value="title">제목</option></select>
         <div className="notebook-view-toggle" role="group" aria-label="보기 방식"><button className={viewMode === "grid" ? "selected" : ""} aria-pressed={viewMode === "grid"} type="button" onClick={() => setViewMode("grid")}>▦</button><button className={viewMode === "list" ? "selected" : ""} aria-pressed={viewMode === "list"} type="button" onClick={() => setViewMode("list")}>☷</button></div>
       </div>
       {state === "loading" && <div id="notebook-home-loading" className="notebook-state" role="status"><span className="notebook-spinner" />Notebook을 불러오는 중입니다.</div>}
       {state === "error" && <div id="notebook-home-error" className="notebook-state notebook-error" role="alert"><strong>Notebook을 불러오지 못했습니다.</strong><span>{safeText(errorCode) || "NOTEBOOK_UNAVAILABLE"}</span><button type="button" onClick={onReload}>다시 시도</button></div>}
-      {state === "ready" && notebooks.length === 0 && <div id="notebook-home-empty" className="notebook-state"><span className="notebook-empty-symbol" aria-hidden="true">＋</span><strong>첫 Notebook을 만들어 보세요</strong><span>제목과 선택 설명만 입력하면 빈 작업 공간이 열립니다.</span><button type="button" onClick={(event) => { createOpenerRef.current = event.currentTarget; setCreating(true); }}>새 Notebook</button></div>}
+      {state === "ready" && notebooks.length === 0 && <div id="notebook-home-empty" className="notebook-state"><span className="notebook-empty-symbol" aria-hidden="true"><StudioIcon name="add" size={28} /></span><strong>첫 Notebook을 만들어 보세요</strong><span>제목과 선택 설명만 입력하면 빈 작업 공간이 열립니다.</span><button type="button" onClick={(event) => { createOpenerRef.current = event.currentTarget; setCreating(true); }}>새 Notebook</button></div>}
       {state === "ready" && notebooks.length > 0 && <><p className="notebook-result-count" aria-live="polite">Notebook {visible.length}개</p><div className={`notebook-collection ${viewMode}`}>
         {visible.map((notebook) => <NotebookCard key={notebook.notebook_id} notebook={notebook} viewMode={viewMode} onOpenNotebook={onOpenNotebook} onRequestDelete={setDeletingNotebook} />)}
         {visible.length === 0 && <div className="notebook-state"><strong>검색 결과가 없습니다.</strong><span>다른 제목으로 검색해 보세요.</span></div>}

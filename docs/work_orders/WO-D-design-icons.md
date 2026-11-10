@@ -31,7 +31,7 @@
 ### T-D-01. 아이콘 세트 (이번 작업에서 구현 — 아래 §3)
 
 - **파일**: `packages/ui/src/studio-icon-data.js`(순수 데이터), `studio-icon.js`(컴포넌트, JSX 없이 `createElement`), `studio-icon.css`, `scripts/build-studio-icon-preview.mjs`(미리보기 HTML 생성), `scripts/tests/studio-icon.test.mjs`, `packages/ui/package.json` exports 항목.
-- **아이콘 목록(36개)**
+- **아이콘 목록(37개: 2026-11-10 search 추가)**
   - 유형(10): `audio_overview`, `slides`, `video_overview`, `mind_map`, `report`, `flashcards`, `quiz`, `infographic`, `data_table`, `memo`
   - 동작(26): `add`, `close`, `more_vertical`, `share`, `edit`, `download`, `info_sparkle`(프롬프트 및 소스 보기), `delete`, `play`, `panel_toggle`, `settings_sliders`, `copy`, `pin`(메모에 저장), `chart`(애널리틱스), `history`, `refresh`, `check`, `warning`, `chat`, `spinner`, `sparkle`, `source_stack`, `cancel`, `chevron_right`, `chevron_down`, `upload`
 - **규격**: 24×24 viewBox, `fill="none"`, 선 `currentColor`, `stroke-width 1.75`, `stroke-linecap/linejoin round`. 일부 요소(스파클·점·재생)는 `fill`. 접근성: 장식용은 `aria-hidden="true"`, 단독 사용은 `role="img"`+`aria-label`.
