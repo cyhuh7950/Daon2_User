@@ -525,6 +525,17 @@ class PostgresDocumentIndexTests(unittest.TestCase):
         self.assertEqual(wrong_version, ())
         self.assertEqual(self.index.search(self.context, source_id="source-cp3", source_version_id="source-version-cp3", query="unrelated weather"), ())
 
+    def test_pdf_text_indexes_every_page_even_when_facts_are_located(self) -> None:
+        result = ready_result()
+        self.index.index_result(self.context, DocumentUnderstandingResult(
+            result.source_id, result.source_version_id, result.status, result.substates,
+            result.semantic, result.parser, {**result.lineage, "source_format": "pdf_text"},
+        ))
+
+        chunks = self.cloud.connection.index_payload["chunks"]
+        self.assertEqual([chunk["page"] for chunk in chunks], [1, 2])
+        self.assertTrue(all(chunk["evidence_kind"] == "parser_page_grounded_fallback" for chunk in chunks))
+
     def test_ready_paraphrase_uses_parser_page_text_as_grounded_fallback(self) -> None:
         self.index.index_result(self.context, paraphrased_ready_result())
 

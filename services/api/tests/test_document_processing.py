@@ -151,7 +151,7 @@ class FailureEvidenceServiceTests(unittest.TestCase):
             def resolve(inner, context, capability):
                 with super().resolve(context, capability) as model:
                     yield model
-                raise WorkspaceModelUnavailable("WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", retryable=True)
+                raise WorkspaceModelUnavailable("PROVIDER_CONNECTION_UNAVAILABLE", retryable=True)
         class Repository(RecordingRepository):
             def fail_with_readiness(inner, context, run_id, code, *, retryable, failure_evidence):
                 inner.events.append(("readiness-fail", (run_id, code, retryable, failure_evidence)))
@@ -162,9 +162,9 @@ class FailureEvidenceServiceTests(unittest.TestCase):
         with self.assertRaises(DocumentUnderstandingError) as caught:
             service.process_existing(context, source_id="source-cp3", processing_run_id="run-bound")
         self.assertEqual((caught.exception.code, caught.exception.status, caught.exception.retryable),
-                         ("WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", 503, True))
+                         ("PROVIDER_CONNECTION_UNAVAILABLE", 503, True))
         self.assertEqual(repository.events[-1], ("readiness-fail",
-            ("run-bound", "WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", True, None)))
+            ("run-bound", "PROVIDER_CONNECTION_UNAVAILABLE", True, None)))
 
     def test_optional_failure_sink_collects_unknown_without_inventing_role(self):
         error = DocumentUnderstandingError("UNDERSTANDING_PROVIDER_UNAVAILABLE", status=503, retryable=True)
@@ -249,7 +249,7 @@ class FailureEvidenceServiceTests(unittest.TestCase):
                     def resolve(inner, context, capability):
                         calls.append(capability)
                         if capability == failing:
-                            raise WorkspaceModelUnavailable("WORKSPACE_MODEL_DEFAULT_UNAVAILABLE")
+                            raise WorkspaceModelUnavailable("PROVIDER_CONNECTION_UNAVAILABLE")
                         with super().resolve(context, capability) as model:
                             yield model
                 repository = RecordingRepository()
@@ -261,7 +261,7 @@ class FailureEvidenceServiceTests(unittest.TestCase):
                 evidence = getattr(caught.exception, "failure_evidence", None)
                 self.assertIsNotNone(evidence, "실 resolver 진입 역할 근거 미구현")
                 self.assertEqual((evidence.capability, evidence.dependency_connection_id, evidence.failure_kind), (failing, None, "unknown"))
-                self.assertEqual(repository.events[-1], ("fail", ("run-bound", "WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", False)))
+                self.assertEqual(repository.events[-1], ("fail", ("run-bound", "PROVIDER_CONNECTION_UNAVAILABLE", False)))
 
     def test_unclassified_error_is_not_upgraded_by_code_or_retryable_and_fail_contract_stays_legacy(self):
         error = DocumentUnderstandingError("UNDERSTANDING_PROVIDER_UNAVAILABLE", status=503, retryable=True)
