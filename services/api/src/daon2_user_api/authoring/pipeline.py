@@ -21,14 +21,15 @@ from ..question_external_evidence import ExternalEvidenceError, build_plan_promp
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import split_sentences, summarize, tag_section
-from .rfp import extract_requirements
-from .session import SESSION_SCHEMA, transition
+from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
+from .session import SESSION_SCHEMA, source_versions, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
 INLINE_REF = re.compile(r"[ \t]*\[[SK][0-9]+(?:[ \t]*,[ \t]*[SK][0-9]+)*\]")
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
+UNIT_REQUIREMENT_CHARS = 8000  # 소목차 하나를 쓰는 요청이 모델 호출 제한을 넘지 않게 한다.
 _TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
@@ -165,8 +166,13 @@ class AuthoringPipeline:
         return ConnectorContext(ctx.context.tenant_id, ctx.context.actor_id, ctx.context.trace_id, ctx.context.workspace_id, ctx.context.policy_version)
 
     def _rfp_pack(self, ctx: GenerationContext, session: Mapping[str, Any]) -> ContextPack:
-        version = session["inputs"]["rfp_document"]["source_version_id"]
-        return build_pack(self._reader.read(ctx.context, [version]), budget_chars=self._context_chars)
+        return build_pack(self._reader.read(ctx.context, source_versions(session["inputs"]["rfp_document"])), budget_chars=self._context_chars)
+
+    def _scan_rfp(self, ctx: GenerationContext, session: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+        """요구사항은 파일 전체를 구간별로 읽어 뽑는다."""
+        versions = source_versions(session["inputs"]["rfp_document"])
+        sources = self._reader.read(ctx.context, versions, max_chars_per_source=MAX_WINDOWS * self._context_chars)
+        return scan_requirements(sources, self._llm, ctx.context, budget_chars=self._context_chars, progress=ctx.progress, cancel_check=ctx.cancel_check)
 
     # ------------------------------------------------------------------ 분석(요구사항 + 계획)
     def analyze(self, ctx: GenerationContext, session: dict[str, Any]) -> dict[str, Any]:
@@ -203,9 +209,12 @@ class AuthoringPipeline:
     def _analyze_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate) -> dict[str, Any]:
         """LLM이 이번 문서에 맞는 소목차를 정한다(K-3, K-4). 사람은 review 상태에서 확정한다."""
         requirements: list[dict[str, Any]] = []
+        scan_warnings: list[str] = []
         if template.analysis == "rfp_requirements":
             ctx.progress(15, "RFP 읽기")
-            requirements = session["requirements"] or extract_requirements(self._rfp_pack(ctx, session), self._llm, ctx.context, progress=ctx.progress)
+            requirements = session["requirements"]
+            if not requirements:
+                requirements, scan_warnings = self._scan_rfp(ctx, session)
         ctx.cancel_check()
         ctx.progress(55, "목차 설계")
         goal = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
@@ -226,7 +235,7 @@ class AuthoringPipeline:
         if plan and requirements:
             plan[0]["requirement_ids"] = [r["id"] for r in requirements]
         updated = copy.deepcopy(session)
-        updated.update({"requirements": requirements, "plan": {"sections": plan, "assumptions": []}, "units": units, "knowledge": [], "analysis_warnings": []})
+        updated.update({"requirements": requirements, "plan": {"sections": plan, "assumptions": []}, "units": units, "knowledge": [], "analysis_warnings": scan_warnings})
         return transition(updated, "review")
 
     def _plan_unit(self, ctx: GenerationContext, unit: Mapping[str, Any], target: Any) -> tuple[tuple[str, ...], ...]:
@@ -266,7 +275,7 @@ class AuthoringPipeline:
         inputs = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         requirements = {r["id"]: r for r in session["requirements"]}
         section_ids = next((s["requirement_ids"] for s in session["plan"]["sections"] if s["key"] == unit["section_key"]), [])
-        requirement_lines = "\n".join(f"- {requirements[r]['text']}" for r in section_ids if r in requirements)
+        requirement_lines = "\n".join(f"- {requirements[r]['text']}" for r in section_ids if r in requirements)[:UNIT_REQUIREMENT_CHARS]
         earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         prompt = StudioPrompt(system=UNIT_SYSTEM, user=(
@@ -403,7 +412,7 @@ class AuthoringPipeline:
         final["document"] = {"template_id": template.template_id, "title": f"{template.title} 초안", "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
                              "checks": checks, "assumptions": session["assumptions"], "open_items": open_items, "notice": NOTICES[template.style], "style": template.style}
         used = [ref for unit in session["units"] for p in unit["paragraphs"] for ref in p["refs"]]
-        sources = [{"source_version_id": session["inputs"][template.source_input]["source_version_id"]}] if template.source_input else []
+        sources = [{"source_version_id": version} for version in source_versions(session["inputs"][template.source_input])] if template.source_input else []
         return GenerationResult(content={**final, "language": "ko", "warnings": warnings}, warnings=warnings, sources=sources, evidence=evidence_for(used, pack, knowledge),
                                 generated_with={"provider": provider[0], "model": provider[1], "connection": provider[2], "prompt_version": "authoring-unit-v1"})
 
@@ -527,7 +536,7 @@ class AuthoringPipeline:
         final["document"] = document
         content = {**final, "language": "ko", "warnings": warnings.items}
         evidence = evidence_for(used, pack, knowledge)
-        sources = [{"source_version_id": session["inputs"][template.source_input]["source_version_id"]}] if template.source_input else []
+        sources = [{"source_version_id": version} for version in source_versions(session["inputs"][template.source_input])] if template.source_input else []
         return GenerationResult(content=content, warnings=warnings.items, generated_with={"provider": getattr(generation, "provider_code", ""),
                                 "model": getattr(generation, "model_id", ""), "connection": getattr(generation, "connection_short_code", ""),
                                 "prompt_version": "authoring-section-v1"}, sources=sources, evidence=evidence)

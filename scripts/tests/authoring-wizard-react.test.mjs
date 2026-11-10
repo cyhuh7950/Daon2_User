@@ -71,6 +71,44 @@ test("템플릿 선택 → 세션 생성 → 필수 질문(소스 선택)이 보
   } finally { await view.close(); }
 });
 
+test("제안요청서를 여러 파일 고를 수 있고 고른 파일이 모두 전달된다", async () => {
+  const session = { ...base, state: "collecting", pending_questions: REQUIRED, requests: [{ request: "select_source", key: "rfp_document" }] };
+  const studio = fakeStudio([session, { ...session, state: "analyzing", pending_questions: [] }]);
+  const sources = [{ sourceVersionId: "sv-a", filename: "공고서.pdf", ready: true }, { sourceVersionId: "sv-b", filename: "안내서.pdf", ready: true }, { sourceVersionId: "sv-c", filename: "처리중.pdf", ready: false }];
+  const view = await mount(studio, { outputId: OID, sources });
+  try {
+    await view.flush();
+    const reactProps = (node) => node[Object.keys(node).find((key) => key.startsWith("__reactProps"))];
+    const inputs = () => findElements(view.container, (n) => n.tagName === "INPUT" && ["checkbox", "radio"].includes(reactProps(n)?.type));
+    assert.deepEqual(inputs().map((n) => reactProps(n).type), ["checkbox", "checkbox"]);
+    await view.act(async () => { reactProps(inputs()[0]).onChange(); });
+    await view.act(async () => { reactProps(inputs()[1]).onChange(); });
+    assert.deepEqual(inputs().map((n) => reactProps(n).checked), [true, true]);
+    await view.act(async () => { reactProps(inputs()[0]).onChange(); });
+    await view.act(async () => { reactProps(inputs()[0]).onChange(); });
+    const form = findElements(view.container, (n) => n.tagName === "FORM")[0];
+    await view.act(async () => { reactProps(form).onSubmit({ preventDefault() {} }); });
+    await view.flush();
+    const [, input] = studio.calls.find((c) => c[0] === "answer");
+    assert.deepEqual(input.answers, [{ key: "rfp_document", source_version_ids: ["sv-b", "sv-a"] }]);
+  } finally { await view.close(); }
+});
+
+test("검토 단계: 요구사항의 출처 파일과 분석 경고가 보인다", async () => {
+  const review = { ...base, state: "review", pending_questions: [], requests: [], revision_no: 3,
+    analysis_warnings: ["REQUIREMENTS_MODEL_PARTIAL:2", "KNOWLEDGE_TRUNCATED"],
+    requirements: [{ id: "REQ-001", text: "다중 인증", mandatory: true, category: "", refs: [], source_name: "공고서.pdf" }],
+    plan: { sections: [{ key: "a", title: "1. 사업의 이해", purpose: "", knowledge_refs: [], requirement_ids: ["REQ-001"] }], assumptions: [] } };
+  const view = await mount(fakeStudio([review]), { outputId: OID });
+  try {
+    await view.flush();
+    assert.ok(text(view).includes("출처 파일"));
+    assert.ok(text(view).includes("공고서.pdf"));
+    assert.ok(text(view).includes("구간 2개는 모델 분석에 실패"));
+    assert.ok(!text(view).includes("KNOWLEDGE_TRUNCATED"));
+  } finally { await view.close(); }
+});
+
 test("검토 단계: 요구사항 수정·삭제·섹션 순서 후 확정하면 review API가 확정으로 호출된다", async () => {
   const review = { ...base, state: "review", pending_questions: [], requests: [], revision_no: 3, requirements: [
     { id: "REQ-001", text: "다중 인증", mandatory: true, category: "", refs: [] }, { id: "REQ-002", text: "암호화", mandatory: true, category: "", refs: [] }],

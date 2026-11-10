@@ -56,7 +56,7 @@ class AuthoringService:
         template = self._registry.get(current["template_id"], context.tenant_id, current.get("template_version"))
         updated = S.apply_answers(template, current, answers, skip_remaining=skip_remaining)
         analyzing = updated["state"] == "analyzing"
-        versions = [updated["inputs"][template.source_input]["source_version_id"]] if analyzing and template.source_input and template.source_input in updated["inputs"] else []
+        versions = S.source_versions(updated["inputs"][template.source_input]) if analyzing and template.source_input and template.source_input in updated["inputs"] else []
         result = self._studio.authoring_apply(context, output_id, expected_revision, lambda _content: updated, enqueue_step="analyze" if analyzing else None,
                                               source_version_ids=versions)
         return {"output_id": output_id, **result}
@@ -101,7 +101,7 @@ class AuthoringService:
                 content["units"] = reconcile_units(content["units"], plan["sections"])
             return S.transition(content, "generating") if confirm else content
 
-        versions = [current["inputs"][template.source_input]["source_version_id"]] if template.source_input else []
+        versions = S.source_versions(current["inputs"][template.source_input]) if template.source_input else []
         result = self._studio.authoring_apply(context, output_id, expected_revision, mutate, enqueue_step="generate" if confirm else None,
                                               source_version_ids=versions if confirm else ())
         return {"output_id": output_id, **result}
@@ -109,7 +109,7 @@ class AuthoringService:
 
     def _versions(self, context: StudioContext, current: Mapping[str, Any]) -> list[str]:
         template = self._registry.get(current["template_id"], context.tenant_id, current.get("template_version"))
-        return [current["inputs"][template.source_input]["source_version_id"]] if template.source_input and template.source_input in current["inputs"] else []
+        return S.source_versions(current["inputs"][template.source_input]) if template.source_input and template.source_input in current["inputs"] else []
 
     def control(self, context: StudioContext, output_id: str, action: str, expected_revision: int | None, unit_key: str | None = None, material_refs: Sequence[str] | None = None) -> dict[str, Any]:
         """pause는 작업 중에도 받는다. 진행 중인 소목차까지 쓰고 멈춘다. resume은 다음 미완료 소목차부터 잇는다."""

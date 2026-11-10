@@ -15,6 +15,8 @@ from .templates import AuthoringError, AuthoringTemplate
 SESSION_SCHEMA = "studio.authoring_session.v1"
 STATES = ("collecting", "analyzing", "review", "generating", "paused", "completed", "failed", "cancelled")
 MAX_QUESTIONS = 3
+MAX_SOURCE_FILES = 10
+MAX_REQUIREMENTS = 1000
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TRANSITIONS = {"collecting": {"analyzing", "cancelled"}, "analyzing": {"review", "failed", "cancelled"}, "review": {"generating", "analyzing", "cancelled"},
                 "generating": {"completed", "failed", "cancelled", "paused"}, "paused": {"generating", "cancelled"}, "failed": {"analyzing", "generating"}, "completed": set(), "cancelled": set()}
@@ -62,6 +64,12 @@ def new_session(template: AuthoringTemplate, *, request_text: str | None = None,
     return session
 
 
+def source_versions(value: Mapping[str, Any]) -> list[str]:
+    """저장된 source_ref 입력의 버전 목록. 파일 1개로 시작한 이전 세션도 읽는다."""
+    many = value.get("source_version_ids")
+    return list(many) if isinstance(many, list) else [value["source_version_id"]]
+
+
 def validate_value(item: Mapping[str, Any], answer: Mapping[str, Any]) -> Any:
     kind = item["kind"]
     if kind in ("text", "structured"):
@@ -74,10 +82,11 @@ def validate_value(item: Mapping[str, Any], answer: Mapping[str, Any]) -> Any:
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
         return answer["value"]
     if kind == "source_ref":
-        version = answer.get("source_version_id")
-        if not isinstance(version, str) or not _ID.fullmatch(version):
+        versions = answer.get("source_version_ids", [answer.get("source_version_id")])
+        if (not isinstance(versions, list) or not 1 <= len(versions) <= MAX_SOURCE_FILES
+                or any(not isinstance(version, str) or not _ID.fullmatch(version) for version in versions)):
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
-        return {"source_version_id": version}
+        return {"source_version_ids": list(dict.fromkeys(versions))}
     if kind == "knowledge_ref":
         ref = answer.get("knowledge_ref")
         if not isinstance(ref, Mapping) or not all(isinstance(ref.get(k), str) and ref[k] for k in ("connector_id", "project_id", "work_package_id")):
@@ -235,7 +244,7 @@ def apply_outline(session: Mapping[str, Any], change: Sequence[Mapping[str, Any]
 
 def validate_review_edit(requirements: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """사용자가 수정한 요구사항 목록을 정규화·검증한다."""
-    if not isinstance(requirements, (list, tuple)) or len(requirements) > 300:
+    if not isinstance(requirements, (list, tuple)) or len(requirements) > MAX_REQUIREMENTS:
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
     cleaned, seen = [], set()
     for index, req in enumerate(requirements, 1):
@@ -247,5 +256,6 @@ def validate_review_edit(requirements: Sequence[Mapping[str, Any]]) -> list[dict
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
         seen.add(rid)
         cleaned.append({"id": rid, "text": text.strip(), "mandatory": bool(req.get("mandatory", True)), "category": str(req.get("category", ""))[:60],
-                        "refs": [r for r in req.get("refs", []) if isinstance(r, str)][:8]})
+                        "refs": [r for r in req.get("refs", []) if isinstance(r, str)][:8],
+                        **({"source_name": str(req["source_name"])[:255]} if req.get("source_name") else {})})
     return cleaned
