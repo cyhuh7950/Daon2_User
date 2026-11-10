@@ -162,7 +162,7 @@ export function TtsEnginesPane({ api }) {
         return <tr key={engine.engine_id ?? `deployment-${engine.slug}`}>
           <td>{label}{engine.is_default ? <span className="connector-badge" title="생성 설정의 기본 엔진">기본</span> : null}<br /><small>{engine.slug}</small></td>
           <td><small>{engine.base_url}</small><br /><small>{KIND_LABEL[engine.provider_kind] ?? engine.provider_kind}{engine.has_credential ? " · 키 있음" : " · 키 없음"}</small>{policyHost(engine) ? <><br /><small title="설정 > 조직 > 외부 전송 정책 > 허용 목적지">허용 목적지 필요: {policyHost(engine)}</small></> : null}</td>
-          <td><span className={`connector-status status-${engine.status}`}>{STATUS_LABEL[engine.status] ?? engine.status}</span>{engine.error_code ? <small> ({engine.error_code})</small> : null}</td>
+          <td><span className={`connector-status status-${engine.status}`}>{STATUS_LABEL[engine.status] ?? engine.status}</span>{engine.error_code ? <small title={engine.error_code}> {ERROR_TEXT[engine.error_code] ?? engine.error_code}</small> : null}</td>
           <td>{engine.voices.A} / {engine.voices.B}</td>
           <td>{stamp(engine.last_checked_at)}</td>
           <td>{managed ? <>

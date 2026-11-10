@@ -56,9 +56,6 @@
 
 /* 채팅: 큰 입력창과 원형 전송 버튼 */
 .adaptive-workspace .conversation-transcript { padding: 16px 12px; font-size: var(--daon-font-body); }
-.adaptive-workspace .conversation-composer { display: flex; align-items: flex-end; gap: 8px; padding: 8px 4px 4px; }
-.adaptive-workspace .conversation-composer textarea { min-height: 52px; padding: 12px 18px; border-radius: 26px; font-size: var(--daon-font-body); }
-.adaptive-workspace .composer-submit { width: 44px; height: 44px; border-radius: 50%; flex: none; font-size: 18px; }
 
 /* 공통 작은 글자: 12px 이상 */
 .adaptive-workspace .inline-alert,
@@ -111,30 +108,19 @@
 .model-selection-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
 .model-selection-bar select { min-height: 32px; max-width: 100%; min-width: 0; padding: 0 8px; border: 1px solid var(--daon-border, #c9cfdd); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; }
 .model-selection-bar select:disabled { opacity: 0.6; cursor: not-allowed; }
-.conversation-composer { flex-wrap: wrap; }
-.conversation-composer .model-selection-bar { flex: 1 0 100%; margin-bottom: 0; }
-.conversation-composer > label:not(.model-selection-bar *) { flex: 1 1 0; min-width: 0; }
-/* 드롭다운 목록(option)이 어두운 테마에서 흰 배경에 흰 글자가 되지 않게 한다 */
-.model-selection-bar select { background-color: Canvas; color: CanvasText; color-scheme: light; }
-.model-selection-bar select option { background-color: Canvas; color: CanvasText; }
-:root[data-theme="dark"] .model-selection-bar select { background-color: #1f2128; color: #e8eaed; color-scheme: dark; }
-:root[data-theme="dark"] .model-selection-bar select option { background-color: #1f2128; color: #e8eaed; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .model-selection-bar select { background-color: #1f2128; color: #e8eaed; color-scheme: dark; } :root:not([data-theme="light"]) .model-selection-bar select option { background-color: #1f2128; color: #e8eaed; } }
 
 /* 입력창 안쪽 아래줄 오른쪽: 모델·추론 수준 선택 + 전송 (질문 입력은 위, 선택·전송은 아래) */
-.conversation-composer { align-items: center; }
-.conversation-composer > label:not(.model-selection-bar *) { order: 1; flex: 1 0 100%; }
 .conversation-composer .model-selection-bar { order: 2; flex: 1 1 0; justify-content: flex-end; gap: 4px; margin: 0; }
 .conversation-composer .composer-submit { order: 3; }
 .conversation-composer .model-selection-bar select { border-color: transparent; background-color: transparent; font-size: 12px; max-width: 220px; text-overflow: ellipsis; }
 .conversation-composer .model-selection-bar select:hover:not(:disabled), .conversation-composer .model-selection-bar select:focus-visible { border-color: var(--daon-border, #c9cfdd); }
 
-/* 질문 창은 한 줄 높이로 시작해 입력 길이에 맞춰 늘어난다(최대 약 6줄). 선택기·전송 버튼은 같은 줄 오른쪽에 작게 둔다 */
-.adaptive-workspace .conversation-composer { gap: 4px 8px; padding: 6px 8px; }
-.adaptive-workspace .conversation-composer textarea { min-height: 0; height: auto; padding: 8px 12px; border-radius: 16px; field-sizing: content; max-height: 9em; }
-.adaptive-workspace .conversation-composer > label:not(.model-selection-bar *) { flex: 1 1 200px; }
+/* 질문 창(정본 한 곳): 한 줄 높이로 시작해 입력 길이에 맞춰 늘어난다(최대 약 6줄). 선택기·전송 버튼은 같은 줄 오른쪽에 작게 둔다 */
+.adaptive-workspace .conversation-composer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 8px; }
+.adaptive-workspace .conversation-composer textarea { min-height: 0; height: auto; padding: 8px 12px; border-radius: 16px; font-size: var(--daon-font-body); field-sizing: content; max-height: 9em; }
+.adaptive-workspace .conversation-composer > label:not(.model-selection-bar *) { order: 1; flex: 1 1 200px; min-width: 0; }
 .adaptive-workspace .conversation-composer .model-selection-bar { flex: 0 1 auto; flex-wrap: nowrap; }
-.adaptive-workspace .composer-submit { width: 34px; height: 34px; font-size: 15px; }
+.adaptive-workspace .composer-submit { width: 34px; height: 34px; border-radius: 50%; flex: none; font-size: 15px; }
 .assistant-message ul.answer-list { margin: 3px 0; padding-left: 18px; }
 .assistant-message ul.answer-list li { margin: 2px 0; }
 .citation-row a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
