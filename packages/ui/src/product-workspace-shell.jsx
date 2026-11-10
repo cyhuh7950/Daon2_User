@@ -377,6 +377,10 @@ const SOURCE_ERROR_HINTS = Object.freeze({
   EGRESS_MAX_BYTES_EXCEEDED: "자료가 외부 전송 정책의 최대 크기를 넘습니다.",
   TEXT_UNDERSTANDING_RESPONSE_INVALID: "모델이 올바른 형식으로 응답하지 않았습니다. 다른 모델을 지정하거나 다시 시도하세요.",
   TEXT_UNDERSTANDING_UNGROUNDED: "모델 응답이 원문과 일치하지 않아 사용하지 않았습니다. 다시 시도하세요.",
+  PDF_TEXT_NOT_FOUND: "PDF에서 글자를 찾지 못했습니다. 스캔한 PDF는 처리할 수 없으니 글자가 들어 있는 PDF를 올려 주세요.",
+  PDF_TEXT_ENCRYPTED: "암호가 걸린 PDF는 처리할 수 없습니다. 암호를 해제한 파일을 올려 주세요.",
+  PDF_TEXT_UNREADABLE: "PDF를 읽을 수 없습니다. 파일이 손상되지 않았는지 확인해 주세요.",
+  PDF_TEXT_TOO_LARGE: "PDF의 분량이 처리할 수 있는 크기를 넘습니다. 파일을 나누어 올려 주세요.",
 });
 const sourceErrorHint = (code) => (typeof code === "string" && SOURCE_ERROR_HINTS[code] ? ` ${SOURCE_ERROR_HINTS[code]}` : "");
 

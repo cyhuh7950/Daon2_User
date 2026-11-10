@@ -142,6 +142,9 @@ class PostgresDocumentIndex:
                 "evidence_span_id": evidence_span_id,
                 "evidence_kind": "parser_page_validated_semantic_fact",
             })
+        if result.lineage.get("source_format") == "pdf_text":
+            # 모델이 고른 몇 문장이 아니라 쪽 전체를 찾을 수 있어야 한다.
+            all_facts_located = False
         text_source = result.lineage.get("source_format") in {"txt", "md", "csv"}
         image_source = result.lineage.get("source_format") == "image"
         if audio_source:

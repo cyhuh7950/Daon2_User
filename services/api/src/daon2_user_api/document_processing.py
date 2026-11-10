@@ -272,6 +272,7 @@ class DocumentProcessingService:
         docx_adapter=None,
         pptx_adapter=None,
         audio_adapter=None,
+        pdf_text_adapter=None,
     ) -> None:
         self._repository = repository
         self._model_resolver = model_resolver
@@ -301,6 +302,10 @@ class DocumentProcessingService:
             from .pptx_document_understanding import OllamaPptxDocumentAdapter
             pptx_adapter = OllamaPptxDocumentAdapter(UrlLibDocumentUnderstandingTransport())
         self._pptx_adapter = pptx_adapter
+        if pdf_text_adapter is None:
+            from .pdf_text_understanding import PdfTextDocumentAdapter
+            pdf_text_adapter = PdfTextDocumentAdapter(UrlLibDocumentUnderstandingTransport())
+        self._pdf_text_adapter = pdf_text_adapter
         if audio_adapter is None:
             from .audio_document_understanding import AudioDocumentAdapter, LocalBaseAsrTranscriptionPort
             audio_adapter = AudioDocumentAdapter(LocalBaseAsrTranscriptionPort(), UrlLibDocumentUnderstandingTransport(disable_environment_proxy=True), egress_guard=self._egress_guard)
@@ -400,34 +405,43 @@ class DocumentProcessingService:
                         lambda: adapter.understand(document, text_model, context))
                 self._repository.complete(context, processing_run_id, result)
                 return result
-            with resolve("image_understanding") as semantic, resolve("document_parsing") as parser:
-                self._egress_guard.authorize(context, (semantic, parser))
-                if semantic.provider_code != "UPSTAGE" or parser.provider_code != "UPSTAGE":
-                    raise DocumentUnderstandingError(
-                        "DOCUMENT_PROVIDER_ADAPTER_UNAVAILABLE", status=503,
+            try:
+                with resolve("image_understanding") as semantic, resolve("document_parsing") as parser:
+                    self._egress_guard.authorize(context, (semantic, parser))
+                    if semantic.provider_code != "UPSTAGE" or parser.provider_code != "UPSTAGE":
+                        raise DocumentUnderstandingError(
+                            "DOCUMENT_PROVIDER_ADAPTER_UNAVAILABLE", status=503,
+                        )
+                    selection = DocumentModelSelection(
+                        semantic.provider_code, semantic.base_url,
+                        semantic.deployment_id, semantic.model_id,
+                        parser.deployment_id, parser.model_id,
+                        max(semantic.binding_version, parser.binding_version),
+                        semantic.connection_id, semantic.credential_version, semantic.base_url,
+                        parser.connection_id, parser.credential_version, parser.base_url,
                     )
-                selection = DocumentModelSelection(
-                    semantic.provider_code, semantic.base_url,
-                    semantic.deployment_id, semantic.model_id,
-                    parser.deployment_id, parser.model_id,
-                    max(semantic.binding_version, parser.binding_version),
-                    semantic.connection_id, semantic.credential_version, semantic.base_url,
-                    parser.connection_id, parser.credential_version, parser.base_url,
-                )
-                adapter = self._adapter_factory.create(
-                    selection, cast(str, semantic.credential_text()),
-                    cast(str, parser.credential_text()),
-                )
-                result = adapter.understand(
-                    DocumentUnderstandingRequest(
-                        document.source_id, document.source_version_id, document.filename,
-                        document.content, context.trace_id, "document-understanding-v1",
-                        context.policy_version,
-                        before_send=(lambda role: check(model={"image_understanding": semantic,
-                            "document_parsing": parser}[role], capability=role)) if readiness_guard is not None else None,
-                    ),
-                    selection,
-                )
+                    adapter = self._adapter_factory.create(
+                        selection, cast(str, semantic.credential_text()),
+                        cast(str, parser.credential_text()),
+                    )
+                    result = adapter.understand(
+                        DocumentUnderstandingRequest(
+                            document.source_id, document.source_version_id, document.filename,
+                            document.content, context.trace_id, "document-understanding-v1",
+                            context.policy_version,
+                            before_send=(lambda role: check(model={"image_understanding": semantic,
+                                "document_parsing": parser}[role], capability=role)) if readiness_guard is not None else None,
+                        ),
+                        selection,
+                    )
+            except DocumentUnderstandingError as error:
+                if error.code != "WORKSPACE_MODEL_DEFAULT_UNAVAILABLE":
+                    raise
+                # 문서 전용 모델을 지정하지 않은 Workspace는 PDF의 글자를 뽑아 글 모델로 처리한다.
+                with resolve("text_generation") as text_model:
+                    result = _failure_call("text_generation", text_model.connection_id,
+                        lambda: self._pdf_text_adapter.understand(document, text_model, context,
+                            authorize_egress=lambda size: self._egress_guard.authorize(context, (text_model,), size)))
             self._repository.complete(context, processing_run_id, result)
             return result
         except WorkspaceModelUnavailable as error:

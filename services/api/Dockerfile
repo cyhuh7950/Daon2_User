@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir \
     lameenc==1.9.0 \
     minio==7.2.20 \
     pillow==12.3.0 \
+    pypdf==6.21.2 \
     'psycopg[binary,pool]==3.3.4' \
     reportlab==4.4.9 \
     uvicorn==0.51.0
