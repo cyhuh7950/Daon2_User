@@ -313,3 +313,5 @@ select, select option, select optgroup { background-color: var(--daon-color-surf
 .provider-settings-shell:not(.is-embedded), .provider-settings-shell:not(.is-embedded) :is(p, label, input, select, textarea, button) { font-size: 14px; }
 .provider-settings-shell:not(.is-embedded) :is(small, .section-kicker) { font-size: 12px; }
 .provider-settings-shell:not(.is-embedded) :is(input, select, button) { min-height: 34px; }
+/* 좁은 화면: Provider 설정 머리의 확인 주기 입력이 세 줄로 깨지지 않게 한 줄씩 쌓는다 */
+@media (max-width: 600px) { .provider-heading-actions { flex-wrap: wrap; width: 100%; } .provider-heading-actions label { flex: 1 1 100%; justify-content: space-between; } .provider-heading-actions label select { flex: 1 1 auto; max-width: 60%; } }
