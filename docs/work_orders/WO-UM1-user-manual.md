@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 상태 | **설계 검토 중(승인 전).** 작성 전. 승인 후 작업 계획을 따로 작성해 승인받는다 |
+| 상태 | **구현 완료(2026-11-11).** 설계·계획 승인 후 어울이 직접 수행. 실행 판단은 `WORK_STATUS.md` WO-UM1 행 참고 |
 | 작성 | 2026-11-11 (신산님과 논의한 결정 반영) |
 | 계기 | 독립 검증 보고서 `docs/test_reports/FINAL_INDEPENDENT_VALIDATION_REPORT.md`의 F-01·F-02·F-03·F-14 |
 | 선행 결과 | `main` `bbc57fb4` |
@@ -76,17 +76,18 @@
 | 절 | 화면 | 웹 경로 |
 | --- | --- | --- |
 | 3-1 | 사용자 관리 | `/admin` |
-| 3-2 | 조직 관리·조직 가입 | `/organization-admin`, `/organization/join` |
+| 3-2 | 조직 정책과 외부 전송 정책 | `/settings/organization` |
 | 3-3 | 모델 연결과 Workspace 기본 모델 | `/settings/model-connections` |
-| 3-4 | 조직 정책과 외부 전송 정책 | `/settings/organization` |
-| 3-5 | 지식 연결 | `/settings/knowledge-connectors` |
-| 3-6 | 문서 작성 템플릿 | `/settings/authoring-templates` |
-| 3-7 | TTS 음성 엔진 | `/settings/tts-engines` |
-| 3-8 | 내려받기 정책 | `/settings/export-policy` |
-| 3-9 | 라이선스 | `/settings/license` |
-| 3-10 | 운영 상태 | `/operations` |
+| 3-4 | 지식 연결 | `/settings/knowledge-connectors` |
+| 3-5 | 문서 작성 템플릿 | `/settings/authoring-templates` |
+| 3-6 | TTS 음성 엔진 | `/settings/tts-engines` |
+| 3-7 | 내려받기 정책 | `/settings/export-policy` |
+| 3-8 | 라이선스 | `/settings/license` |
+| 3-9 | 운영 상태 | `/operations` |
 
-현재 지식·LLM 가이드의 품질·비용·지연·Citation 검토 기준은 3-3·3-4·2-5에 나누어 옮긴다.
+조직 관리·조직 가입(`/organization-admin`, `/organization/join`)은 제품 화면에 연결된 메뉴가 없는 미공개 화면이고 기존 설명서 시험이 이 화면의 기재를 막고 있어 이번 설명서에서 뺐다(2026-11-11 실행 판단). 공개되면 3부에 절을 추가한다.
+
+현재 지식·LLM 가이드의 품질·비용·지연·Citation 검토 기준은 2-5·3-3·3-4에 나누어 옮기고, 지식 원칙과 용어는 부록 B에 모은다.
 
 ### 4.4 부록
 
