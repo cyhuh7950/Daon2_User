@@ -25,10 +25,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 .admin-user-header-actions > button { background: var(--daon-color-accent); color: var(--daon-color-on-accent); font-weight: 800; }
 .admin-user-row-actions > button:last-child { border-color: color-mix(in srgb, #b5473e 60%, var(--daon-color-border)); }
 .admin-user-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgb(4 8 16 / 72%); }
-.admin-user-modal { display: grid; width: min(100%, 460px); gap: 12px; padding: 22px; border: 1px solid var(--daon-color-border); border-radius: 14px; background: var(--daon-color-surface); box-shadow: 0 20px 60px rgb(0 0 0 / 36%); }
+.admin-user-modal { display: grid; width: min(100%, var(--modal-sm, 460px)); gap: 12px; padding: 22px; border: 1px solid var(--daon-color-border); border-radius: 14px; background: var(--daon-color-surface); box-shadow: 0 20px 60px rgb(0 0 0 / 36%); }
 .admin-user-modal h2 { margin: 0; font-size: 16px; }.admin-user-modal label { display: grid; gap: 5px; color: var(--daon-color-text-secondary); }.admin-user-modal input { min-height: 38px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-canvas); color: inherit; font: inherit; }.admin-user-modal > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 5px; }.admin-user-modal button { min-height: 34px; padding: 0 12px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-muted-surface); color: inherit; font: inherit; cursor: pointer; }.admin-user-modal button[type="submit"] { background: var(--daon-color-accent); color: var(--daon-color-on-accent); }
 
-.admin-user-role-modal { width: min(100%, 620px); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box; font-size: 12px; }
+.admin-user-role-modal { width: min(100%, var(--modal-md, 720px)); max-height: calc(100dvh - 40px); overflow-y: auto; box-sizing: border-box; font-size: 12px; }
 .admin-user-role-modal section { display: grid; gap: 10px; min-width: 0; }
 .admin-user-role-modal select { width: 100%; min-height: 34px; background: var(--daon-color-canvas); color: inherit; font: inherit; }
 .admin-user-role-modal p { overflow-wrap: anywhere; margin: 0; }
@@ -36,7 +36,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 @media (max-width: 640px) { .admin-user-role-backdrop { padding: 10px; }.admin-user-role-modal { padding: 14px; max-height: calc(100dvh - 20px); } }
 
 .egress-policy-pane { width: min(100%, 1240px); box-sizing: border-box; margin: 0 auto; padding: 22px; border: 1px solid var(--daon-color-border); border-radius: 14px; background: var(--daon-color-surface); color: var(--daon-color-text-primary); font: 12px/1.5 system-ui, sans-serif; overflow: hidden; }
-.egress-policy-pane > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }.egress-policy-pane h1 { margin: 0; font-size: 18px; }.egress-policy-pane .info-button { width: 24px; height: 24px; border: 1px solid var(--daon-color-border); border-radius: 50%; background: var(--daon-color-muted-surface); color: inherit; }.egress-policy-pane .policy-lock { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid var(--daon-color-accent); border-radius: 8px; background: var(--daon-color-muted-surface); color: var(--daon-color-text-secondary); }.egress-policy-pane form, .egress-policy-pane .policy-form { display: grid; gap: 14px; }.egress-policy-pane fieldset { min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--daon-color-border); border-radius: 10px; background: var(--daon-color-canvas); }.egress-policy-pane legend { padding: 0 5px; font-weight: 800; }.egress-policy-pane label { display: grid; gap: 5px; color: var(--daon-color-text-secondary); }.egress-policy-pane input, .egress-policy-pane select, .egress-policy-pane textarea { width: 100%; min-height: 36px; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-surface); color: inherit; font: inherit; }.egress-policy-pane textarea { min-height: 76px; resize: vertical; }.egress-policy-pane .policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.egress-policy-pane .policy-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 4px; }.egress-policy-pane button:not(.info-button) { min-height: 34px; padding: 0 12px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-muted-surface); color: inherit; font: inherit; cursor: pointer; }
+.egress-policy-pane > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }.egress-policy-pane h1 { margin: 0; font-size: 18px; }.egress-policy-pane .info-button { width: 24px; height: 24px; border: 1px solid var(--daon-color-border); border-radius: 50%; background: var(--daon-color-muted-surface); color: inherit; }.egress-policy-pane .policy-lock { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--daon-color-accent); border-radius: 8px; background: var(--daon-color-muted-surface); color: var(--daon-color-text-secondary); }.egress-policy-pane form, .egress-policy-pane .policy-form { display: grid; gap: 14px; }.egress-policy-pane fieldset { min-width: 0; margin: 0; padding: 14px; border: 1px solid var(--daon-color-border); border-radius: 10px; background: var(--daon-color-canvas); }.egress-policy-pane legend { padding: 0 5px; font-weight: 800; }.egress-policy-pane label { display: grid; gap: 5px; color: var(--daon-color-text-secondary); }.egress-policy-pane input, .egress-policy-pane select, .egress-policy-pane textarea { width: 100%; min-height: 36px; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-surface); color: inherit; font: inherit; }.egress-policy-pane textarea { min-height: 76px; resize: vertical; }.egress-policy-pane .policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }.egress-policy-pane .policy-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding-top: 4px; }.egress-policy-pane button:not(.info-button) { min-height: 34px; padding: 0 12px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: var(--daon-color-muted-surface); color: inherit; font: inherit; cursor: pointer; }
 
 @media (max-width: 640px) { .admin-user-header-actions, .admin-user-row-actions { width: 100%; justify-content: stretch; }.admin-user-header-actions > *, .admin-user-row-actions > * { flex: 1 1 120px; }.egress-policy-pane { padding: 16px; }.egress-policy-pane .policy-grid { grid-template-columns: 1fr; } }
 
@@ -200,7 +200,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 .provider-model-options { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; align-content: flex-start; padding-right: 4px; }
 .provider-model-picker legend { padding: 0 4px; font-size: 12px; font-weight: 700; }.provider-model-picker p, .provider-model-picker small { display: block; margin: 0 0 6px; font-size: 12px; }.provider-model-options { display: flex; flex-wrap: wrap; gap: 5px; }.provider-model-options label { display: inline-flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 7px; border: 1px solid var(--workspace-border, var(--daon-color-border)); border-radius: 7px; background: var(--workspace-surface-soft, var(--daon-color-muted-surface)); color: inherit; cursor: pointer; font-size: 12px; }.provider-model-options input { accent-color: var(--workspace-violet, var(--daon-color-accent)); }.provider-model-clear { margin-top: 7px; padding: 4px 7px; border: 1px solid var(--workspace-border, var(--daon-color-border)); border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
 .provider-step-up-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgb(8 10 18 / 72%); }
-.provider-step-up-dialog { width: min(420px, 100%); padding: 18px; border: 1px solid var(--workspace-border, var(--daon-color-border)); border-radius: 12px; background: var(--workspace-surface, var(--daon-color-surface)); box-shadow: 0 18px 60px rgb(0 0 0 / 35%); }
+.provider-step-up-dialog { width: min(var(--modal-sm, 460px), 100%); padding: 18px; border: 1px solid var(--workspace-border, var(--daon-color-border)); border-radius: 12px; background: var(--workspace-surface, var(--daon-color-surface)); box-shadow: 0 18px 60px rgb(0 0 0 / 35%); }
 .provider-step-up-dialog h2 { margin: 0 0 6px; font-size: 16px; }.provider-step-up-dialog p { margin: 0 0 12px; color: var(--workspace-muted, var(--daon-color-text-secondary)); font-size: 12px; }.provider-step-up-dialog label { display: grid; gap: 4px; font-size: 12px; font-weight: 700; }.provider-step-up-dialog input { min-height: 34px; padding: 0 8px; border: 1px solid var(--workspace-border, var(--daon-color-border)); border-radius: 8px; background: var(--workspace-surface-soft, var(--daon-color-muted-surface)); color: inherit; font: 12px system-ui; }
 
 /* 지식 연결(MCP Connector) 관리 화면 */
@@ -219,12 +219,12 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 .connector-status { padding: 2px 10px; border-radius: 999px; background: var(--daon-status-neutral-bg); color: var(--daon-status-neutral-fg); }
 .connector-status.status-verified { background: var(--daon-status-ok-bg); color: var(--daon-status-ok-fg); }
 .connector-status.status-failed { background: var(--daon-status-danger-bg); color: var(--daon-status-danger-fg); }
-.connector-dialog { display: grid; gap: 10px; max-width: 560px; padding: 16px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface, rgba(255, 255, 255, .04)); }
+.connector-dialog { display: grid; gap: 10px; max-width: var(--modal-md, 720px); padding: 16px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface, rgba(255, 255, 255, .04)); }
 .connector-dialog h3 { margin: 0; }
 .daon-scope-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .daon-scope-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
 .daon-scope-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .45); }
-.daon-scope-dialog { width: min(560px, 100%); max-height: min(640px, 90vh); overflow: auto; background: var(--daon-color-surface, #fff); }
+.daon-scope-dialog { width: min(var(--modal-md, 720px), 100%); max-height: min(640px, 90vh); overflow: auto; background: var(--daon-color-surface, #fff); }
 .daon-scope-projects { display: grid; gap: 10px; }
 .connector-dialog label { display: grid; gap: 4px; }
 .connector-dialog input[type="text"], .connector-dialog input[type="url"], .connector-dialog input[type="password"], .connector-dialog select { min-height: 32px; padding: 0 8px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: transparent; color: inherit; }
@@ -277,27 +277,18 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 :root[data-theme="dark"] .provider-settings-shell .provider-save-state.is-dirty { color: #ffb74d; }
 :root[data-theme="dark"] .provider-settings-shell .provider-save-state.is-done { color: #6fdc9f; }
 :root[data-theme="dark"] .provider-settings-shell .provider-save-state.is-failed { color: #ff8a80; }
-.provider-settings-shell .workspace-default-controls select { background-color: Canvas; color: CanvasText; color-scheme: light; }
-.provider-settings-shell .workspace-default-controls select option { background-color: Canvas; color: CanvasText; }
-:root[data-theme="dark"] .provider-settings-shell .workspace-default-controls select { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); color-scheme: dark; }
-:root[data-theme="dark"] .provider-settings-shell .workspace-default-controls select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); }
 .provider-settings-shell .provider-reasoning-probe { margin: 12px 0; padding: 8px 12px; border: 1px solid var(--workspace-border, #3a3c42); border-radius: 10px; }
 .provider-settings-shell .provider-reasoning-probe h3 { margin: 0 0 4px; font-size: 13px; }
 .provider-settings-shell .provider-reasoning-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
 /* 어두운 테마에서 모든 드롭다운 목록이 흰 배경에 흰 글자가 되지 않게 한다 */
-.provider-settings-shell select, .provider-settings-shell select option { background-color: Canvas; color: CanvasText; color-scheme: light; }
-:root[data-theme="dark"] .provider-settings-shell select, :root[data-theme="dark"] .provider-settings-shell select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); color-scheme: dark; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .provider-settings-shell select, :root:not([data-theme="light"]) .provider-settings-shell select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); color-scheme: dark; } }
 /* 전역: 어두운 테마에서는 브라우저 기본 컨트롤(드롭다운 목록·스크롤바 등)도 어둡게 그려 모든 화면의 select가 읽히게 한다 */
 :root[data-theme="dark"] { color-scheme: dark; }
-:root[data-theme="dark"] select, :root[data-theme="dark"] select option, :root[data-theme="dark"] select optgroup { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } :root:not([data-theme="light"]) select, :root:not([data-theme="light"]) select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); } }
 /* 외부 전송 정책 폼의 체크박스: 이 파일의 .egress-policy-pane label/input 규칙(grid, width 100%)보다 우선한다 */
 .egress-policy-pane form > label.policy-check { display: flex !important; flex-direction: row; align-items: center; justify-content: flex-start; gap: 8px; min-height: 32px; }
 .egress-policy-pane form > label.policy-check input[type="checkbox"] { width: 18px !important; height: 18px !important; min-height: 0 !important; flex: 0 0 18px; margin: 0; padding: 0; }
 
 /* 관리 화면 공통: 내용 폭 한 값, 표는 안에서만 가로 스크롤, 버튼 글자는 쪼개지지 않는다 */
-:root { --admin-content-width: 1120px; }
+:root { --admin-content-width: 1120px; --modal-sm: 460px; --modal-md: 720px; --modal-lg: 1040px; }
 .connectors-pane, .egress-policy-pane, .admin-user-table-wrap { box-sizing: border-box; width: 100%; max-width: var(--admin-content-width); min-width: 0; margin-inline: auto; }
 .connectors-pane { overflow-x: auto; }
 .connectors-table { min-width: 640px; }
@@ -308,3 +299,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--daon-color-
 /* 한글은 어절 단위로 줄바꿈하고, 긴 식별자는 칸 안에서 꺾는다 */
 body { word-break: keep-all; overflow-wrap: break-word; }
 .notebook-home-header, .notebook-home-intro, .notebook-home-controls { flex-wrap: wrap; row-gap: 8px; }
+
+/* 모든 select(목록 포함)는 한 규칙: 테마 토큰으로 칠하고 color-scheme 은 data-theme 을 따른다. 화면별 패치를 만들지 않는다 */
+select, select option, select optgroup { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); }
+/* 모델·Provider 설정도 관리 화면 폭 기준에 맞춘다(전폭으로 퍼지지 않게) */
+.provider-settings-shell { box-sizing: border-box; width: 100%; max-width: 1280px; margin-inline: auto; }
