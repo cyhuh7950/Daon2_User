@@ -9,3 +9,7 @@
 .web-shell-runtime-popover { position: absolute; bottom: calc(100% + 5px); left: 0; display: grid; gap: 4px; width: min(280px, calc(100vw - 16px)); padding: 8px; border: 1px solid var(--daon-color-border); border-radius: 6px; background: var(--daon-color-surface); color: var(--daon-color-text-primary); box-shadow: 0 5px 16px rgb(15 23 42 / 18%); font-size: 12px; }
 .web-shell-runtime-popover span { overflow-wrap: anywhere; }
 @media (max-width: 599px) { .web-shell-runtime { bottom: 4px; left: 4px; max-width: calc(100vw - 8px); } }
+/* 정상(ready)일 때는 점과 설명 버튼만 작게 보이고, 안내 문구는 화면 낭독기용으로만 남긴다. 문제가 있을 때만 전체 문구가 보인다 */
+.web-shell-ready { padding: 2px 4px; gap: 2px; opacity: .7; }
+.web-shell-ready:hover, .web-shell-ready:focus-within { opacity: 1; }
+.web-shell-ready .web-shell-runtime-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

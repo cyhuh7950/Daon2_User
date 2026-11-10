@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { secureUuid } from "./secure-uuid.js";
 import { focusInitialModalControl, trapModalTab } from "./workspace-interaction.js";
 import { msg } from "./studio-messages.ko.js";
+import { StudioIcon } from "./studio-icon.js";
 
 // 상단 바의 노트북 도구(S3-01~S3-03): "+ 노트북 만들기", 공유, ⋮ 메뉴, 맞춤설정 입력 화면.
 // 복사·채팅 기록 삭제·공유는 서버 기능(F3-02/F3-03)이 준비되기 전까지 "준비 중"으로 표시한다. 애널리틱스는 1차에서 표시하지 않는다.
@@ -134,7 +135,7 @@ export function NotebookTools({ studio, title = "", counts = {}, onCreateNoteboo
     <button type="button" className="notebook-create" onClick={onCreateNotebook}>{msg("notebook.create")}</button>
     <button type="button" className="notebook-share" disabled title={msg("notebook.share.pending")}>{msg("notebook.share")}</button>
     <div className="settings-menu-anchor" ref={anchorRef}>
-      <button type="button" aria-haspopup="menu" aria-expanded={menuOpen} aria-label={msg("notebook.menu")} onClick={() => setMenuOpen((open) => !open)}>⋮</button>
+      <button type="button" aria-haspopup="menu" aria-expanded={menuOpen} aria-label={msg("notebook.menu")} onClick={() => setMenuOpen((open) => !open)}><StudioIcon name="more_vertical" size={18} /></button>
       {menuOpen ? <div className="settings-menu" role="menu" aria-label={msg("notebook.menu")}>
         <button type="button" role="menuitem" disabled={!onOpenChatSettings} onClick={() => { setMenuOpen(false); onOpenChatSettings?.(); }}><span><strong>{msg("notebook.menu.chat_settings")}</strong><small>{msg("notebook.menu.chat_settings.hint")}</small></span></button>
         <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setDialog("customization"); }}><span><strong>{msg("notebook.menu.customization")}</strong><small>{msg("notebook.menu.customization.hint")}</small></span></button>
