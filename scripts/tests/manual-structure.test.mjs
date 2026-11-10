@@ -19,7 +19,7 @@ const PARTS = ["기능·목적", "쓸 수 있는 사람", "사용 순서", "화�
 const NOT_UI_TEXT = new Set([]);
 
 function section(text, number) {
-  const start = text.search(new RegExp(`^### ${number.replace("-", "\\-")} `, "mu"));
+  const start = text.search(new RegExp(`^### ${number} `, "mu"));
   if (start < 0) return null;
   const rest = text.slice(start + 1);
   const next = rest.search(/\n#{2,3} /u);
