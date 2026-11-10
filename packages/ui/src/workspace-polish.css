@@ -117,9 +117,9 @@
 /* 드롭다운 목록(option)이 어두운 테마에서 흰 배경에 흰 글자가 되지 않게 한다 */
 .model-selection-bar select { background-color: Canvas; color: CanvasText; color-scheme: light; }
 .model-selection-bar select option { background-color: Canvas; color: CanvasText; }
-:root[data-theme="dark"] .model-selection-bar select { background-color: #1f2128; color: #e8eaed; color-scheme: dark; }
-:root[data-theme="dark"] .model-selection-bar select option { background-color: #1f2128; color: #e8eaed; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .model-selection-bar select { background-color: #1f2128; color: #e8eaed; color-scheme: dark; } :root:not([data-theme="light"]) .model-selection-bar select option { background-color: #1f2128; color: #e8eaed; } }
+:root[data-theme="dark"] .model-selection-bar select { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); color-scheme: dark; }
+:root[data-theme="dark"] .model-selection-bar select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .model-selection-bar select { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); color-scheme: dark; } :root:not([data-theme="light"]) .model-selection-bar select option { background-color: var(--daon-color-surface); color: var(--daon-color-text-primary); } }
 
 /* 입력창 안쪽 아래줄 오른쪽: 모델·추론 수준 선택 + 전송 (질문 입력은 위, 선택·전송은 아래) */
 .conversation-composer { align-items: center; }

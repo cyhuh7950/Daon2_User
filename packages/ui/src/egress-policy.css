@@ -5,7 +5,7 @@
 .egress-policy-pane label { display: grid; gap: 6px; }
 .egress-policy-pane input, .egress-policy-pane select, .egress-policy-pane button { font: inherit; min-height: 32px; }
 .egress-policy-pane .info-button { width: 24px; min-height: 24px; border-radius: 50%; }
-.egress-policy-pane .policy-lock { font-size: 10px; }
+.egress-policy-pane .policy-lock { font-size: 12px; }
 .egress-policy-pane { box-sizing: border-box; color: var(--daon-color-text-primary, #172033); }
 .egress-policy-pane header p, .egress-policy-pane .policy-lock, .egress-policy-pane label { color: var(--daon-color-text-secondary, #4B5B73); }
 .egress-policy-pane form > label:not(:has(input[type="checkbox"])) { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); align-items: center; gap: 10px; }
