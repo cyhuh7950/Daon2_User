@@ -76,3 +76,20 @@ def test_unknown_mark_shape_is_rejected(tmp_path):
     source = blank(tmp_path / "raw" / "a.png")
     with pytest.raises(SystemExit):
         module.annotate(source, [{"n": 1}], tmp_path / "a.png")
+
+
+def test_raw_shot_with_unmasked_private_area_is_rejected(tmp_path):
+    """raw/는 공개 저장소에 올라가므로 가리기 영역은 원본에서도 이미 가려져 있어야 한다."""
+    module = load()
+    blank(tmp_path / "raw" / "a.png")
+    (tmp_path / "annotations.json").write_text(json.dumps({"a.png": [{"mask": [20, 20, 60, 30]}]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="RAW_NOT_MASKED: a.png"):
+        module.annotate_all(tmp_path)
+
+
+def test_raw_shot_already_masked_is_accepted(tmp_path):
+    module = load()
+    source = blank(tmp_path / "raw" / "a.png")
+    module.annotate(source, [{"mask": [20, 20, 60, 30]}], source)
+    (tmp_path / "annotations.json").write_text(json.dumps({"a.png": [{"mask": [20, 20, 60, 30]}]}), encoding="utf-8")
+    assert [path.name for path in module.annotate_all(tmp_path)] == ["a.png"]

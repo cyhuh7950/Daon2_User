@@ -48,12 +48,27 @@ def annotate(source: Path, marks: list[dict], out: Path) -> None:
     image.save(out, optimize=True)
 
 
+def _raw_masked(source: Path, marks: list[dict]) -> bool:
+    image = Image.open(source).convert("RGB")
+    for mark in marks:
+        if set(mark) == {"mask"} and len(mark["mask"]) == 4:
+            x, y, width, height = (int(value) for value in mark["mask"])
+            colours = image.crop((x, y, x + width, y + height)).getcolors(maxcolors=1)
+            if colours is None or colours[0][1] != MASK_FILL:
+                return False
+    return True
+
+
 def annotate_all(images: Path = DEFAULT_IMAGES) -> list[Path]:
     raw = sorted((images / "raw").glob("*.png"))
     entries = json.loads((images / "annotations.json").read_text(encoding="utf-8"))
     missing = [path.name for path in raw if path.name not in entries]
     if missing:
         raise SystemExit(f"ANNOTATION_MISSING: {', '.join(missing)}")
+    # raw/도 공개 저장소에 올라가므로 가리기 영역은 원본에서 이미 가려져 있어야 한다.
+    unmasked = [path.name for path in raw if not _raw_masked(path, entries[path.name])]
+    if unmasked:
+        raise SystemExit(f"RAW_NOT_MASKED: {', '.join(unmasked)}")
     written = []
     for path in raw:
         out = images / path.name
