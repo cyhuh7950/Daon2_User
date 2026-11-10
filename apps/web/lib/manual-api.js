@@ -1,12 +1,9 @@
 import { lawSha256 as sha256 } from "./product-workspace-api.js";
 
 const MANIFEST_PATH = "/manual/manifest.json";
-const APPROVED_RELEASE_VERSION = "1.0.0";
-const APPROVED_DOCUMENT_IDS = new Set([
-  "daon-getting-started",
-  "daon-user-manual",
-  "daon-knowledge-llm-guide",
-]);
+const APPROVED_RELEASE_VERSION = "2.0.0";
+// 2.0.0부터 한 권(1부 흐름·2부 화면·3부 관리자). 시작 안내·지식 가이드는 은퇴했다.
+const APPROVED_DOCUMENT_IDS = new Set(["daon-user-manual"]);
 const SAFE_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SAFE_VERSION = /^\d+\.\d+\.\d+$/u;
 const SAFE_DATE = /^\d{4}-\d{2}-\d{2}$/u;
@@ -44,7 +41,7 @@ function projectManifest(value) {
     || !SAFE_VERSION.test(value.release_version) || value.release_version !== APPROVED_RELEASE_VERSION
     || !SAFE_DATE.test(value.released_at)
     || value.language !== "ko-KR"
-    || !Array.isArray(value.documents) || value.documents.length !== 3
+    || !Array.isArray(value.documents) || value.documents.length !== APPROVED_DOCUMENT_IDS.size
   ) throw new Error("MANUAL_MANIFEST_INVALID");
   const seen = new Set();
   const documents = value.documents.map((document) => {

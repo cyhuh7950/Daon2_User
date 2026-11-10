@@ -10,15 +10,15 @@ if (!outDir) throw new Error("DAON_MANUAL_EVIDENCE_DIST is required");
 const networkLog = process.env.DAON_MANUAL_NETWORK_LOG;
 const allowlist = new Set([
   "manifest.json",
-  "daon-getting-started.md", "daon-getting-started.docx", "daon-getting-started.pdf",
   "daon-user-manual.md", "daon-user-manual.docx", "daon-user-manual.pdf",
-  "daon-knowledge-llm-guide.md", "daon-knowledge-llm-guide.docx", "daon-knowledge-llm-guide.pdf",
 ]);
+const allowedImage = /^images\/[a-z0-9-]+\.png$/u;
 const contentTypes = {
   ".json": "application/json",
   ".md": "text/markdown; charset=utf-8",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".pdf": "application/pdf",
+  ".png": "image/png",
 };
 
 export default {
@@ -28,7 +28,8 @@ export default {
     configureServer(server) {
       server.middlewares.use("/manual", (request, response) => {
         const filename = decodeURIComponent(new URL(request.originalUrl, "http://evidence.invalid").pathname.slice("/manual/".length));
-        if (!allowlist.has(filename) || filename.includes("..") || filename.includes("/") || filename.includes("\\")) {
+        const allowed = allowlist.has(filename) ? !filename.includes("/") : allowedImage.test(filename);
+        if (!allowed || filename.includes("..") || filename.includes("\\")) {
           response.statusCode = 404;
           response.end("NOT_FOUND");
           return;
