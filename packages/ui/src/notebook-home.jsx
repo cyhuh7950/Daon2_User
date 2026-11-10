@@ -115,7 +115,12 @@ export function NotebookHome({ state = "ready", notebooks = [], errorCode = null
     const badge = home?.ownerDocument.querySelector?.(".web-shell-runtime");
     if (!badge) return;
     // 고정 배너의 실제 점유 하단만 S41에 예약한다. 배너 상태/동작과 다른 화면은 바꾸지 않는다.
-    const measure = () => home.style.setProperty("--nh-shell-occupied", `${Math.max(0, badge.getBoundingClientRect().bottom)}px`);
+    const measure = () => {
+      const box = badge.getBoundingClientRect();
+      // 배너가 화면 위쪽에 있을 때만 그 아래를 예약한다(아래쪽에 두면 bottom 값이 화면 높이라 본문이 밀려 내려간다).
+      const occupied = box.top < window.innerHeight / 2 ? Math.max(0, box.bottom) : 0;
+      home.style.setProperty("--nh-shell-occupied", `${occupied}px`);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(badge);
