@@ -382,6 +382,8 @@ const SOURCE_ERROR_HINTS = Object.freeze({
   PDF_TEXT_UNREADABLE: "PDF를 읽을 수 없습니다. 파일이 손상되지 않았는지 확인해 주세요.",
   PDF_TEXT_TOO_LARGE: "PDF의 분량이 처리할 수 있는 크기를 넘습니다. 파일을 나누어 올려 주세요.",
 });
+const FAILED_SOURCE_STATES = new Set(["failed", "waiting_model"]);
+const sourceFailureText = (code) => (typeof code === "string" && SOURCE_ERROR_HINTS[code]) || "처리하지 못했습니다. 재처리를 눌러 다시 시도해 주세요.";
 const sourceErrorHint = (code) => (typeof code === "string" && SOURCE_ERROR_HINTS[code] ? ` ${SOURCE_ERROR_HINTS[code]}` : "");
 
 const SAFE_DTO_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
@@ -1074,6 +1076,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             sourceState: source.source_state,
             processingState: source.processing_state,
             jobState: source.job_state,
+            safeErrorCode: source.safe_error_code ?? null,
             websiteSnapshot,
             lawSnapshot,lawCandidate,
             ready: source.source_state === "ready"
@@ -1085,6 +1088,15 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
         }
       } else {
         sourceSafeError = safeErrorCode(sourceResult.reason, "SOURCE_LIST_FAILED");
+      }
+      if (!sourceSafeError && typeof adapter.listSourceFailureReasons === "function" && projected.some((source) => FAILED_SOURCE_STATES.has(source.sourceState))) {
+        // 실패한 자료가 있을 때만 사유를 한 번 더 묻는다. 실패해도 목록 표시는 막지 않는다.
+        try {
+          const detailed = await adapter.listSourceFailureReasons({ signal: controller.signal });
+          const codes = new Map(detailed.filter((item) => typeof item.safe_error_code === "string")
+            .map((item) => [`${item.source_id}:${item.source_version_id}`, item.safe_error_code]));
+          projected = projected.map((source) => ({ ...source, safeErrorCode: codes.get(`${source.sourceId}:${source.sourceVersionId}`) ?? source.safeErrorCode }));
+        } catch { /* 사유 없이 기본 안내를 보인다. */ }
       }
       if (!isCurrent()) return;
       if (initialSourceVersionId && !projected.some(source=>source.sourceVersionId===initialSourceVersionId)) sourceSafeError = "SOURCE_UNAVAILABLE";
@@ -2127,10 +2139,11 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 {(new Set(["failed", "waiting_model"]).has(source.sourceState)
                   || (typeof source.filename === "string" && /\.(docx|pptx)$/u.test(source.filename.toLowerCase())
                     && source.sourceState === "needs_review" && source.processingState === "completed" && source.jobState === "completed")) && typeof adapter?.reprocessSource === "function"
-                  ? <button type="button" disabled={sourceAddPending} onClick={() => {
+                  ? <button type="button" className="source-retry-button" disabled={sourceAddPending} onClick={() => {
                     const prior=sourceRetryKeysRef.current.get(`${source.sourceId}:${source.sourceVersionId}`);
                     setSourceRetryTarget(source);setSourceRetryMode(prior?.mode??"");setSourceRetryError(null);setSourceRetrySaved(null);
                   }}>재처리</button> : null}
+                {FAILED_SOURCE_STATES.has(source.sourceState) ? <p className="source-row-failure" role="status">{sourceFailureText(source.safeErrorCode)}</p> : null}
               </li>
             ))}
           </ul>

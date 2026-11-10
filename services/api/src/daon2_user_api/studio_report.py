@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 
@@ -105,6 +105,7 @@ class WorkspaceSourceProjection:
     source_state: str
     processing_state: str
     job_state: str
+    safe_error_code: str | None = field(default=None, metadata={"omit_none": True})
 
 
 class StudioReportRepository(Protocol):

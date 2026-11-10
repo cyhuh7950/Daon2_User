@@ -28,6 +28,12 @@ function StepBar({ state }) {
 }
 
 const MAX_SOURCE_FILES = 10;
+const FAILED_SOURCE_STATES = new Set(["failed", "waiting_model", "needs_review", "partial_understanding"]);
+
+function noReadySourceMessage(sources) {
+  if (sources.length === 0) return "authoring.no_ready_source";
+  return sources.some((s) => FAILED_SOURCE_STATES.has(s.sourceState)) ? "authoring.source_failed" : "authoring.source_processing";
+}
 
 function scanWarning(warning) {
   const [code, detail] = String(warning).split(":");
@@ -88,7 +94,7 @@ function Questions({ session, sources, adapter, onSubmit, busy }) {
           const list = v[q.key] ?? [];
           return { ...v, [q.key]: list.includes(s.sourceVersionId) ? list.filter((id) => id !== s.sourceVersionId) : [...list, s.sourceVersionId].slice(0, MAX_SOURCE_FILES) };
         })} /> {s.filename ?? s.sourceId}</label>)}
-        {sources.every((s) => !s.ready) && <p>{msg("authoring.no_ready_source")}</p>}</div>}
+        {sources.every((s) => !s.ready) && <p>{msg(noReadySourceMessage(sources))}</p>}</div>}
       {q.kind === "knowledge_ref" && <div>
         {connectors === null ? <p role="status">…</p> : connectors.length === 0 ? <p>{msg("authoring.no_connectors")}</p> : <>
           <label>{msg("authoring.connector")} <select value={connectorId} onChange={(event) => { setConnectorId(event.target.value); setScopeIndex(0); setPicked([]); }}>

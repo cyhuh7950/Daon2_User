@@ -440,7 +440,7 @@ class OutlineBody(_Strict):
 
 class ReviewBody(_Strict):
     expected_revision: int = Field(ge=1)
-    requirements: list[dict[str, Any]] | None = Field(default=None, max_length=300)
+    requirements: list[dict[str, Any]] | None = Field(default=None, max_length=1000)
     plan_sections: list[dict[str, Any]] | None = Field(default=None, max_length=30)
     output_formats: list[str] | None = Field(default=None, max_length=4)
     confirm: bool = False

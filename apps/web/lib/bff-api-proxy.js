@@ -3,6 +3,7 @@ const MAX_ANDROID_AUTH_FORM_BYTES = 512;
 const MAX_ANDROID_AUTH_RESPONSE_BYTES = 4_096;
 const MAX_SOURCE_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_NATIVE_RESPONSE_BYTES = 128 * 1024;
+const AUTHORING_REVIEW_REQUEST_BYTES = 1024 * 1024;
 const MAX_NATIVE_RECOVERY_RESPONSE_BYTES = 1024 * 1024;
 const MAX_SESSION_COOKIE_BYTES = 4_096;
 const MIN_NATIVE_BEARER_BYTES = 16;
@@ -170,7 +171,7 @@ function studioV2Route(method, segments) {
       const id = encodeURIComponent(rest[2]);
       if (rest.length === 3) return make(`/authoring/sessions/${id}`, ["GET"]);
       if (rest.length === 4 && rest[3] === "answers") return make(`/authoring/sessions/${id}/answers`, ["POST"]);
-      if (rest.length === 4 && rest[3] === "review") return make(`/authoring/sessions/${id}/review`, ["PUT"]);
+      if (rest.length === 4 && rest[3] === "review") return make(`/authoring/sessions/${id}/review`, ["PUT"], { maxRequestBytes: AUTHORING_REVIEW_REQUEST_BYTES });
       if (rest.length === 4 && rest[3] === "control") return make(`/authoring/sessions/${id}/control`, ["POST"]);
       if (rest.length === 4 && rest[3] === "outline") return make(`/authoring/sessions/${id}/outline`, ["PUT"]);
       if (rest.length === 5 && rest[3] === "units" && SAFE_SEGMENT.test(rest[4] ?? "")) return make(`/authoring/sessions/${id}/units/${encodeURIComponent(rest[4])}`, ["PUT"]);
@@ -863,7 +864,7 @@ function routeFor(method, segments) {
     && segments[2] === "sources"
   ) {
     if (method === "GET") {
-      return { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, query: new Set(["notebook_id", "website_source_version_id"]), websiteSourceQuery: true };
+      return { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, query: new Set(["notebook_id", "website_source_version_id", "include_failure_reason"]), websiteSourceQuery: true };
     }
     return method === "POST" ? {
           path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`,

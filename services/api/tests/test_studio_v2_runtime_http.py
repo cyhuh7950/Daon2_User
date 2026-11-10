@@ -125,6 +125,23 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
     def authenticated(self):
         return patch.object(self.identity, "describe_access", return_value=identity_session_view(self.principal))
 
+    async def test_review_request_may_exceed_the_general_body_limit(self):
+        from daon2_user_api.studio_v2_routes import ReviewBody
+        requirements = [{"id": f"REQ-{n}", "text": "가" * 90} for n in range(1000)]
+        body = {"expected_revision": 3, "requirements": requirements, "confirm": True}
+        self.assertEqual(len(ReviewBody.model_validate(body).requirements), 1000)
+        headers = {"Content-Type": "application/json", "Idempotency-Key": "studio-v2-key-000001"}
+        import json
+        payload = json.dumps(body, ensure_ascii=False).encode()
+        self.assertGreater(len(payload), 65_536)
+        with self.authenticated():
+            review = await self.client.put(BASE + "/authoring/sessions/" + OID + "/review", cookies=self.cookies, headers=headers, content=payload)
+            other = await self.client.put(BASE + "/authoring/sessions/" + OID + "/outline", cookies=self.cookies, headers=headers, content=payload)
+            huge = await self.client.put(BASE + "/authoring/sessions/" + OID + "/review", cookies=self.cookies, headers=headers, content=b'"' + b"a" * 1_048_577 + b'"')
+        self.assertNotEqual(review.status_code, 413)
+        self.assertEqual(other.status_code, 413)
+        self.assertEqual(huge.status_code, 413)
+
     async def test_types_create_list_get_rename_delete_cancel_export(self):
         key = {"Idempotency-Key": "studio-v2-key-000001"}
         match = {"If-Match": '"studio-v2:' + OID + ':2026-10-20T00:00:00+00:00"'}

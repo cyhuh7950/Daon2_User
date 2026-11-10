@@ -92,6 +92,20 @@ class StudioRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
             return_value=identity_session_view(principal or self.principal),
         )
 
+    async def test_failure_code_is_returned_only_when_asked(self):
+        from dataclasses import replace
+        original = FakeSources.list_sources
+        FakeSources.list_sources = lambda self, context: tuple(replace(item, source_state="failed", safe_error_code="PDF_TEXT_NOT_FOUND") for item in original(self, context))
+        try:
+            with self._authenticated():
+                base = "/api/v1/workspaces/workspace-001/sources?notebook_id=notebook-001"
+                plain = await self.client.get(base, cookies={WEB_SESSION_COOKIE: "opaque"})
+                asked = await self.client.get(base + "&include_failure_reason=true", cookies={WEB_SESSION_COOKIE: "opaque"})
+        finally:
+            FakeSources.list_sources = original
+        self.assertNotIn("safe_error_code", plain.json()["data"]["sources"][0])
+        self.assertEqual(asked.json()["data"]["sources"][0]["safe_error_code"], "PDF_TEXT_NOT_FOUND")
+
     async def test_source_list_and_studio_routes_return_exact_safe_projection(self):
         with self._authenticated():
             sources = await self.client.get("/api/v1/workspaces/workspace-001/sources?notebook_id=notebook-001", cookies={WEB_SESSION_COOKIE: "opaque"})

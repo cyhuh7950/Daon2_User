@@ -280,11 +280,12 @@ function safeResponseError(payload, fallback) {
   return error;
 }
 
-export async function listWorkspaceSources(workspaceId, { notebookId, websiteSourceVersionId, fetchImpl = fetch, signal } = {}) {
+export async function listWorkspaceSources(workspaceId, { notebookId, websiteSourceVersionId, includeFailureReason = false, fetchImpl = fetch, signal } = {}) {
   const workspace = requiredWorkspace(workspaceId, "SOURCE_LIST_INPUT_INVALID");
   const notebook = requiredWorkspace(notebookId, "SOURCE_LIST_INPUT_INVALID");
   if (websiteSourceVersionId !== undefined && !safeId(websiteSourceVersionId)) throw new Error("SOURCE_LIST_INPUT_INVALID");
-  const selectedQuery = websiteSourceVersionId === undefined ? "" : `&website_source_version_id=${encodeURIComponent(websiteSourceVersionId)}`;
+  const selectedQuery = websiteSourceVersionId !== undefined ? `&website_source_version_id=${encodeURIComponent(websiteSourceVersionId)}`
+    : includeFailureReason === true ? "&include_failure_reason=true" : "";
   const response = await fetchImpl(`/bff/api/workspaces/${encodeURIComponent(workspace)}/sources?notebook_id=${encodeURIComponent(notebook)}${selectedQuery}`, {
     method: "GET", credentials: "same-origin", cache: "no-store", signal,
   });
@@ -297,6 +298,7 @@ export async function listWorkspaceSources(workspaceId, { notebookId, websiteSou
     && payload.data.sources.length <= 1_000
     && validMeta(payload.meta, workspace)
     && payload.data.sources.every((source) => (exact(source, SOURCE_KEYS)
+      || (exact(source, [...SOURCE_KEYS, "safe_error_code"]) && typeof source.safe_error_code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(source.safe_error_code))
       || (websiteSourceVersionId !== undefined && source.source_version_id === websiteSourceVersionId
         && exact(source, [...SOURCE_KEYS, "website"]) && source.source_state === "ready"
         && typeof source.website?.text === "string" && new TextEncoder().encode(source.website.text).length <= 524288
