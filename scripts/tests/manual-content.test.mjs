@@ -7,14 +7,12 @@ import test from "node:test";
 const root = new URL("../../", import.meta.url);
 const privateNetworkEvidence = new URL("docs/03_evidence/release_1/R1-M8-10-WINDOWS-OFFLINE-STUDIO-01/phase-c3-manual/browser-network.jsonl", root);
 const privateEvidenceManifest = new URL("docs/03_evidence/release_1/R1-M8-10-WINDOWS-OFFLINE-STUDIO-01/phase-c3-manual/manifest.json", root);
-const docs = [
-  ["daon-getting-started", "Daon Getting Started"],
-  ["daon-user-manual", "Daon 사용자 설명서"],
-  ["daon-knowledge-llm-guide", "Daon 지식·LLM 활용 가이드"],
-];
+// 2.0.0부터 한 권이다(WO-UM1). 시작 안내·지식 가이드는 은퇴했다.
+const docs = [["daon-user-manual", "Daon 사용자 설명서"]];
+const retired = ["daon-getting-started", "daon-knowledge-llm-guide"];
 
 test("S33 두 설명서는 게시본의 상세 절차와 최신 Provider 권한·호환 방식·Auto 설명을 함께 보존한다", async (t) => {
-  for (const id of ["daon-user-manual", "daon-knowledge-llm-guide"]) await t.test(id, async () => {
+  for (const id of ["daon-user-manual"]) await t.test(id, async () => {
     for (const file of [`docs/manual/${id}/index.md`, `apps/web/public/manual/${id}.md`]) {
       const markdown = await readFile(new URL(file, root), "utf8");
       for (const required of [
@@ -50,14 +48,15 @@ test("S33 사용자 설명서는 조직 정책 잠금과 License의 사용자·N
   }
 });
 
-test("S33 지식 가이드는 기존 핵심 원칙과 용어 절의 여섯 근거 정의를 보존한다", async (t) => {
-  for (const file of ["docs/manual/daon-knowledge-llm-guide/index.md", "apps/web/public/manual/daon-knowledge-llm-guide.md"]) await t.test(file, async () => {
+test("S33 지식 원칙 일곱 줄과 근거 용어 여섯 정의는 부록 B 용어집에 보존한다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
     const markdown = await readFile(new URL(file, root), "utf8");
-    const principlesStart = markdown.indexOf("## 1. 목적과 핵심 원칙\n");
-    const termsStart = markdown.indexOf("## 2. 용어\n");
-    const sourcesStart = markdown.indexOf("## 3. 접근 경로와 Source 유형·현재 지원 수준\n");
-    assert.ok(principlesStart >= 0 && termsStart > principlesStart && sourcesStart > termsStart, `${file}: 1 → 2 → 3 절 순서`);
-    assert.deepEqual(markdown.slice(principlesStart, termsStart).split("\n").filter((line) => line.startsWith("- ")), [
+    const glossaryStart = markdown.indexOf("### 부록 B 용어집\n");
+    assert.ok(glossaryStart >= 0, `${file}: 부록 B 용어집`);
+    const rest = markdown.slice(glossaryStart + 1);
+    const next = rest.search(/\n#{2,3} /u);
+    const bullets = rest.slice(0, next < 0 ? undefined : next).split("\n").filter((line) => line.startsWith("- "));
+    assert.deepEqual(bullets.slice(0, 7), [
       "- 질문에 사용할 Source를 사용자가 명시적으로 선택합니다.",
       "- 근거 질문은 Citation을 원문과 함께 검토합니다.",
       "- Provider 연결과 실제 질문 실행 지원을 구분합니다.",
@@ -66,7 +65,7 @@ test("S33 지식 가이드는 기존 핵심 원칙과 용어 절의 여섯 근�
       "- 미지원 형식이나 기능은 성공을 가장하지 않고 안전하게 중단합니다.",
       "- Version, Run과 산출물의 계보를 보존합니다.",
     ]);
-    assert.deepEqual(markdown.slice(termsStart, sourcesStart).split("\n").filter((line) => line.startsWith("- ")).slice(0, 6), [
+    assert.deepEqual(bullets.slice(7, 13), [
       "- Raw Source: 사용자가 직접 등록한 파일이나 텍스트",
       "- Daon 승인 지식: Daon 2, Daon 2.5, Daon 3에서 생산·등록된 지식 패키지",
       "- 연결형 Source: MCP나 Connector를 통해 참조하는 외부 Source",
@@ -77,25 +76,29 @@ test("S33 지식 가이드는 기존 핵심 원칙과 용어 절의 여섯 근�
   });
 });
 
-test("한국어 Manual 정본 3종은 실제 절차·권한·오류·준비 상태를 명시한다", async () => {
+test("한국어 Manual 정본은 1부 첫 업무 흐름과 공개 범위를 명시하고 내부 정보를 쓰지 않는다", async () => {
   for (const [id, title] of docs) {
     const markdown = await readFile(new URL(`docs/manual/${id}/index.md`, root), "utf8");
-    assert.match(markdown, new RegExp(`# ${title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`));
-    for (const heading of ["목적", "접근 경로", "조작", "예상 결과", "제한·오류 대응"]) assert.match(markdown, new RegExp(`##+ .*${heading}`, "u"));
+    assert.ok(markdown.startsWith(`# ${title}\n`));
     assert.match(markdown, /공개 범위|로그인 후 조직 전용/u);
-    assert.doesNotMatch(markdown, /(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/|\/home\/ubuntu|DAON_[A-Z0-9_]*(?:KEY|TOKEN|SECRET)|BEGIN (?:RSA )?PRIVATE KEY)/u);
+    assert.doesNotMatch(markdown, /(?:localhost|127\.0\.0\.1|postgres(?:ql)?:\/\/|\/home\/ubuntu|DAON_[A-Z0-9_]*(?:KEY|TOKEN|SECRET)|BEGIN (?:RSA )?PRIVATE KEY|sinsan\.kr)/u);
+    const flow = markdown.slice(markdown.indexOf("## 1부"), markdown.indexOf("## 2부"));
+    for (const step of ["노트북", "Source", "질문", "근거", "스튜디오", "문서 작성", "내려받"]) assert.match(flow, new RegExp(step, "u"));
   }
-  const gettingStarted = await readFile(new URL("docs/manual/daon-getting-started/index.md", root), "utf8");
-  for (const step of ["Notebook 생성", "Source 추가", "질문", "Citation", "Studio 산출물"]) assert.match(gettingStarted, new RegExp(step, "u"));
-  assert.match(gettingStarted, /준비 중|미구현|미검증/u);
+});
+
+test("은퇴한 두 설명서는 원본·dist·공개 사본 어디에도 남지 않는다", () => {
+  for (const id of retired) {
+    for (const file of [`docs/manual/${id}/index.md`, `docs/manual/dist/${id}.docx`, `docs/manual/dist/${id}.pdf`,
+      `apps/web/public/manual/${id}.md`, `apps/web/public/manual/${id}.docx`, `apps/web/public/manual/${id}.pdf`]) {
+      assert.equal(existsSync(new URL(file, root)), false, file);
+    }
+  }
 });
 
 test("기존 사용자 매뉴얼은 보호된 초기 관리자와 사용자 관리·콘솔 복구 절차를 제공한다", async () => {
-  const [gettingStarted, userManual] = await Promise.all([
-    readFile(new URL("docs/manual/daon-getting-started/index.md", root), "utf8"),
-    readFile(new URL("docs/manual/daon-user-manual/index.md", root), "utf8"),
-  ]);
-  for (const markdown of [gettingStarted, userManual]) {
+  const userManual = await readFile(new URL("docs/manual/daon-user-manual/index.md", root), "utf8");
+  for (const markdown of [userManual]) {
     for (const required of [
       /로그인 ID.*admin/u,
       /이메일.*없/u,
@@ -133,7 +136,7 @@ test("기존 사용자 매뉴얼은 보호된 초기 관리자와 사용자 관�
   assert.match(userManual, /공동 작업자를 초대하거나.*Workspace 권한.*(?:변경|편집).*사용자 화면.*(?:없|제공하지 않)/su);
 });
 
-test("정본·dist·Web public copies는 3문서×3형식에서 byte-identical하다", async () => {
+test("정본·dist·Web public copies는 한 권×3형식과 그림에서 byte-identical하다", async () => {
   for (const [id] of docs) {
     const [sourceMarkdown, publicMarkdown] = await Promise.all([
       readFile(new URL(`docs/manual/${id}/index.md`, root)),
@@ -147,6 +150,14 @@ test("정본·dist·Web public copies는 3문서×3형식에서 byte-identical�
       ]);
       assert.deepEqual(published, dist, `${id}.${extension} public copy must equal dist bytes`);
     }
+    const { readdir } = await import("node:fs/promises");
+    const sourceImages = (await readdir(new URL(`docs/manual/${id}/images/`, root))).filter((name) => /^[a-z0-9-]+\.png$/u.test(name)).sort();
+    const publicImages = (await readdir(new URL("apps/web/public/manual/images/", root))).sort();
+    assert.deepEqual(publicImages, sourceImages);
+    for (const name of sourceImages) {
+      assert.deepEqual(await readFile(new URL(`apps/web/public/manual/images/${name}`, root)),
+        await readFile(new URL(`docs/manual/${id}/images/${name}`, root)), name);
+    }
   }
 });
 
@@ -159,7 +170,8 @@ test("Release/Web manifest는 source·dist·public 실제 bytes와 deterministic
   const manifest = JSON.parse(releaseText);
   assert.equal(manifest.schema_version, 1);
   assert.equal(manifest.language, "ko-KR");
-  assert.equal(manifest.documents.length, 3);
+  assert.equal(manifest.documents.length, 1);
+  assert.equal(manifest.release_version, "2.0.0");
   for (const [id] of docs) {
     const document = manifest.documents.find((entry) => entry.document_id === id);
     assert.ok(document);
