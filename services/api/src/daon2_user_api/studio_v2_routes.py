@@ -59,6 +59,7 @@ class EditTurnBody(_Strict):
 
 class RegenerateBody(_Strict):
     settings: dict[str, Any] | None = None
+    format_id: str | None = Field(default=None, max_length=64)
 
 
 class LearningBody(_Strict):
@@ -240,7 +241,7 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         _require_query_keys(request, frozenset())
         _studio_idempotency_key(idempotency_key)
         ctx = _ctx(request, id, notebook_id, Action.EDIT)
-        result = await run(service.regenerate, ctx, _output_id(output_id), body.settings, idempotency_key)
+        result = await run(service.regenerate, ctx, _output_id(output_id), body.settings, idempotency_key, format_id=body.format_id)
         return JSONResponse({"data": {k: result[k] for k in ("output_id", "job_id", "status")},
                              "meta": {**_meta(request, id), "replayed": result["replayed"]}}, status_code=202)
 

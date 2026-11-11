@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 import unicodedata
@@ -282,12 +283,18 @@ class OpenAICompatibleTextGenerationAdapter:
         material_anchors_supported = _evidence_anchors(answer).issubset(
             _evidence_anchors(cited_text)
         )
-        if (
-            not answer or len(answer) > 8_000 or len(cited) != len(set(cited))
-            or not set(cited).issubset(allowed)
-            or (insufficient and cited) or (not insufficient and not cited)
-            or not material_anchors_supported
-        ):
+        reason = (
+            "answer_empty" if not answer else "answer_too_long" if len(answer) > 8_000
+            else "citation_duplicated" if len(cited) != len(set(cited))
+            else "citation_unknown" if not set(cited).issubset(allowed)
+            else "insufficient_with_citation" if insufficient and cited
+            else "answer_without_citation" if not insufficient and not cited
+            else "anchors_unsupported" if not material_anchors_supported else None
+        )
+        if reason is not None:
+            # 이유 종류와 개수만 남긴다. 질문·답변·근거 글은 남기지 않는다.
+            logging.getLogger(__name__).warning(
+                "text_grounding_failure reason=%s cited_count=%d evidence_count=%d", reason, len(cited), len(request.evidence))
             raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
         return GroundedTextResult(answer, cited, insufficient, usage,reported_cost_from_usage(response.get("usage")))
 

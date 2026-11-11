@@ -26,7 +26,10 @@ from .session import SESSION_SCHEMA, source_versions, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
-INLINE_REF = re.compile(r"[ \t]*\[[SK][0-9]+(?:[ \t]*,[ \t]*[SK][0-9]+)*\]")
+# 본문 근거 표기: [S1], [S1, S2], 위치가 붙은 [S1: 2, S2: 3-4]. 위치 숫자가 본문에 남으면 숫자 검증에 걸린다.
+_REF_PAGE = r"(?:p\.?[ \t]*)?[0-9]+(?:[ \t]*[-~][ \t]*[0-9]+)?(?:[ \t]*(?:쪽|페이지|p))?"
+_REF_LOC = rf"(?:(?:[ \t]*[:：][ \t]*|[ \t]+(?=p\.?[ \t]*[0-9]))(?:{_REF_PAGE})(?:[ \t]*,[ \t]*{_REF_PAGE})*)?"
+INLINE_REF = re.compile(rf"[ \t]*\[[ \t]*[SKL][0-9]+{_REF_LOC}(?:[ \t]*[,;][ \t]*[SKL][0-9]+{_REF_LOC})*[ \t]*\]")
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
 UNIT_REQUIREMENT_CHARS = 8000  # 소목차 하나를 쓰는 요청이 모델 호출 제한을 넘지 않게 한다.
@@ -302,7 +305,7 @@ class AuthoringPipeline:
             if not text:
                 continue
             # 본문에 쓴 근거 번호는 근거로 옮기고 지운다. 번호의 숫자가 숫자 검증에 걸리지 않게 먼저 처리한다.
-            inline = [label for found in INLINE_REF.findall(text) for label in re.findall(r"[SK][0-9]+", found)]
+            inline = [label for found in INLINE_REF.findall(text) for label in re.findall(r"[SKL][0-9]+", found)]
             text = re.sub(r"[ \t]{2,}", " ", INLINE_REF.sub("", text)).strip()
             refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
             if not text:

@@ -66,9 +66,18 @@ class PostgresDocumentIndex:
     def _normalized(text: str) -> str:
         return " ".join(text.casefold().split())
 
-    @staticmethod
-    def _tokens(text: str) -> set[str]:
-        return set(re.findall(r"[가-힣A-Za-z0-9]+", text.casefold()))
+    # 한국어 단어 끝의 조사를 떼어 "예산을"과 "예산은"이 같은 단어로 맞게 한다. 남는 말이 두 글자 이상일 때만 뗀다.
+    _PARTICLES = ("에서", "으로", "에게", "까지", "부터", "이다", "은", "는", "이", "가", "을", "를", "과", "와", "의", "에", "로", "도", "만")
+
+    @classmethod
+    def _tokens(cls, text: str) -> set[str]:
+        tokens = set(re.findall(r"[가-힣A-Za-z0-9]+", text.casefold()))
+        for token in tuple(tokens):
+            for particle in cls._PARTICLES:
+                if token.endswith(particle) and len(token) - len(particle) >= 2 and re.fullmatch(r"[가-힣]+", token):
+                    tokens.add(token[: -len(particle)])
+                    break
+        return tokens
 
     @staticmethod
     def _transition_source(
@@ -212,6 +221,18 @@ class PostgresDocumentIndex:
         if text_source:
             for chunk in chunks:
                 chunk["evidence_kind"] = "text_source_verbatim_fact"
+            # 모델이 고른 핵심 문장만으로는 질문에 답할 수 없다. 원문 전체를 그대로 구간으로 나눠 함께 색인한다.
+            for page, page_text in page_texts:
+                for start in range(0, len(page_text), 1024):
+                    passage = page_text[start:start + 1024]
+                    if not passage.strip():
+                        continue
+                    chunk_id = self._opaque_id("chunk", result.source_version_id, "passage", str(page), str(start), passage)
+                    chunks.append({
+                        "chunk_id": chunk_id, "source_id": result.source_id, "source_version_id": result.source_version_id,
+                        "page": page, "text": passage, "evidence_span_id": self._opaque_id("span", chunk_id, str(page)),
+                        "evidence_kind": "text_source_verbatim_fact",
+                    })
         strategy = "text_llm_facts_with_original_validation" if text_source else "vision_llm_facts_with_parser_page_validation"
         if image_source:
             strategy = "native_image_facts_with_ocr_region_validation"

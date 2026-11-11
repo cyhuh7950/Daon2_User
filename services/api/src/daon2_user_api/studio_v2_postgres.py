@@ -208,13 +208,14 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                     "trace_id": context.trace_id, "policy_version": context.policy_version})))
 
     def regenerate(self, context: StudioContext, output_id: str, settings_override: Mapping[str, object] | None,
-                   idempotency_key: str) -> dict[str, object]:
+                   idempotency_key: str, *, format_id: str | None = None) -> dict[str, object]:
+        format_override = format_id
         notebook_id = self._require_notebook(context)
         key_sha = sha256_hex(idempotency_key)
         job_id = opaque("svj", output_id, key_sha)
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.create")) as connection:
             row = self._owned_output(connection, context, output_id, lock=True)
-            type_id, format_id, status, current_settings, versions = row[1], row[2], row[4], dict(row[6] or {}), list(row[7] or [])
+            type_id, format_id, status, current_settings, versions = row[1], format_override or row[2], row[4], dict(row[6] or {}), list(row[7] or [])
             replay = connection.execute("SELECT state FROM studio_v2_jobs WHERE tenant_id=%s AND workspace_id=%s AND job_id=%s",
                                         (context.tenant_id, context.workspace_id, job_id)).fetchone()
             if replay is not None:

@@ -3121,6 +3121,10 @@
         "properties": {
           "settings": {
             "type": "object"
+          },
+          "format_id": {
+            "type": "string",
+            "maxLength": 64
           }
         }
       },

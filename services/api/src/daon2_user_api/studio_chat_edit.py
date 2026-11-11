@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -83,6 +84,20 @@ def flatten(type_id: str, content: Mapping[str, Any]) -> list[Piece]:
     if handler is None:
         raise ChatEditInvalid("대화 수정을 지원하지 않는 자료입니다.")
     return handler(content)
+
+
+def humanize_reply(reply: str, pieces: Sequence[Piece], limit: int = 20) -> str:
+    """답변 속 내부 조각 번호(s4.b1 등)를 그 조각의 첫 글로 바꾼다. 사용자에게 번호는 뜻이 없다."""
+    labels = {}
+    for piece in pieces:
+        text = " ".join(piece_text(piece.content).split())
+        if text:
+            labels[piece.id] = f"‘{text[:limit]}…’" if len(text) > limit else f"‘{text}’"
+    if not labels:
+        return reply
+    # 뒤에 조사(을·의)나 문장 끝 마침표가 붙어도 바꾼다. 영문·숫자나 ".b1" 같은 더 긴 번호가 이어지면 바꾸지 않는다.
+    pattern = re.compile(r"(?<![A-Za-z0-9_.])(" + "|".join(re.escape(key) for key in sorted(labels, key=len, reverse=True)) + r")(?![A-Za-z0-9_]|\.[A-Za-z0-9])")
+    return pattern.sub(lambda match: labels[match.group(1)], reply)
 
 
 def render_pieces(pieces: Sequence[Piece]) -> str:

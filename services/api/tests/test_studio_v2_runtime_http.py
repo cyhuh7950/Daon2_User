@@ -57,6 +57,10 @@ class FakeV2:
     def soft_delete(self, ctx, output_id):
         self._record("delete", ctx, output_id)
 
+    def regenerate(self, ctx, output_id, settings, key, *, format_id=None):
+        self._record("regenerate", output_id, settings, format_id)
+        return {"output_id": output_id, "job_id": "svj-2", "status": "queued", "replayed": False}
+
     def request_cancel(self, ctx, output_id):
         self._record("cancel", ctx, output_id)
         return {"output_id": output_id, "cancel_requested": True}
@@ -334,6 +338,15 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
             ]
         self.assertEqual([r.status_code for r in responses], [403] * 7)
         self.assertEqual(self.v2.calls, [])
+
+    async def test_regenerate_forwards_the_chosen_format(self):
+        # 실제 화면: "설정 변경 후 다시 생성"에서 고른 형식이 서버로 가지 않아 바뀌지 않았다.
+        headers = {"Idempotency-Key": "studio-v2-key-000077"}
+        with self.authenticated():
+            response = await self.client.post(BASE + f"/outputs/{OID}/regenerate", cookies=self.cookies, headers=headers,
+                                              json={"format_id": "briefing", "settings": {"focus": "핵심"}})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(self.v2.calls[-1], ("regenerate", OID, {"focus": "핵심"}, "briefing"))
 
     async def test_validation_idempotency_and_unknown_fields(self):
         with self.authenticated():

@@ -15,22 +15,22 @@
         "markdown": {
           "filename": "daon-user-manual.md",
           "href": "/manual/daon-user-manual.md",
-          "bytes": 71570,
-          "sha256": "5ef4add2e3b39e17798570a7144dcd7babb69fa07b12f31f86cf570cbc94bca8",
+          "bytes": 71382,
+          "sha256": "883b70824c616e08a44f32acbbca097351a5db73d8a3696112932abec7ad4d1e",
           "mime": "text/markdown; charset=utf-8"
         },
         "docx": {
           "filename": "daon-user-manual.docx",
           "href": "/manual/daon-user-manual.docx",
-          "bytes": 1439970,
-          "sha256": "82727cdc3593fae9c68d17fe6d415a3c0530cc33945f27ba8a98c366e4cb479b",
+          "bytes": 1439912,
+          "sha256": "0cebb4f32072b001b3a7313e2626f6ea90825971769836eb0ae860ab3057bed2",
           "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         },
         "pdf": {
           "filename": "daon-user-manual.pdf",
           "href": "/manual/daon-user-manual.pdf",
-          "bytes": 2139326,
-          "sha256": "076ac7cfb607092312cb7d4e9316bbd46ae2cc08a3ece56ea75f081bb43c1169",
+          "bytes": 2139274,
+          "sha256": "48ce1575635d6a4e7bcd7de3c29cba3dd9ce165d78fc5dd21cd0f79ec94adc5e",
           "mime": "application/pdf"
         }
       }

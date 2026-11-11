@@ -1344,3 +1344,26 @@ class QuestionAnsweringContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroundingFailureReasonLogTests(unittest.TestCase):
+    """실제 서버에서 근거 검증 실패의 이유를 알 수 없었다. 내용 없이 이유 종류만 남긴다."""
+
+    def test_unsupported_number_logs_only_the_reason_kind(self) -> None:
+        class NumberTransport(RecordingTransport):
+            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+                response = super().post_json(**kwargs)
+                response["choices"][0]["message"]["content"] = json.dumps({
+                    "answer": "The phrase is ORANGE-COMPASS-42 on page 7.", "cited_chunk_ids": ["chunk-page-2"], "insufficient": False})
+                return response
+
+        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
+        evidence = (IndexedEvidenceChunk("chunk-page-2", "source-cp3", "source-version-cp3", 2, "ORANGE-COMPASS-42", "span-page-2", 1.0),)
+        with self.assertLogs("daon2_user_api.question_answering", level="WARNING") as logs, \
+                self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            OpenAICompatibleTextGenerationAdapter(transport=NumberTransport(), api_key="server-secret").generate(
+                GroundedQuestionRequest("What is the phrase?", evidence, "trace-cp3"), selection)
+        joined = "\n".join(logs.output)
+        self.assertIn("text_grounding_failure reason=anchors_unsupported", joined)
+        self.assertNotIn("ORANGE", joined)
+        self.assertNotIn("page 7", joined)
