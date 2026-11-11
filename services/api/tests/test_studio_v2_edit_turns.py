@@ -156,7 +156,7 @@ class ResultTests(unittest.TestCase):
 
     def test_list_hides_internal_content(self):
         rows = Repo(turns=[turn()]).list_edit_turns(CTX, OID)
-        self.assertEqual(rows[0]["changes"], [{"op": "replace", "id": "s1.b1", "before_text": "가", "after_text": "고침", "reason": "요청"}])
+        self.assertEqual(rows[0]["changes"], [{"op": "replace", "id": "s1.b1", "before_text": "가", "after_text": "고침", "reason": "요청", "anchor_text": ""}])
         self.assertNotIn("new_evidence_json", rows[0])
         self.assertEqual(rows[0]["created_at"], "2026-11-10T00:00:00+00:00")
 

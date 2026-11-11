@@ -14,7 +14,7 @@ MAX_INSTRUCTION_CHARS = 2000
 COLUMNS = ("turn_id", "output_id", "job_id", "base_revision", "instruction", "state", "reply", "changes_json", "new_evidence_json",
            "error_code", "applied_revision", "created_at")
 _SELECT = "SELECT " + ",".join(COLUMNS) + " FROM studio_v2_edit_turns WHERE tenant_id=%s AND workspace_id=%s AND "
-_PUBLIC_CHANGE = ("op", "id", "before_text", "after_text", "reason")
+_PUBLIC_CHANGE = ("op", "id", "before_text", "after_text", "reason", "anchor_text")
 
 
 def _record(row: Sequence[Any]) -> dict[str, Any]:
@@ -24,7 +24,7 @@ def _record(row: Sequence[Any]) -> dict[str, Any]:
 def _public(record: Mapping[str, Any]) -> dict[str, Any]:
     created = record["created_at"]
     return {"turn_id": record["turn_id"], "output_id": record["output_id"], "base_revision": record["base_revision"], "instruction": record["instruction"],
-            "state": record["state"], "reply": record["reply"], "changes": [{key: change.get(key) for key in _PUBLIC_CHANGE} for change in record["changes_json"]],
+            "state": record["state"], "reply": record["reply"], "changes": [{key: change.get(key, "" if key == "anchor_text" else None) for key in _PUBLIC_CHANGE} for change in record["changes_json"]],
             "error_code": record["error_code"], "applied_revision": record["applied_revision"], "created_at": created.isoformat() if hasattr(created, "isoformat") else created}
 
 

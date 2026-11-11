@@ -98,6 +98,12 @@ class RunnerTests(unittest.TestCase):
         run(FakeLlm({**GOOD, "reply": "s1.b1을 고치고 s1.heading의 뜻은 그대로 두었습니다. 끝은 s1.b1."}), repo)
         self.assertEqual(repo.saved[0]["reply"], "‘가나다’을 고치고 ‘1장’의 뜻은 그대로 두었습니다. 끝은 ‘가나다’.")
 
+    def test_change_reason_shows_piece_text_instead_of_ids(self):
+        repo = FakeRepo()
+        bad = {"reply": "고쳤습니다", "changes": [{**GOOD["changes"][0], "reason": "s1.b1은 s1.heading과 겹쳐 줄였습니다"}]}
+        run(FakeLlm(bad), repo)
+        self.assertEqual(repo.saved[0]["changes"][0]["reason"], "‘가나다’은 ‘1장’과 겹쳐 줄였습니다")
+
     def test_empty_changes_saved_as_no_change(self):
         repo = FakeRepo()
         llm = FakeLlm({"reply": "그 문단은 고칠 수 없습니다", "changes": []})

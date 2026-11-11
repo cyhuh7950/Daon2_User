@@ -105,7 +105,7 @@ const TURN = `svt-${"b".repeat(32)}`;
 const EDIT_OID = `sv2-${"a".repeat(32)}`;
 const EDIT_BASE = `/bff/api/workspaces/ws-1/notebooks/nb-1/studio/outputs/${EDIT_OID}/edit-turns`;
 const editTurn = (over = {}) => ({ turn_id: TURN, output_id: EDIT_OID, base_revision: 3, instruction: "고쳐", state: "ready", reply: "됨",
-  changes: [{ op: "replace", id: "s1.b1", before_text: "가", after_text: "나", reason: "요청" }], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00", ...over });
+  changes: [{ op: "replace", id: "s1.b1", before_text: "가", after_text: "나", reason: "요청", anchor_text: "" }], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00", ...over });
 const envelope = (data, status = 200) => Response.json({ data, meta: { trace_id: "t" } }, { status });
 
 test("대화 수정 API는 경로·Idempotency-Key·응답 모양을 지킨다", async () => {

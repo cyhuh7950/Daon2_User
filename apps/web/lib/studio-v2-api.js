@@ -147,9 +147,9 @@ const TURN_ID = /^svt-[0-9a-f]{32}$/u;
 const TURN_STATES = new Set(["queued", "working", "ready", "no_change", "failed", "applied", "discarded"]);
 const CHANGE_OPS = new Set(["replace", "insert_after", "delete"]);
 const TURN_KEYS = ["turn_id", "output_id", "base_revision", "instruction", "state", "reply", "changes", "error_code", "applied_revision", "created_at"];
-const CHANGE_KEYS = ["op", "id", "before_text", "after_text", "reason"];
+const CHANGE_KEYS = ["op", "id", "before_text", "after_text", "reason", "anchor_text"];
 const validChange = (c) => exact(c, CHANGE_KEYS) && CHANGE_OPS.has(c.op) && typeof c.id === "string" && typeof c.before_text === "string"
-  && typeof c.after_text === "string" && typeof c.reason === "string";
+  && typeof c.after_text === "string" && typeof c.reason === "string" && typeof c.anchor_text === "string";
 const validTurn = (t) => exact(t, TURN_KEYS) && TURN_ID.test(t.turn_id) && TURN_STATES.has(t.state) && typeof t.instruction === "string"
   && (t.reply === null || typeof t.reply === "string") && Array.isArray(t.changes) && t.changes.every(validChange)
   && (t.error_code === null || ERROR_CODE.test(t.error_code));
