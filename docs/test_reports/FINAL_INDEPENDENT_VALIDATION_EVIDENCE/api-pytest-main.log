@@ -1,0 +1,292 @@
+ssssssssssssssss.......sss.....................s........................ [  1%]
+......................ss.............................................sss [  3%]
+.................................................................................................................. [  7%]
+................................................................... [  9%]
+.........................sssss.........ssss............ [ 10%]
+.....................ssss [ 11%]
+sssss..................s............................................................................ [ 14%]
+.................................................................................. [ 16%]
+............................... [ 17%]
+................................... [ 18%]
+................................................ssssssss..................................................s.. [ 21%]
+....s..........sssssssssssss....ssssssssssssssssssssssss.......... [ 22%]
+................ssss.............sss.................... [ 24%]
+...........................................................sssssss.................................... [ 27%]
+.............................sss..................................... [ 29%]
+..........................................ssss..ssss.ss.... [ 30%]
+....ssssssssssssssssssssssssss................................Fsssss.....sssssssssssssssssssssssssssssssssssssssssssss [ 34%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 36%]
+sssssssssssss..ss..ss.sssssssssssssssssssssssssssssssssssssssssssssss..s [ 38%]
+sssss......................................sssssssss..s........................................ss.ssssssssssss [ 41%]
+ssssssssss.......................................................... [ 43%]
+........................................................................ [ 45%]
+........s..................................ssss......s....................... [ 47%]
+....................................................... [ 48%]
+...............ssssss.........sssss.......sssssss.....ssssss.. [ 50%]
+................................................................................. [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+...............................s................... [ 60%]
+................................... [ 61%]
+........................................ [ 62%]
+............ [ 62%]
+............................................................................................................... [ 65%]
+.......................................................... [ 67%]
+................................sss........................................sssssss.........sssssssss [ 69%]
+.......................................s........................... [ 71%]
+.........................................................................sssss................................. [ 74%]
+......................sssssss..........sssssssssssssssss....ssssssssssss [ 76%]
+sssssssssssssss................................................ [ 78%]
+............................................................... [ 80%]
+..........................sss.ssssssssss......................... [ 82%]
+................................................................................................................ [ 85%]
+....sss......................................................... [ 87%]
+...................................ssssssssssss.................... [ 88%]
+........................................................ [ 90%]
+................ss..................................s............................... [ 92%]
+...........FF....F.FF.F.....ssssss..............................................s............ [ 95%]
+.................sss...ssss............................................. [ 97%]
+.............................................................................................            [100%]
+================================== FAILURES ===================================
+___ test_notification_dispatch_requires_current_ready_0072_before_discovery ___
+
+    def test_notification_dispatch_requires_current_ready_0072_before_discovery():
+        """현재 DB를 옛 revision으로 오인해 실제 알림 발견을 막는 회귀를 잡는다."""
+        import pytest
+        from daon2_user_api.notification import NotificationError
+
+        class DiscoveryReached(RuntimeError):
+            pass
+
+>       for ready,revision in ((True,'0072'),(True,'0069'),(True,'0071'),(True,'0073'),(True,'0074'),(True,'0079','0080'),(False,'0072'),(False,'0073')):
+            ^^^^^^^^^^^^^^
+E       ValueError: too many values to unpack (expected 2, got 3)
+
+tests\test_notification_dispatch_runtime.py:68: ValueError
+_________ DialogueTests.test_retry_once_on_retryable_error_then_fail __________
+
+self = <test_tts_audio.DialogueTests testMethod=test_retry_once_on_retryable_error_then_fail>
+
+    def test_retry_once_on_retryable_error_then_fail(self):
+>       result = synthesize_dialogue(FakeClient(fail_first=True), self.engine, [Spoken("A", "하나")], voices={"A": "F1", "B": "M1"}, max_total_seconds=60)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_tts_audio.py:179:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+__________________ DialogueTests.test_segments_gaps_and_mp3 ___________________
+
+self = <test_tts_audio.DialogueTests testMethod=test_segments_gaps_and_mp3>
+
+    def test_segments_gaps_and_mp3(self):
+        client = FakeClient()
+        lines = [Spoken("A", "하나"), Spoken("B", "둘"), Spoken("B", "셋")]
+>       result = synthesize_dialogue(client, self.engine, lines, voices={"A": "F1", "B": "M1"}, max_total_seconds=60)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_tts_audio.py:169:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+____ GeneratorTests.test_a_per_tenant_resolver_picks_each_tenants_engines _____
+
+self = <test_tts_audio.GeneratorTests testMethod=test_a_per_tenant_resolver_picks_each_tenants_engines>
+
+    def test_a_per_tenant_resolver_picks_each_tenants_engines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = load_config(config_file(directory))
+        seen = []
+
+        def resolver(tenant_id):
+            seen.append(tenant_id)
+            return config if tenant_id == "tenant-1" else None
+        client = FakeClient()
+        generator = AudioOverviewGenerator(FakeReader(), ScriptedLLM(SCRIPT), resolver, client_factory=lambda engine: client)
+>       generator.generate(gen_ctx("audio_overview")[0])
+
+tests\test_tts_audio.py:308:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\studio_audio.py:102: in generate
+    audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+___________ GeneratorTests.test_generates_content_asset_and_timings ___________
+
+self = <test_tts_audio.GeneratorTests testMethod=test_generates_content_asset_and_timings>
+
+    def test_generates_content_asset_and_timings(self):
+        generator, client = self.make()
+>       result = generator.generate(gen_ctx("audio_overview")[0])
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_tts_audio.py:251:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\studio_audio.py:102: in generate
+    audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+__ GeneratorTests.test_policy_masking_hides_personal_patterns_before_sending __
+
+self = <test_tts_audio.GeneratorTests testMethod=test_policy_masking_hides_personal_patterns_before_sending>
+
+    def test_policy_masking_hides_personal_patterns_before_sending(self):
+        data = {**SCRIPT, "script": [{**row, "speech": "연락처는 010-1234-5678 입니다."} if i == 0 else row for i, row in enumerate(SCRIPT["script"])]}
+        generator, client = self.make(gate=StubGate(True, masked=True), data=data)
+>       generator.generate(gen_ctx("audio_overview")[0])
+
+tests\test_tts_audio.py:292:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\studio_audio.py:102: in generate
+    audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+____________ GeneratorTests.test_voice_override_and_unknown_voice _____________
+
+self = <test_tts_audio.GeneratorTests testMethod=test_voice_override_and_unknown_voice>
+
+    def test_voice_override_and_unknown_voice(self):
+        generator, client = self.make()
+>       generator.generate(gen_ctx("audio_overview", {"voice_a": "F2"})[0])
+
+tests\test_tts_audio.py:266:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+src\daon2_user_api\studio_audio.py:102: in generate
+    audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
+src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
+    return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+pcm = b'\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10...10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00\x10\x00'
+rate = 22050
+
+    def encode_mp3(pcm: bytes, rate: int) -> bytes:
+>       import lameenc
+E       ModuleNotFoundError: No module named 'lameenc'
+
+src\daon2_user_api\tts_engines.py:254: ModuleNotFoundError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/test_egress_policy_runtime_http.py: 3 warnings
+tests/test_knowledge_connector_runtime_http.py: 2 warnings
+tests/test_license_runtime_http.py: 3 warnings
+tests/test_question_answering_runtime_http.py: 7 warnings
+tests/test_runtime_http.py: 7 warnings
+tests/test_source_upload_runtime.py: 1 warning
+tests/test_studio_report_runtime_http.py: 4 warnings
+tests/test_studio_v2_runtime_http.py: 38 warnings
+tests/test_studio_workspace_runtime_http.py: 6 warnings
+tests/test_tts_engine_routes.py: 5 warnings
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\httpx\_client.py:1768: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+tests/test_egress_policy_runtime_http.py: 11 warnings
+tests/test_knowledge_connector_runtime_http.py: 10 warnings
+tests/test_license_runtime_http.py: 5 warnings
+tests/test_question_answering_runtime_http.py: 26 warnings
+tests/test_runtime_http.py: 15 warnings
+tests/test_source_upload_runtime.py: 18 warnings
+tests/test_studio_report_runtime_http.py: 6 warnings
+tests/test_studio_v2_runtime_http.py: 22 warnings
+tests/test_studio_workspace_runtime_http.py: 5 warnings
+tests/test_tts_engine_routes.py: 13 warnings
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\httpx\_client.py:1859: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+tests/test_external_transfer_personal_owner_runtime_http.py: 17 warnings
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\starlette\testclient.py:454: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+tests/test_knowledge_connector_runtime_http.py: 2 warnings
+tests/test_studio_v2_runtime_http.py: 1 warning
+tests/test_tts_engine_routes.py: 7 warnings
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\httpx\_client.py:1933: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+tests/test_knowledge_connector_runtime_http.py::ConnectorRouteTests::test_admin_crud_and_audit
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_types_create_list_get_rename_delete_cancel_export
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_user_without_workspace_access_is_forbidden_on_every_studio_route
+tests/test_tts_engine_routes.py::TtsEngineRoutesTests::test_admin_flow_and_responses_never_carry_a_key
+tests/test_tts_engine_routes.py::TtsEngineRoutesTests::test_every_route_is_admin_only
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\httpx\_client.py:1966: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_customization_etag_roundtrip
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_export_policy_admin_route_only_for_admins_and_cannot_be_turned_off
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_export_policy_admin_route_only_for_admins_and_cannot_be_turned_off
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_review_request_may_exceed_the_general_body_limit
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_review_request_may_exceed_the_general_body_limit
+tests/test_studio_v2_runtime_http.py::StudioV2RuntimeHttpTests::test_review_request_may_exceed_the_general_body_limit
+  D:\Project\Daon2_User\services\api\.venv\Lib\site-packages\httpx\_client.py:1896: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return await self.request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_notification_dispatch_runtime.py::test_notification_dispatch_requires_current_ready_0072_before_discovery
+FAILED tests/test_tts_audio.py::DialogueTests::test_retry_once_on_retryable_error_then_fail
+FAILED tests/test_tts_audio.py::DialogueTests::test_segments_gaps_and_mp3 - M...
+FAILED tests/test_tts_audio.py::GeneratorTests::test_a_per_tenant_resolver_picks_each_tenants_engines
+FAILED tests/test_tts_audio.py::GeneratorTests::test_generates_content_asset_and_timings
+FAILED tests/test_tts_audio.py::GeneratorTests::test_policy_masking_hides_personal_patterns_before_sending
+FAILED tests/test_tts_audio.py::GeneratorTests::test_voice_override_and_unknown_voice
+7 failed, 3077 passed, 522 skipped, 246 warnings, 2143 subtests passed in 371.51s (0:06:11)

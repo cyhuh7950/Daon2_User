@@ -43,3 +43,6 @@ coverage/
 .studio-a11y-*/
 .*-react-*/
 .*-ui-*/
+
+# Serena MCP 로컬 설정·캐시
+.serena/
