@@ -55,10 +55,10 @@ ___ test_notification_dispatch_requires_current_ready_0072_before_discovery ___
         """현재 DB를 옛 revision으로 오인해 실제 알림 발견을 막는 회귀를 잡는다."""
         import pytest
         from daon2_user_api.notification import NotificationError
-    
+
         class DiscoveryReached(RuntimeError):
             pass
-    
+
 >       for ready,revision in ((True,'0072'),(True,'0069'),(True,'0071'),(True,'0073'),(True,'0074'),(True,'0079','0080'),(False,'0072'),(False,'0073')):
             ^^^^^^^^^^^^^^
 E       ValueError: too many values to unpack (expected 2, got 3)
@@ -72,7 +72,7 @@ self = <test_tts_audio.DialogueTests testMethod=test_retry_once_on_retryable_err
 >       result = synthesize_dialogue(FakeClient(fail_first=True), self.engine, [Spoken("A", "하나")], voices={"A": "F1", "B": "M1"}, max_total_seconds=60)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests\test_tts_audio.py:179: 
+tests\test_tts_audio.py:179:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
     return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
@@ -97,7 +97,7 @@ self = <test_tts_audio.DialogueTests testMethod=test_segments_gaps_and_mp3>
 >       result = synthesize_dialogue(client, self.engine, lines, voices={"A": "F1", "B": "M1"}, max_total_seconds=60)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests\test_tts_audio.py:169: 
+tests\test_tts_audio.py:169:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\tts_engines.py:250: in synthesize_dialogue
     return AudioResult(encode_mp3(bytes(pcm), rate) if encode else b"", round(len(pcm) / 2 * 1000 / rate), tuple(segments), bytes(pcm), rate)
@@ -120,7 +120,7 @@ self = <test_tts_audio.GeneratorTests testMethod=test_a_per_tenant_resolver_pick
         with tempfile.TemporaryDirectory() as directory:
             config = load_config(config_file(directory))
         seen = []
-    
+
         def resolver(tenant_id):
             seen.append(tenant_id)
             return config if tenant_id == "tenant-1" else None
@@ -128,7 +128,7 @@ self = <test_tts_audio.GeneratorTests testMethod=test_a_per_tenant_resolver_pick
         generator = AudioOverviewGenerator(FakeReader(), ScriptedLLM(SCRIPT), resolver, client_factory=lambda engine: client)
 >       generator.generate(gen_ctx("audio_overview")[0])
 
-tests\test_tts_audio.py:308: 
+tests\test_tts_audio.py:308:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\studio_audio.py:102: in generate
     audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
@@ -154,7 +154,7 @@ self = <test_tts_audio.GeneratorTests testMethod=test_generates_content_asset_an
 >       result = generator.generate(gen_ctx("audio_overview")[0])
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-tests\test_tts_audio.py:251: 
+tests\test_tts_audio.py:251:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\studio_audio.py:102: in generate
     audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
@@ -180,7 +180,7 @@ self = <test_tts_audio.GeneratorTests testMethod=test_policy_masking_hides_perso
         generator, client = self.make(gate=StubGate(True, masked=True), data=data)
 >       generator.generate(gen_ctx("audio_overview")[0])
 
-tests\test_tts_audio.py:292: 
+tests\test_tts_audio.py:292:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\studio_audio.py:102: in generate
     audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,
@@ -205,7 +205,7 @@ self = <test_tts_audio.GeneratorTests testMethod=test_voice_override_and_unknown
         generator, client = self.make()
 >       generator.generate(gen_ctx("audio_overview", {"voice_a": "F2"})[0])
 
-tests\test_tts_audio.py:266: 
+tests\test_tts_audio.py:266:
 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 src\daon2_user_api\studio_audio.py:102: in generate
     audio: AudioResult = synthesize_dialogue(client, engine, spoken, voices=voices,

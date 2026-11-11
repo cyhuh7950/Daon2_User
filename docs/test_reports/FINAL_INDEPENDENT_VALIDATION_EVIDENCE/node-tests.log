@@ -1836,9 +1836,9 @@ test at scripts\tests\account-security.test.mjs:306:1
 test at scripts\tests\admin-user-management-react.test.mjs:670:1
 ✖ 현재 workspace 조회가 거부돼도 본인 조직 전환 메뉴로 복구할 수 있다 (406.9808ms)
   AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
-  
+
     assert.ok(buttonByText(view.container, "조직 · 이동할 조직"))
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/admin-user-management-react.test.mjs:697:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -1853,9 +1853,9 @@ test at scripts\tests\admin-user-management-react.test.mjs:670:1
 test at scripts\tests\admin-user-management-react.test.mjs:707:1
 ✖ 전환 commit 뒤 응답 본문이 깨지면 이전 조직 노트북을 즉시 숨기고 재로그인한다 (81.1199ms)
   AssertionError [ERR_ASSERTION]: The input did not match the regular expression /이전 노트북/u. Input:
-  
+
   '◒Daon Notebookqa-user⚙ 설정MY NOTEBOOKS지식에서 결과까지, 하나의 Notebook에서＋ 새 Notebook⌕정렬최근 수정제목▦☷Notebook을 불러오지 못했습니다.NOTEBOOK_UNAVAILABLE다시 시도'
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/admin-user-management-react.test.mjs:735:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -1879,7 +1879,7 @@ test at scripts\tests\admin-user-management-react.test.mjs:751:1
 test at scripts\tests\daon2-user-compose.test.mjs:55:1
 ✖ provider credentials use one read-only secret reference in provider callers (2.3606ms)
   AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /provider_credential_key/. Input:
-  
+
   '\n' +
     '    build:\n' +
     '      context: ../..\n' +
@@ -1928,7 +1928,7 @@ test at scripts\tests\daon2-user-compose.test.mjs:55:1
     '    healthcheck:\n' +
     '      disable: true\n' +
     '    restart: unless-stopped\n'
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/daon2-user-compose.test.mjs:65:10)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -2100,7 +2100,7 @@ test at scripts\tests\manual-content.test.mjs:136:1
   AssertionError [ERR_ASSERTION]: daon-user-manual.md public copy must equal source bytes
   + actual - expected
   ... Skipped lines
-  
+
   + Buffer(52051) [Uint8Array] [
   - Buffer(52155) [Uint8Array] [
       35,
@@ -2235,7 +2235,7 @@ test at scripts\tests\manual-content.test.mjs:136:1
       124,
       32,
       235,
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/manual-content.test.mjs:142:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -2252,7 +2252,7 @@ test at scripts\tests\manual-content.test.mjs:153:1
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
   ... Skipped lines
-  
+
   + Buffer(52051) [Uint8Array] [
   - Buffer(52155) [Uint8Array] [
       35,
@@ -2387,7 +2387,7 @@ test at scripts\tests\manual-content.test.mjs:153:1
       124,
       32,
       235,
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/manual-content.test.mjs:177:14)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -2402,7 +2402,7 @@ test at scripts\tests\manual-content.test.mjs:153:1
 test at scripts\tests\operations-recovery.test.mjs:441:1
 ✖ 운영 Web Wrapper는 Stage A Safe surface이고 실제 Recovery 자산은 Stage C용으로 보존한다 (9.0212ms)
   AssertionError [ERR_ASSERTION]: The input did not match the regular expression /RESOURCE_UNAVAILABLE/. Input:
-  
+
   '"use client";\n' +
     '\n' +
     'import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";\n' +
@@ -2556,7 +2556,7 @@ test at scripts\tests\operations-recovery.test.mjs:441:1
     '  const canonId=v=>typeof v==="string"&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(v)&&!/[\\s\\u0000-\\u001f\\u007f]/u.test(v);\n' +
     '  if (!value || Object.keys(value).length!==9 || !fields.every(k=>Object.hasOwn(value,k)))throw new Error("INVALID_LINEAGE");\n' +
     '  for (const key of fields.slice(0,3)'... 43652 more characters
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/operations-recovery.test.mjs:446:10)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -2572,10 +2572,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:69:1
 ✖ L3 admin은 내부 tenant 자동진입 없이 조직 선택 전 정확히 한 번만 조회한다 (2.1022ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:70:56)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2594,10 +2594,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:83:1
 ✖ L3 일반 관리자는 본인 scope만 읽고 전체 조직 목록을 호출하지 않는다 (0.2799ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:85:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2618,10 +2618,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:90:1
 ✖ L3 조직 변경 뒤 늦은 이전 성공은 새 조직 화면을 복원하지 않는다 (0.2437ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:94:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2642,10 +2642,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:104:1
 ✖ L3 응답 유실은 중복·재진입 새 요청을 막고 명시 동일 요청만 확인한다 (0.2595ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:107:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2666,10 +2666,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:123:1
 ✖ L3 pagehide는 flush 전에 본문과 미제출 코드를 차단하고 복귀 재검증 동안 이전 조직을 노출하지 않는다 (0.8822ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:127:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2690,10 +2690,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:145:1
 ✖ L3 403과 늦은 성공은 거부된 본문을 복원하지 않는다 (0.2747ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:148:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2714,10 +2714,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:158:1
 ✖ L3 같은 세션 popstate 읽기와 겹친 늦은 전송 실패도 원 요청을 보존한다 (0.194ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:161:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2738,10 +2738,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:171:1
 ✖ L3 쓰기 직전 다른 세션이면 mutation 없이 이전 입력을 폐기한다 (0.1758ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:174:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2762,10 +2762,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:179:1
 ✖ L3 flag OFF 거부 뒤에는 조직 전환으로 쓰기 차단을 우회하지 않는다 (0.1942ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:182:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2786,10 +2786,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 승인은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (1.9336ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2810,10 +2810,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 거부은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (0.2042ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2834,10 +2834,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 역할 저장은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (5.6641ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2858,10 +2858,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 중지은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (0.2558ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2882,10 +2882,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 생성은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (0.355ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2906,10 +2906,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:192:3
 ✖ L3 실제 화면 폐기은 정확 대상·version·원 세션으로 저장하고 같은 조직을 재조회한다 (0.1648ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:193:58)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2930,10 +2930,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:227:1
 ✖ L3 첫 session 조회 중 pagehide·pageshow도 새 검증을 시작하고 늦은 원 session을 버린다 (1.9156ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:231:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2954,10 +2954,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:243:1
 ✖ L3 저장 성공 뒤 재조회 실패는 조회 완료나 전체 실패로 가장하지 않는다 (0.3336ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:249:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -2978,10 +2978,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 network 뒤에도 원 키와 본문을 보존한다 (0.2592ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3002,10 +3002,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 401 뒤에도 원 키와 본문을 보존한다 (0.1094ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3026,10 +3026,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 403 뒤에도 원 키와 본문을 보존한다 (0.0874ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3050,10 +3050,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 503 뒤에도 원 키와 본문을 보존한다 (0.0829ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3074,10 +3074,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 malformed 뒤에도 원 키와 본문을 보존한다 (0.0855ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3098,10 +3098,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 pagehide 뒤에도 원 키와 본문을 보존한다 (0.0972ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3122,10 +3122,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:258:3
 ✖ L3 미확정 재확인 사전조회 tenant 뒤에도 원 키와 본문을 보존한다 (0.1102ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:273:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3146,10 +3146,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:299:3
 ✖ L3 미확정 재확인 전송 403도 이전 미확정을 확정 실패로 지우지 않는다 (0.2232ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:307:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3170,10 +3170,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:299:3
 ✖ L3 미확정 재확인 전송 503도 이전 미확정을 확정 실패로 지우지 않는다 (0.1073ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:307:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3194,10 +3194,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:322:1
 ✖ L3 최초 전송 전 조회 실패는 미확정이 아니므로 안전하게 새 제출할 수 있다 (0.1863ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:325:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3218,10 +3218,10 @@ test at scripts\tests\organization-admin-console-react.test.mjs:333:1
 ✖ L3 미확정 재확인에서 확인된 다른 세션만 원 요청을 폐기한다 (0.1742ms)
   AssertionError [ERR_ASSERTION]: 승인된 L3 TEMP만 사용한다
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:31:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-console-react.test.mjs:338:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3242,10 +3242,10 @@ test at scripts\tests\organization-admin-role-label.test.mjs:12:1
 ✖ 기존 미연결 조직 역할은 실제 컴포넌트에서 표기 역할·읽기 전용으로 구분한다 (2.9917ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-l3-20261017-eoul2'
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-admin-role-label.test.mjs:15:10)
       at Test.runInAsyncScope (node:async_hooks:227:14)
       at Test.run (node:internal/test_runner/test:1402:25)
@@ -3263,10 +3263,10 @@ test at scripts\tests\organization-join-react.test.mjs:61:1
 ✖ J2 본인 목록은 재진입·수동 조회로 pending 승인 거부를 구별하고 자동 신청하지 않는다 (2.8129ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:62:65)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3285,10 +3285,10 @@ test at scripts\tests\organization-join-react.test.mjs:74:1
 ✖ J2 정상 제출은 동기 중복을 막고 원 세션·키를 고정하며 입력을 즉시 비운다 (0.4048ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:77:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3309,10 +3309,10 @@ test at scripts\tests\organization-join-react.test.mjs:88:3
 ✖ J2 미확정 재확인 network는 원 코드·키를 보존하고 새 신청을 차단한다 (0.2929ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:95:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3333,10 +3333,10 @@ test at scripts\tests\organization-join-react.test.mjs:88:3
 ✖ J2 미확정 재확인 401는 원 코드·키를 보존하고 새 신청을 차단한다 (0.1615ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:95:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3357,10 +3357,10 @@ test at scripts\tests\organization-join-react.test.mjs:88:3
 ✖ J2 미확정 재확인 403는 원 코드·키를 보존하고 새 신청을 차단한다 (0.168ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:95:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3381,10 +3381,10 @@ test at scripts\tests\organization-join-react.test.mjs:88:3
 ✖ J2 미확정 재확인 503는 원 코드·키를 보존하고 새 신청을 차단한다 (0.1443ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:95:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3405,10 +3405,10 @@ test at scripts\tests\organization-join-react.test.mjs:88:3
 ✖ J2 미확정 재확인 pagehide는 원 코드·키를 보존하고 새 신청을 차단한다 (0.1443ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:95:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3429,10 +3429,10 @@ test at scripts\tests\organization-join-react.test.mjs:112:1
 ✖ J2 pagehide는 flush 전 원문·본문을 숨기고 늦은 본인 목록으로 복원하지 않는다 (0.4501ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:115:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3453,10 +3453,10 @@ test at scripts\tests\organization-join-react.test.mjs:124:1
 ✖ J2 쓰기 전 세션 교체는 mutation0이며 타인 목록도 표시하지 않는다 (0.3549ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:129:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3477,10 +3477,10 @@ test at scripts\tests\organization-join-react.test.mjs:140:3
 ✖ J2 재확인 전송 401도 앞선 미확정의 원 키를 해제하지 않는다 (0.4611ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:148:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3501,10 +3501,10 @@ test at scripts\tests\organization-join-react.test.mjs:140:3
 ✖ J2 재확인 전송 403도 앞선 미확정의 원 키를 해제하지 않는다 (0.1637ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:148:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3525,10 +3525,10 @@ test at scripts\tests\organization-join-react.test.mjs:140:3
 ✖ J2 재확인 전송 503도 앞선 미확정의 원 키를 해제하지 않는다 (0.1401ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:148:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3549,10 +3549,10 @@ test at scripts\tests\organization-join-react.test.mjs:160:1
 ✖ J2 같은 세션 재조회 뒤 늦은 전송 실패도 원 요청을 보존한다 (0.2436ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:163:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3573,10 +3573,10 @@ test at scripts\tests\organization-join-react.test.mjs:175:1
 ✖ J2 미확정 뒤 실제 다른 세션은 이전 코드를 폐기하고 첫 전송 전 실패는 잠그지 않는다 (0.3503ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j2-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:22:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-join-react.test.mjs:179:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3597,10 +3597,10 @@ test at scripts\tests\organization-journey-react.test.mjs:49:1
 ✖ J3 중지 조직 Notebook 거부와 현재조직 목록제외에도 개인 복귀 메뉴를 유지한다 (1.5128ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:50:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3619,10 +3619,10 @@ test at scripts\tests\organization-journey-react.test.mjs:60:1
 ✖ J3 개인전용에서 명시 새로고침으로 승인 조직을 표시하고 자동 전환하지 않는다 (0.3577ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:62:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3643,10 +3643,10 @@ test at scripts\tests\organization-journey-react.test.mjs:72:1
 ✖ J3 pagehide 직후 동기 conceal하고 늦은 Notebook 성공으로 이전자료를 복원하지 않는다 (0.2577ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:73:47)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3667,10 +3667,10 @@ test at scripts\tests\organization-journey-react.test.mjs:84:1
 ✖ J3 전환 응답유실은 본인 세션 확인 전 다른 조직 요청과 동기 중복을 차단한다 (0.4677ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:86:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3691,10 +3691,10 @@ test at scripts\tests\organization-journey-react.test.mjs:99:1
 ✖ J3 scope 조회 실패는 이전 Notebook을 남기지 않으며 실패에서 권한을 추론하지 않는다 (0.2914ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:101:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3715,10 +3715,10 @@ test at scripts\tests\organization-journey-react.test.mjs:110:1
 ✖ J3 전송 중 같은 세션 재조회는 잠금을 해제하지 않고 늦은 응답유실을 표시한다 (0.2524ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:112:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3739,10 +3739,10 @@ test at scripts\tests\organization-journey-react.test.mjs:126:1
 ✖ J3 전환 성공은 이전 Notebook을 폐기하고 새 세션 scope 재진입으로 보낸다 (0.2244ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:127:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3763,10 +3763,10 @@ test at scripts\tests\organization-journey-react.test.mjs:138:1
 ✖ J3 다른 탭 세션 변경을 전송 직전 확인하면 이전 선택을 전송하지 않는다 (0.2142ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:140:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3787,10 +3787,10 @@ test at scripts\tests\organization-journey-react.test.mjs:149:1
 ✖ J3 focus 재검증의 새 세션보다 늦은 이전 Notebook 응답은 폐기한다 (0.3068ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:151:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3811,10 +3811,10 @@ test at scripts\tests\organization-journey-react.test.mjs:162:1
 ✖ J3 전송 중 확인된 실제 다른 세션에는 이전 미확정 결과나 잠금을 노출하지 않는다 (2.0948ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:164:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3835,10 +3835,10 @@ test at scripts\tests\organization-journey-react.test.mjs:177:1
 ✖ J3 같은 세션 재조회 뒤 늦은 전환 성공도 이전 범위 본문을 즉시 폐기한다 (0.306ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:179:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3859,10 +3859,10 @@ test at scripts\tests\organization-journey-react.test.mjs:203:3
 ✖ J3 생성 대기 same-session-focus 이후 A 성공은 목록·자동열기 모두 폐기한다 (1.2322ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:207:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3883,10 +3883,10 @@ test at scripts\tests\organization-journey-react.test.mjs:203:3
 ✖ J3 생성 대기 other-account 이후 A 성공은 목록·자동열기 모두 폐기한다 (0.5502ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:207:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3907,10 +3907,10 @@ test at scripts\tests\organization-journey-react.test.mjs:203:3
 ✖ J3 생성 대기 other-scope 이후 A 성공은 목록·자동열기 모두 폐기한다 (0.1518ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:207:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3931,10 +3931,10 @@ test at scripts\tests\organization-journey-react.test.mjs:203:3
 ✖ J3 생성 대기 cookie-only 이후 A 성공은 목록·자동열기 모두 폐기한다 (0.1446ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:207:24)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -3955,10 +3955,10 @@ test at scripts\tests\organization-journey-react.test.mjs:219:1
 ✖ J3 정상 생성은 검증된 동일 세션에서 목록 반영과 자동열기를 유지한다 (0.1839ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'C:\\Users\\cyhuh\\AppData\\Local\\Temp'
   - 'D:\\tmp\\daon2-user-s39-j3-20261017-eoul2'
-  
+
       at render (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:18:10)
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/organization-journey-react.test.mjs:220:22)
       at Test.runInAsyncScope (node:async_hooks:227:14)
@@ -4024,9 +4024,9 @@ test at scripts\tests\product-studio-click.test.mjs:918:56
 test at scripts\tests\product-studio-click.test.mjs:998:15
 ✖ success (96.0844ms)
   AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Version 2 · 근거 5 · 설정 settings-2/. Input:
-  
+
   '새 Version이 저장되었습니다. (version-2)저장은 완료되었으나 새 Version의 정본 조회가 아직 확인되지 않았습니다.근거 기반 보고서대상 보고서초안편집 입력Version version-2 · 근거 미확인 · 설정 settings-2변경 사유편집 내용편집 새 VersionAI 재생성 새 Version설정 변경 새 Version검토 요청승인 요청승인수정 요청승인 요청 회수내보내기전달 기록 등록전달 기록만 등록하며 실제 외부 송신은 없습니다.생산 지식 등록'
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/product-studio-click.test.mjs:1073:20)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/product-studio-click.test.mjs:998:7)
@@ -4066,13 +4066,13 @@ test at scripts\tests\product-studio-click.test.mjs:1151:1
 ✖ 실제 React click은 저장 구조 산출물을 선택하고 검토·승인요청 adapter를 호출한다 (248.6218ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
   + actual - expected
-  
+
     [
       'version',
   -   'reviews',
   -   'approval-requests'
     ]
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/product-studio-click.test.mjs:1180:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -4095,9 +4095,9 @@ test at scripts\tests\product-studio.test.mjs:372:1
 test at scripts\tests\product-ui-boundary.test.mjs:392:1
 ✖ 현재 Web·Desktop 제품 Source와 존재하는 Build Bundle에는 금지 Token이 없다 (4384.1325ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-  
+
   false !== true
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/product-ui-boundary.test.mjs:396:10)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -4140,9 +4140,9 @@ test at scripts\tests\provider-model-picker-layout.test.mjs:136:1
 test at scripts\tests\s16-source-actions.test.mjs:139:1
 ✖ S16 React 영구 삭제는 추가 인증 후에만 접수하고 재시도는 같은 key와 새 인증을 사용한다 (11.7813ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-  
+
   6 !== 0
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/s16-source-actions.test.mjs:151:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -4157,9 +4157,9 @@ test at scripts\tests\s16-source-actions.test.mjs:139:1
 test at scripts\tests\s16-source-actions.test.mjs:180:1
 ✖ S16 새로고침은 원본 binding 없이 failed 원장을 복원하고 같은 요청을 재시도한다 (13.5061ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-  
+
   9 !== 2
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/s16-source-actions.test.mjs:197:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
@@ -4175,10 +4175,10 @@ test at scripts\tests\web-runtime-shell.test.mjs:87:1
 ✖ navigation, screen, token과 Web Shell의 M2 model/reducer 정본은 변경하지 않는다 (8.9744ms)
   AssertionError [ERR_ASSERTION]: packages/design-tokens/tokens.css
   + actual - expected
-  
+
   + '7167140E58437B4F9B2B5557DFE8BE4F274B52B09A39E9C55B228F89BD4E00F0'
   - '5AC29A2FCDF1F881180E2E71EBA3018C2540E6DDA36C8D8A8CC3A6007A89B309'
-  
+
       at TestContext.<anonymous> (file:///D:/Project/Daon2_User/scripts/tests/web-runtime-shell.test.mjs:99:12)
       at Test.runInAsyncScope (node:async_hooks:227:14)
       at Test.run (node:internal/test_runner/test:1402:25)
