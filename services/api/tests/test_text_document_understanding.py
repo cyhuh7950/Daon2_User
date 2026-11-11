@@ -73,10 +73,18 @@ def test_registered_utf8_text_formats_use_same_semantic_and_verbatim_contract(fi
     assert len(transport.calls) == 1
 
 
-def test_txt_hallucinated_fact_fails_before_ready():
+def test_txt_unsupported_fact_is_dropped_and_original_line_is_kept():
+    # 실제 서버: 모델이 고른 문장 하나가 원문과 달라 TXT 전체가 처리 실패했다(신산님 결정: 맞지 않는 문장만 버리고 처리).
     transport = Transport(["UNSUPPORTED-999 is approved."])
-    with pytest.raises(DocumentUnderstandingError, match="TEXT_UNDERSTANDING_UNGROUNDED"):
-        OllamaTextDocumentAdapter(transport).understand(_document(), _selection(), _context())
+    result = OllamaTextDocumentAdapter(transport).understand(_document(), _selection(), _context())
+    assert result.status == "ready"
+    assert result.semantic.key_facts == ("ORANGE-COMPASS-42 is the current source marker.",)
+
+
+def test_txt_keeps_only_the_verbatim_facts():
+    transport = Transport(["UNSUPPORTED-999 is approved.", "ORANGE-COMPASS-42 is the current source marker."])
+    result = OllamaTextDocumentAdapter(transport).understand(_document(), _selection(), _context())
+    assert result.semantic.key_facts == ("ORANGE-COMPASS-42 is the current source marker.",)
 
 
 def test_txt_invalid_encoding_or_oversize_is_not_sent_to_model():
@@ -212,12 +220,20 @@ def test_qa_missing_get_or_external_selection_never_chats(monkeypatch):
 
 
 @pytest.mark.parametrize('mode,code', [('thinking-only','TEXT_UNDERSTANDING_RESPONSE_INVALID'),
-    ('bad-json','TEXT_UNDERSTANDING_RESPONSE_INVALID'),('ungrounded','TEXT_UNDERSTANDING_UNGROUNDED')])
+    ('bad-json','TEXT_UNDERSTANDING_RESPONSE_INVALID')])
 def test_qa_request_fix_does_not_relax_strict_results(monkeypatch,mode,code):
     monkeypatch.setenv('DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID','workspace-t')
     transport=MetadataTransport(response_mode=mode)
     with pytest.raises(DocumentUnderstandingError,match='^'+code+'$'):
         OllamaTextDocumentAdapter(transport).understand(_document(),thinking_selection(),_context())
+
+
+def test_qa_unsupported_summary_and_fact_are_replaced_by_original_text(monkeypatch):
+    monkeypatch.setenv('DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID','workspace-t')
+    result=OllamaTextDocumentAdapter(MetadataTransport(response_mode='ungrounded')).understand(_document(),thinking_selection(),_context())
+    assert result.status=='ready'
+    assert result.semantic.key_facts==('ORANGE-COMPASS-42 is the current source marker.',)
+    assert 'UNSUPPORTED-999' not in result.semantic.summary
 
 
 _EXACT_SOURCE_LINE = '내용: 복사한 텍스트를 Source로 등록하고 저장 후 다시 조회합니다.'
@@ -237,12 +253,12 @@ class ExactFactTransport(MetadataTransport):
 
 
 @pytest.mark.parametrize('target', ['workspace-t','different-workspace'])
-def test_source_spacing_change_remains_ungrounded_even_with_enum(monkeypatch,target):
+def test_source_spacing_change_is_not_stored_even_with_enum(monkeypatch,target):
     monkeypatch.setenv('DAON_QA_STRUCTURED_OLLAMA_WORKSPACE_ID',target)
     transport=ExactFactTransport(_EXACT_SOURCE_LINE.replace('Source로','Source 로'))
     document=replace(_document(),content=_EXACT_SOURCE_LINE.encode())
-    with pytest.raises(DocumentUnderstandingError,match='^TEXT_UNDERSTANDING_UNGROUNDED$'):
-        OllamaTextDocumentAdapter(transport).understand(document,thinking_selection(),_context())
+    result=OllamaTextDocumentAdapter(transport).understand(document,thinking_selection(),_context())
+    assert result.semantic.key_facts==(_EXACT_SOURCE_LINE,)
 
 
 def test_qa_thinking_schema_offers_exact_lines_but_model_selects_fact(monkeypatch):
@@ -311,5 +327,5 @@ def test_qa_enum_does_not_allow_summary_extra_anchors(monkeypatch):
             return response
     transport=ExtraSummaryTransport(_EXACT_SOURCE_LINE)
     document=replace(_document(),content=_EXACT_SOURCE_LINE.encode())
-    with pytest.raises(DocumentUnderstandingError,match='^TEXT_UNDERSTANDING_UNGROUNDED$'):
-        OllamaTextDocumentAdapter(transport).understand(document,thinking_selection(),_context())
+    result=OllamaTextDocumentAdapter(transport).understand(document,thinking_selection(),_context())
+    assert '58000' not in result.semantic.summary

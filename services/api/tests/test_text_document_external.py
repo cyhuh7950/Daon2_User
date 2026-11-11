@@ -91,8 +91,8 @@ def test_external_adapter_uses_openai_chat_with_key_masks_pii_and_returns_ground
 def test_external_adapter_accepts_fenced_json_and_rejects_ungrounded_or_invalid_answers():
     fenced = "```json\n" + _answer("제3조(면책 기간) 계약일부터 30일 이내 발생한 질병은 보장하지 않습니다.") + "\n```"
     assert OpenAICompatibleTextDocumentAdapter(Transport(fenced)).understand(_document(), _model(), _context()).status == "ready"
-    with pytest.raises(DocumentUnderstandingError, match="TEXT_UNDERSTANDING_UNGROUNDED"):
-        OpenAICompatibleTextDocumentAdapter(Transport(_answer("원문에 없는 사실"))).understand(_document(), _model(), _context())
+    kept = OpenAICompatibleTextDocumentAdapter(Transport(_answer("원문에 없는 사실"))).understand(_document(), _model(), _context())
+    assert "원문에 없는 사실" not in kept.semantic.key_facts and all(fact in kept.parser.page_texts[0][1] for fact in kept.semantic.key_facts)
     for bad in ("not json", json.dumps({"title": "x"})):
         with pytest.raises(DocumentUnderstandingError, match="TEXT_UNDERSTANDING_RESPONSE_INVALID"):
             OpenAICompatibleTextDocumentAdapter(Transport(bad)).understand(_document(), _model(), _context())

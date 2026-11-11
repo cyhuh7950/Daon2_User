@@ -134,11 +134,7 @@ class OllamaTextDocumentAdapter:
                 raise ValueError
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             raise DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502) from None
-        if (
-            any(fact not in original for fact in fact_values)
-            or not _evidence_anchors(summary).issubset(_evidence_anchors(original))
-        ):
-            raise DocumentUnderstandingError("TEXT_UNDERSTANDING_UNGROUNDED", status=502)
+        summary, fact_values = _grounded_facts(original, summary, fact_values)
         return DocumentUnderstandingResult(
             document.source_id, document.source_version_id, "ready",
             ("vision_llm_understanding", "parser_ocr_validation", "evidence_reconciliation"),
@@ -159,6 +155,20 @@ class OllamaTextDocumentAdapter:
                 "trace_id": context.trace_id,
             },
         )
+
+
+def _grounded_facts(original: str, summary: str, facts: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    """원문과 글자가 같은 핵심 문장만 남긴다. 하나도 없으면 원문 첫 줄을 쓰고, 요약에 원문에 없는 숫자가 있으면 첫 문장으로 바꾼다.
+
+    근거 없는 문장은 저장하지 않되, 문장 하나가 어긋났다고 TXT 전체를 실패로 만들지 않는다(신산님 결정 2026-11-11).
+    """
+    kept = tuple(dict.fromkeys(fact for fact in facts if fact in original))
+    if not kept:
+        first = next((line.strip() for line in original.splitlines() if line.strip()), original.strip())
+        kept = (first[:2000],)
+    if not _evidence_anchors(summary).issubset(_evidence_anchors(original)):
+        summary = kept[0][:4000]
+    return summary, kept
 
 
 def _json_text(text: str) -> object:
@@ -192,8 +202,7 @@ def _validated_understanding(raw_content: object, revision: object, original: st
             raise ValueError
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         raise DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502) from None
-    if any(fact not in original for fact in fact_values) or not _evidence_anchors(summary).issubset(_evidence_anchors(original)):
-        raise DocumentUnderstandingError("TEXT_UNDERSTANDING_UNGROUNDED", status=502)
+    summary, fact_values = _grounded_facts(original, summary, fact_values)
     return title, summary, fact_values, revision.strip()
 
 
