@@ -188,7 +188,9 @@ test('S44 Workspace host capacity is explicitly requested and renders measured p
   try{
     assert.equal(options.includeCapacity,true);
     const text=visibleText(view.container);
-    for(const label of ['WSL-server 실측','논리 CPU','CPU 사용률','40.00%','가용 RAM','2026-10-20T00:00:00Z'])assert.ok(text.includes(label),label);
+    const shown=new Intl.DateTimeFormat('ko-KR',{dateStyle:'medium',timeStyle:'medium'}).format(new Date('2026-10-20T00:00:00Z'));
+    for(const label of ['WSL-server 실측','논리 CPU','CPU 사용률','40.00%','가용 RAM',shown])assert.ok(text.includes(label),label);
+    assert.doesNotMatch(text,/2026-10-20T00:00:00Z|TELEMETRY_FRESH/u);
     assert.deepEqual(p.writes,[]);
   }finally{await view.cleanup();}
 });
@@ -1198,9 +1200,9 @@ test("S44 홈 상태·목록의 독립 장애를 빈 목록 성공으로 바꾸�
       const text = visibleText(view.container);
       assert.match(text, part === "status" ? /확인할 수 없/u : /권한/u);
       if (part === "status") assert.match(text, /조회된 백업이 없습니다/u);
-      else { assert.match(text, /API_READY/u); assert.doesNotMatch(text, /조회된 백업이 없습니다/u); }
+      else { assert.match(text, /API · 준비/u); assert.doesNotMatch(text, /조회된 백업이 없습니다/u); }
       rejected = false; await click(view, "다시 조회");
-      assert.match(visibleText(view.container), /API_READY/u);
+      assert.match(visibleText(view.container), /API · 준비/u);
       assert.match(visibleText(view.container), /조회된 백업이 없습니다/u);
       noMutations(view, p.writes);
     } finally { await view.cleanup(); }
@@ -1224,7 +1226,7 @@ test("S44 추가 회귀: status 또는 list의 401은 양쪽 본문과 백업 �
     try {
       assert.deepEqual(p.calls, homeCalls);
       assert.match(visibleText(view.container), /로그인/u);
-      assert.doesNotMatch(visibleText(view.container), /API_READY|PROVIDER_CONFIGURATION_REQUIRED|backup-a|현재 Workspace 운영 상태|백업 목록/u);
+      assert.doesNotMatch(visibleText(view.container), /API · 준비|Provider 설정 · 주의|backup-a|현재 Workspace 운영 상태|백업 목록/u);
       assert.equal(findElements(view.container, node => node.tagName === "A").length, 0);
       noMutations(view, p.writes);
     } finally { await view.cleanup(); }
@@ -1238,7 +1240,7 @@ test("S44 추가 회귀: 중복 backup ID는 목록 전체를 거부하고 독�
   const view = await render("", p.api);
   try {
     assert.deepEqual(p.calls, homeCalls);
-    assert.match(visibleText(view.container), /API_READY/u);
+    assert.match(visibleText(view.container), /API · 준비/u);
     assert.match(visibleText(view.container), /백업 목록:.*확인할 수 없/u);
     assert.doesNotMatch(visibleText(view.container), /backup-a|조회된 백업이 없습니다/u);
     assert.equal(findElements(view.container, node => node.tagName === "A").length, 0);
@@ -1267,7 +1269,7 @@ test("S44 홈은 잘못된 session에서 GET0·조회 전후 모든 scope 교체
     let count = 0;
     const p = homePort({ getSession: async () => ++count === 1 ? session() : session(changes) });
     const view = await render("", p.api);
-    try { assert.match(visibleText(view.container), /권한/u); assert.doesNotMatch(visibleText(view.container), /API_READY|조회된 백업/u); noMutations(view, p.writes); }
+    try { assert.match(visibleText(view.container), /권한/u); assert.doesNotMatch(visibleText(view.container), /API · 준비|조회된 백업/u); noMutations(view, p.writes); }
     finally { await view.cleanup(); }
   }
 });
@@ -1276,7 +1278,7 @@ test("S44 홈 목록의 다른 범위·malformed 응답을 버리고 전체 상�
   for (const data of [null, {}, [backup({ tenant_id: "tenant-b" })], [backup({ workspace_id: "workspace-b" })], [backup({ backup_id: canary, version: 0 })]]) {
     const p = homePort({ listBackups: async () => response(data) }), view = await render("", p.api);
     try {
-      assert.match(visibleText(view.container), /API_READY/u);
+      assert.match(visibleText(view.container), /API · 준비/u);
       assert.match(visibleText(view.container), /확인할 수 없/u);
       assert.doesNotMatch(view.container.textContent, /backup-a|tenant-b|workspace-b|S42_표시금지/u);
       assert.doesNotMatch(visibleText(view.container), /조회된 백업이 없습니다/u); noMutations(view, p.writes);
@@ -1305,15 +1307,15 @@ test("S44 홈 표시도 pagehide·focus 직후 숨기고 session 재확인 전 �
   const gate = deferred(); let count = 0;
   const p = homePort({ getSession: () => ++count <= 2 ? session() : gate.promise }), view = await render("", p.api);
   try {
-    assert.match(visibleText(view.container), /API_READY/u);
+    assert.match(visibleText(view.container), /API · 준비/u);
     await view.act(async () => {
       view.browser.dispatchEvent(new MinimalEvent("pagehide"));
-      assert.doesNotMatch(visibleText(view.container), /API_READY/u);
+      assert.doesNotMatch(visibleText(view.container), /API · 준비/u);
       view.browser.dispatchEvent(new MinimalEvent("focus"));
-      assert.doesNotMatch(visibleText(view.container), /API_READY/u);
+      assert.doesNotMatch(visibleText(view.container), /API · 준비/u);
     });
     await view.act(async () => gate.resolve(session({ workspace_id: null })));
-    assert.doesNotMatch(visibleText(view.container), /API_READY/u); noMutations(view, p.writes);
+    assert.doesNotMatch(visibleText(view.container), /API · 준비/u); noMutations(view, p.writes);
   } finally { gate.resolve(session()); await view.cleanup(); }
 });
 
@@ -1323,7 +1325,8 @@ test("S44 홈은 정상 session 전후를 확인하고 실제 5상태·빈 백�
     assert.match(view.container.textContent, /운영 상태·복구/u);
     assert.deepEqual(p.calls, homeCalls);
     const text = visibleText(view.container);
-    for (const code of ["PROVIDER_CONFIGURATION_REQUIRED", "API_READY", "STORAGE_READY", "SYNC_PENDING", "QUEUE_ATTENTION_REQUIRED"]) assert.ok(text.includes(code));
+    for (const label of ["Provider 설정 · 주의", "API · 준비", "DB·Object Storage", "동기화", "작업 Queue"]) assert.ok(text.includes(label), label);
+    for (const code of ["PROVIDER_CONFIGURATION_REQUIRED", "API_READY", "STORAGE_READY", "SYNC_PENDING", "QUEUE_ATTENTION_REQUIRED"]) assert.ok(!text.includes(code), code);
     assert.match(text, /백업은 자료 선택·계보 사전확인·명시 동의 후 독립 보존 준비가 된 서버에서만 생성됩니다/u);
     assert.match(text, /v3 백업의 등록 목적지 Preview와 별도 인증 Execute·Cancel은 정확 ID 상세에서 사용합니다/u);
     assert.match(text, /독립 전체 DB 복원은 지원하지 않습니다/u);
