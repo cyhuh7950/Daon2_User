@@ -10,10 +10,12 @@ export const CHAT_EDIT_TYPES = ["report", "slides", "flashcards", "quiz", "autho
 const POLL_MS = 2000;
 const ACTIVE = new Set(["queued", "working"]);
 const STATE_NOTE = { applied: "studio.chat_edit.applied", discarded: "studio.chat_edit.discarded" };
+// 위치 표시용으로 앞 조각의 글을 짧게 줄인다.
+const clip = (text, limit = 20) => { const one = String(text).split(/\s+/u).join(" ").trim(); return one.length > limit ? `${one.slice(0, limit)}…` : one; };
 
 function Change({ change }) {
   return <div className="studio-chat-edit__change">
-    <p className="studio-chat-edit__piece">{msg(`studio.chat_edit.op.${change.op}`)} · {change.id}{change.reason ? ` · ${change.reason}` : ""}</p>
+    <p className="studio-chat-edit__piece">{change.op === "insert_after" && change.anchor_text ? `‘${clip(change.anchor_text)}’ ` : ""}{msg(`studio.chat_edit.op.${change.op}`)}{change.reason ? ` · ${change.reason}` : ""}</p>
     <div className="studio-chat-edit__compare">
       <div><strong>{msg("studio.chat_edit.before")}</strong><p>{change.before_text || msg("studio.chat_edit.empty")}</p></div>
       <div><strong>{msg("studio.chat_edit.after")}</strong><p>{change.after_text || msg("studio.chat_edit.empty")}</p></div>

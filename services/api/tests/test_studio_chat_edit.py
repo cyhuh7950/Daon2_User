@@ -84,6 +84,8 @@ class ReportTests(unittest.TestCase):
         rows = describe_changes("report", REPORT, [{"op": "insert_after", "id": "s1.b1", "content": paragraph("새")}, {"op": "delete", "id": "s1.b2"}])
         self.assertEqual((rows[0]["before_text"], rows[0]["after_text"]), ("", "새"))
         self.assertEqual((rows[1]["before_text"], rows[1]["after_text"]), ("나", ""))
+        # 뒤에 추가할 위치는 번호가 아니라 앞 조각의 글로 보여 준다.
+        self.assertEqual((rows[0]["anchor_text"], rows[1]["anchor_text"]), ("가", ""))
 
     def test_unsupported_type_is_invalid(self):
         with self.assertRaises(ChatEditInvalid):

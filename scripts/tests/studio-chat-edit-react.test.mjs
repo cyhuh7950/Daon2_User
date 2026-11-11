@@ -190,9 +190,19 @@ test("polling recovers after a failed list", async () => {
 
 test("each change says what happens and where", async () => {
   const view = await mount(fakeStudio([[turn({ changes: [
-    { op: "insert_after", id: "s2.b1", before_text: "", after_text: "새 문단", reason: "" },
-    { op: "delete", id: "s3", before_text: "지울 절", after_text: "", reason: "" }] })]]));
+    { op: "insert_after", id: "s2.b1", before_text: "", after_text: "새 문단", reason: "", anchor_text: "앞 문단 내용" },
+    { op: "delete", id: "s3", before_text: "지울 절", after_text: "", reason: "", anchor_text: "" }] })]]));
   try {
-    for (const expected of ["뒤에 추가", "s2.b1", "삭제", "s3"]) assert.ok(view.container.textContent.includes(expected), expected);
+    for (const expected of ["‘앞 문단 내용’ 뒤에 추가", "삭제", "지울 절"]) assert.ok(view.container.textContent.includes(expected), expected);
+    for (const hidden of ["s2.b1", "s3 "]) assert.ok(!view.container.textContent.includes(hidden), hidden);
+  } finally { await view.close(); }
+});
+
+test("change rows never show internal piece ids", async () => {
+  // 실제 화면: 변경 카드에 "수정 · s2.b1 · 이유"처럼 내부 조각 번호가 보였다.
+  const view = await mount(fakeStudio([[turn()]]));
+  try {
+    assert.ok(!view.container.textContent.includes("s1.b2"), view.container.textContent);
+    assert.ok(view.container.textContent.includes("요청"));
   } finally { await view.close(); }
 });

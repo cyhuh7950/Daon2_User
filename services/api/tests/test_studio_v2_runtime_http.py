@@ -84,7 +84,7 @@ class FakeV2:
     def list_edit_turns(self, ctx, output_id):
         self._record("edit_turns", ctx, output_id)
         return [{"turn_id": TURN, "output_id": output_id, "base_revision": 3, "instruction": "고쳐", "state": "ready", "reply": "됨",
-                 "changes": [{"op": "delete", "id": "s1", "before_text": "가", "after_text": "", "reason": "요청"}], "error_code": None,
+                 "changes": [{"op": "delete", "id": "s1", "before_text": "가", "after_text": "", "reason": "요청", "anchor_text": ""}], "error_code": None,
                  "applied_revision": None, "created_at": "2026-11-10T00:00:00+00:00"}]
 
     def apply_edit_turn(self, ctx, output_id, turn_id):
@@ -218,7 +218,7 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
             listed = await self.client.get(BASE + "/outputs/" + OID + "/edit-turns", cookies=self.cookies)
         turn = listed.json()["data"]["turns"][0]
         self.assertNotIn("new_evidence", turn)
-        self.assertEqual(set(turn["changes"][0]), {"op", "id", "before_text", "after_text", "reason"})
+        self.assertEqual(set(turn["changes"][0]), {"op", "id", "before_text", "after_text", "reason", "anchor_text"})
 
     async def test_edit_turn_errors_are_safe_codes(self):
         self.v2.fail = ("CHAT_EDIT_STALE", 409)

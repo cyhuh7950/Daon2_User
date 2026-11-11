@@ -287,5 +287,7 @@ def describe_changes(type_id: str, content: Mapping[str, Any], changes: Sequence
         op = change["op"]
         rows.append({"op": op, "id": change["id"], "content": change.get("content"), "reason": str(change.get("reason") or ""),
                      "before_text": "" if op == "insert_after" else piece_text(pieces[change["id"]].content),
-                     "after_text": "" if op == "delete" else piece_text(change["content"])})
+                     "after_text": "" if op == "delete" else piece_text(change["content"]),
+                     # 뒤에 추가할 위치는 번호 대신 앞 조각의 글로 보여 준다.
+                     "anchor_text": piece_text(pieces[change["id"]].content) if op == "insert_after" else ""})
     return rows

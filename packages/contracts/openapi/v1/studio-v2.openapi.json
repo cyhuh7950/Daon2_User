@@ -3257,7 +3257,8 @@
                 "id",
                 "before_text",
                 "after_text",
-                "reason"
+                "reason",
+                "anchor_text"
               ],
               "properties": {
                 "op": {
@@ -3278,6 +3279,9 @@
                   "type": "string"
                 },
                 "reason": {
+                  "type": "string"
+                },
+                "anchor_text": {
                   "type": "string"
                 }
               }
