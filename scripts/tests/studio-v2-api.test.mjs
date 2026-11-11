@@ -46,9 +46,12 @@ test("생성·재생성·메모는 Idempotency-Key와 JSON 본문을 보낸다",
   await regenerateStudioOutput("ws-1", OID, { notebookId: "nb-1", settings: { focus: "x" }, fetchImpl });
   assert.match(calls[1].init.headers["Idempotency-Key"], /^studio-v2-/u);
   assert.equal(calls[1].url, `${BASE}/outputs/${OID}/regenerate`);
+  assert.deepEqual(JSON.parse(calls[1].init.body), { settings: { focus: "x" } });
   await createStudioMemo("ws-1", { notebookId: "nb-1", fromRunResultId: "rr-1", fetchImpl });
   assert.deepEqual(JSON.parse(calls[2].init.body), { from_run_result_id: "rr-1" });
   await cancelStudioOutput("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply({ output_id: OID, cancel_requested: true }) });
+  await regenerateStudioOutput("ws-1", OID, { notebookId: "nb-1", settings: { focus: "x" }, formatId: "briefing", fetchImpl });
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { settings: { focus: "x" }, format_id: "briefing" });
 });
 
 test("이름 변경은 If-Match를, 삭제는 204만 성공으로 본다", async () => {

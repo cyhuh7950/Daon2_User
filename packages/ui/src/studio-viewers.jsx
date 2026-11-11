@@ -271,12 +271,20 @@ export function MemoViewer({ content, onSave }) {
   const [state, setState] = useState("saved");
   const timer = useRef(null);
   const latest = useRef(initial);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const pending = useRef(null);
+  const save = useRef(null);
+  save.current = (value) => onSave?.({ ...content, body: { ...content.body, markdown: value } });
+  // 자동 저장 전에 화면을 떠나도 마지막 입력을 바로 저장한다.
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+    if (pending.current !== null) { const value = pending.current; pending.current = null; Promise.resolve(save.current?.(value)).catch(() => {}); }
+  }, []);
   const change = (value) => {
-    setText(value); setState("pending");
+    setText(value); setState("pending"); pending.current = value;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      try { await onSave?.({ ...content, body: { ...content.body, markdown: value } }); latest.current = value; setState("saved"); } catch { setState("error"); }
+      timer.current = null; pending.current = null;
+      try { await save.current?.(value); latest.current = value; setState("saved"); } catch { setState("error"); }
     }, 1500);
   };
   return <div className="studio-memo">

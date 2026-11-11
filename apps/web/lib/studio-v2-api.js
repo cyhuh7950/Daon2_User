@@ -127,9 +127,11 @@ export async function cancelStudioOutput(workspaceId, outputId, { notebookId, si
   return data;
 }
 
-export async function regenerateStudioOutput(workspaceId, outputId, { notebookId, settings, idempotencyKey, signal, fetchImpl } = {}) {
+export async function regenerateStudioOutput(workspaceId, outputId, { notebookId, settings, formatId, idempotencyKey, signal, fetchImpl } = {}) {
+  const body = settings ? { settings } : {};
+  if (formatId) body.format_id = formatId;
   const { data } = await json(await request("POST", `${outputPath(workspaceId, notebookId, outputId)}/regenerate`,
-    { body: settings ? { settings } : {}, idempotent: true, idempotencyKey, signal, fetchImpl }), validReceipt);
+    { body, idempotent: true, idempotencyKey, signal, fetchImpl }), validReceipt);
   return data;
 }
 

@@ -485,6 +485,31 @@ class PostgresDocumentIndexTests(unittest.TestCase):
             "text_source_verbatim_fact",
         )
 
+    def txt_with_one_key_fact(self) -> DocumentUnderstandingResult:
+        original = "계약 기간은 12개월. 사업 예산은 3억 원이다. 해지 통보는 30일 전."
+        self.cloud.connection.understanding_payload = {"source_id": "source-cp3", "status": "ready", "semantic": {"key_facts": ["계약 기간은 12개월"]}}
+        return DocumentUnderstandingResult(
+            "source-cp3", "source-version-cp3", "ready",
+            ("vision_llm_understanding", "parser_ocr_validation", "evidence_reconciliation"),
+            SemanticUnderstanding("계약서", "계약 기간", ("계약 기간은 12개월",)),
+            ParserValidation(original, original, "", (1,), ((1, original),), "original_text_validation"),
+            {"provider_code": "OLLAMA", "source_format": "txt"},
+        )
+
+    def test_txt_indexes_original_text_passages_not_only_key_facts(self) -> None:
+        # 실제 서버: TXT 색인에 모델이 고른 핵심 문장만 있어 사업 기간·예산 질문이 "찾지 못했습니다"가 됐다.
+        result = self.txt_with_one_key_fact()
+        self.index.index_result(self.context, result)
+        found = self.index.search(self.context, source_id=result.source_id, source_version_id=result.source_version_id, query="사업 예산")
+        self.assertTrue(any("사업 예산은 3억 원" in chunk.text for chunk in found))
+        self.assertTrue(all(chunk["evidence_kind"] == "text_source_verbatim_fact" for chunk in self.cloud.connection.index_payload["chunks"]))
+
+    def test_search_matches_korean_words_with_particles(self) -> None:
+        result = self.txt_with_one_key_fact()
+        self.index.index_result(self.context, result)
+        found = self.index.search(self.context, source_id=result.source_id, source_version_id=result.source_version_id, query="예산을 알려 줘")
+        self.assertTrue(any("사업 예산은 3억 원" in chunk.text for chunk in found))
+
     def test_markdown_and_csv_semantic_facts_create_original_text_sections(self) -> None:
         for source_format in ("md", "csv"):
             with self.subTest(source_format=source_format):

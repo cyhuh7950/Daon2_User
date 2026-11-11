@@ -59,7 +59,8 @@
 .studio-tile:hover:not([aria-disabled="true"]) { background: var(--studio-tile-hover); }
 .studio-tile__label { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .studio-tile__edit { display: none; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; }
-.studio-tile:hover .studio-tile__edit, .studio-tile:focus-within .studio-tile__edit { display: inline-flex; }
+.studio-tile-wrap:hover .studio-tile__edit, .studio-tile-wrap:focus-within .studio-tile__edit { display: inline-flex; }
+@media (hover: none) { .studio-tile__edit { display: inline-flex; } }
 .studio-tile__tooltip { position: absolute; left: 12px; right: 12px; top: calc(100% + 4px); z-index: 5; display: none; padding: 6px 10px; border-radius: 10px;
   background: #202124; color: #ffffff; font-size: 12px; pointer-events: none; }
 .studio-tile:hover .studio-tile__tooltip, .studio-tile:focus-visible .studio-tile__tooltip { display: block; }
@@ -134,7 +135,9 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); }
 .studio-dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .studio-dialog label { display: block; margin: 10px 0 4px; font-weight: 600; }
-.studio-dialog textarea, .studio-dialog input, .studio-dialog select { width: 100%; padding: 8px 12px; border: 1px solid var(--studio-border, #d5dae5); border-radius: 12px; background: transparent; color: inherit; font: inherit; }
+.studio-dialog label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: 8px; }
+.studio-dialog input[type="checkbox"] { width: 18px; height: 18px; margin: 0; }
+.studio-dialog textarea, .studio-dialog input:not([type="checkbox"]):not([type="radio"]), .studio-dialog select { width: 100%; padding: 8px 12px; border: 1px solid var(--studio-border, #d5dae5); border-radius: 12px; background: transparent; color: inherit; font: inherit; }
 .studio-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .studio-dialog dl { margin: 0; }
 .studio-dialog dt { margin-top: 10px; font-weight: 600; }

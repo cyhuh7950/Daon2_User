@@ -165,6 +165,23 @@ class WritingTests(Base):
         document = result.content["document"]
         self.assertEqual([s["title"] for s in document["sections"]], ["1.1 배경", "1.2 목적", "2.1 평가 기준"])
 
+    def test_inline_ref_removes_citations_with_locations_and_several_sources(self):
+        from daon2_user_api.authoring.pipeline import INLINE_REF
+        for raw in ("본문 [S1: 2, S2: 2].", "본문 [S1: 3, 4, S2: 3, 4].", "본문 [S1][S2].", "본문 [K1].", "본문 [S1, S2].", "본문 [S1: 2쪽].", "본문 [S1 p.2].", "본문 [S1: p.2-3, S2: 4페이지]."):
+            self.assertEqual(INLINE_REF.sub("", raw), "본문.", raw)
+        for kept in ("[S1 단계]", "[K1, 2024]"):
+            self.assertEqual(INLINE_REF.sub("", kept), kept)
+
+    def test_citation_with_page_numbers_in_the_text_does_not_stop_the_run(self):
+        # 실제 서버: 모델이 본문에 [S1: 2, S2: 2]처럼 위치를 붙여 쓰면 인용이 지워지지 않고 숫자 검증에 걸려 매 소목차 멈췄다.
+        self.llm.paragraphs = [{"text": "평가 기준은 기술 90점과 가격 10점이다 [K1: 2, K1: 3].", "refs": ["K1"]}]
+        self.generating()
+        result = self.run_job()
+        self.assertEqual(result.content["state"], "completed")
+        unit = result.content["units"][0]
+        self.assertEqual((unit["status"], unit["warnings"]), ("done", []))
+        self.assertNotIn("K1:", unit["paragraphs"][0]["text"])
+
     def test_larger_units_get_more_evidence(self):
         self.generating(target_pages=None)
         self.store.session["units"][0]["target_chars"] = 2400

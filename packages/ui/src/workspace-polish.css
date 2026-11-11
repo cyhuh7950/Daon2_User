@@ -45,9 +45,9 @@
 .adaptive-workspace .source-list { gap: 4px; }
 .adaptive-workspace .source-list-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 56px; border-radius: var(--daon-radius-4); }
 .adaptive-workspace .source-list-row:hover { background: var(--workspace-surface-soft); }
-.adaptive-workspace .source-list-row > button:not(.source-action-trigger):not(.source-retry-button) { flex: 1 1 0; min-width: 0; min-height: 52px; font-size: var(--daon-font-body); }
+.adaptive-workspace .source-list-row > button:not(.source-action-trigger):not(.source-retry-button) { flex: 1 1 140px; min-width: 0; min-height: 52px; font-size: var(--daon-font-body); }
 .adaptive-workspace .source-action-trigger { flex: none; }
-.adaptive-workspace .source-list-row > .source-retry-button { display: inline-flex; flex: none; width: auto; min-height: 36px; align-items: center; padding: 0 12px; border: 1px solid var(--workspace-border); border-radius: 999px; white-space: nowrap; }
+.adaptive-workspace .source-list-row > .source-retry-button { display: inline-flex; flex: none; width: auto; min-height: 36px; align-items: center; padding: 0 12px; border: 1px solid var(--workspace-border); border-radius: 999px; white-space: nowrap; margin-left: auto; }
 .adaptive-workspace .source-row-failure { flex: 0 0 100%; margin: 0; padding: 0 10px 8px; color: var(--daon-color-danger, #e5484d); font-size: var(--daon-font-description); overflow-wrap: anywhere; }
 .adaptive-workspace .source-use-check { width: 18px; height: 18px; margin: 0 4px 0 10px; accent-color: var(--workspace-violet); flex: none; }
 .adaptive-workspace .source-group-heading h3 { font-size: var(--daon-font-body); }

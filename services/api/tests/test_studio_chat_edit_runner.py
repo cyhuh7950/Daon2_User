@@ -87,6 +87,17 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(repo.saved[0]["reply"], "고쳤습니다")
         self.assertEqual((repo.saved[0]["changes"][0]["before_text"], repo.saved[0]["changes"][0]["after_text"]), ("가나다", "고침"))
 
+    def test_reply_shows_the_piece_text_instead_of_internal_piece_ids(self):
+        # 실제 서버: 답변에 "s4.b1" 같은 내부 조각 번호가 그대로 보였다.
+        repo = FakeRepo()
+        run(FakeLlm({**GOOD, "reply": "s1.b1 문단을 고쳤습니다(s1.heading 유지, s9는 없음)."}), repo)
+        self.assertEqual(repo.saved[0]["reply"], "‘가나다’ 문단을 고쳤습니다(‘1장’ 유지, s9는 없음).")
+
+    def test_reply_piece_ids_followed_by_korean_particles_or_a_period_are_replaced(self):
+        repo = FakeRepo()
+        run(FakeLlm({**GOOD, "reply": "s1.b1을 고치고 s1.heading의 뜻은 그대로 두었습니다. 끝은 s1.b1."}), repo)
+        self.assertEqual(repo.saved[0]["reply"], "‘가나다’을 고치고 ‘1장’의 뜻은 그대로 두었습니다. 끝은 ‘가나다’.")
+
     def test_empty_changes_saved_as_no_change(self):
         repo = FakeRepo()
         llm = FakeLlm({"reply": "그 문단은 고칠 수 없습니다", "changes": []})

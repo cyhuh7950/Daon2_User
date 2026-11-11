@@ -232,10 +232,10 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     }
   };
 
-  const regenerate = async (output, settings) => {
+  const regenerate = async (output, settings, formatId) => {
     dispatch({ type: "BUSY", outputId: output.output_id, on: true });
     try {
-      await studio.regenerateOutput(output.output_id, { settings });
+      await studio.regenerateOutput(output.output_id, formatId ? { settings, formatId } : { settings });
       dispatch({ type: "OUTPUT_UPDATED", output: { ...output, status: "queued", error_code: null } });
     } catch (error) { dispatch({ type: "ERROR", code: error?.code }); }
     dispatch({ type: "BUSY", outputId: output.output_id, on: false });
@@ -266,7 +266,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
           const type = typeById.get(typeId) ?? { type_id: typeId, available: false };
           const tile = tileState(type, stats);
           const style = STUDIO_TYPE_STYLE[typeId];
-          return <div key={typeId} style={{ position: "relative" }}>
+          return <div key={typeId} className="studio-tile-wrap" style={{ position: "relative" }}>
             <button type="button" className="studio-tile" style={{ width: "100%" }} aria-disabled={!tile.enabled} aria-label={label(typeId)}
               aria-describedby={`studio-tip-${typeId}`} onClick={() => { if (tile.enabled) create(typeId); }}>
               <StudioIcon name={style.icon} accent={typeId} size={24} />
@@ -303,8 +303,8 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     }} />}
     {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
-    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{}} onCancel={() => setDialog(null)}
-      onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings); }} />}
+    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id }} onCancel={() => setDialog(null)}
+      onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings, values.formatId); }} />}
     {dialog?.kind === "provenance" && <ProvenanceDialog load={() => studio.getProvenance(dialog.output.output_id)} onClose={() => setDialog(null)}
       onOpenEvidence={(ref) => openEvidence(dialog.output, ref)} onRegenerate={(settings) => { const target = dialog.output; setDialog(null); regenerate(target, settings); }} />}
     {dialog?.kind === "share" && <ShareDialog load={() => studio.getSharing(dialog.output.output_id)} onClose={() => setDialog(null)} />}

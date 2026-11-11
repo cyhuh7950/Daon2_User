@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import "@daon2-user/design-tokens/tokens.css";
 import "./workspace.css";
+import { formatNotificationTime } from "./notification-time.js";
 
 const VIEW_STATES = Object.freeze(["loading", "empty", "forbidden", "unavailable", "error", "ready"]);
 const NOTIFICATION_FIELDS = "id workspace_id recipient_id kind severity title summary source_event_id resource_type resource_id deep_link audit_event_id trace_id delivery_state read_state created_at delivered_at read_at version".split(" ");
@@ -234,7 +235,7 @@ export function NotificationInboxWorkspace({ api, mode = "notifications" }) {
             <div><span className="operations-badge">{item.severity ?? (item.request_kind === "delivery" ? "전달 기록" : item.request_kind)}</span><strong>{item.title ?? `${item.request_kind === "delivery" ? "전달 기록" : item.request_kind} · ${item.status}`}</strong></div>
             <p>{item.summary ?? `${item.resource_type} · ${item.resource_id}`}</p>
             {mode === "inbox" && item.request_kind === "delivery" && <small>실제 외부 송신 없음</small>}
-            <small>{item.created_at ?? item.due_at ?? "기한 없음"} · Trace {item.trace_id ?? "소유 Domain Audit 연결"}</small>
+            <small title={item.trace_id ? `추적 번호 ${item.trace_id}` : undefined}>{formatNotificationTime(item.created_at ?? item.due_at)}</small>
             <div className="operations-actions">
               {mode === "notifications" && <button type="button" disabled={reading || readUncertain || item.read_state === "read"} onClick={() => void markRead(item)}>{item.read_state === "read" ? "읽음" : "읽음 처리"}</button>}
               {link ? <a href={link}>원 요청 열기</a> : <span className="operations-visible-warning">CURRENT_ACCESS_DENIED</span>}

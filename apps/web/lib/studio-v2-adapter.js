@@ -7,6 +7,7 @@ import {
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, issueExportStepUp,
   listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
+import { localMemoTitle } from "./memo-title.js";
 
 // 노트북 범위(workspaceId, notebookId)를 미리 묶은 Studio v2 어댑터. 셸·패널은 이 객체만 쓴다.
 export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {}) {
@@ -41,7 +42,7 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     getSharing: (outputId, options) => getStudioSharing(workspaceId, outputId, scope(options)),
     recordLearningAttempt: (outputId, input) => recordLearningAttempt(workspaceId, outputId, scope(input)),
     listLearningAttempts: (outputId, options) => listLearningAttempts(workspaceId, outputId, scope(options)),
-    createMemo: (input) => createStudioMemo(workspaceId, scope(input)),
+    createMemo: (input) => createStudioMemo(workspaceId, scope({ ...input, title: input?.title ?? localMemoTitle() })),
     issueExportStepUp: (outputId, password, options) => issueExportStepUp(outputId, password, options),
     copyNotebook: (input) => copyNotebook(workspaceId, scope(input)),
     clearChatHistory: (options) => clearChatHistory(workspaceId, scope(options)),

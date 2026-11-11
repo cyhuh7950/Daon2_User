@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .authoring.agent import knowledge_row, next_knowledge_ref
 from .question_external_evidence import ExternalEvidenceError
-from .studio_chat_edit import AUTHORED_TYPE, MAX_PIECE_CHARS, ChatEditInvalid, Piece, apply_changes, describe_changes, flatten, piece_text, pieces_size, render_pieces
+from .studio_chat_edit import AUTHORED_TYPE, MAX_PIECE_CHARS, ChatEditInvalid, Piece, apply_changes, describe_changes, flatten, humanize_reply, piece_text, pieces_size, render_pieces
 from .studio_context_builder import ContextPack, build_pack
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import StudioCancelled
@@ -98,7 +98,7 @@ class ChatEditRunner:
                               max_output_tokens=6000, prompt_version="studio-chat-edit-v1", schema_name="studio_chat_edit")
         reply, changes = self._answer(context, prompt, type_id, content, cancel_check)
         new_evidence = [material.rows[ref] for ref in _used_refs(changes) if ref in material.rows]
-        self._repository.save_edit_turn_result(context, turn_id, reply=reply, changes=describe_changes(type_id, content, changes), new_evidence=new_evidence)
+        self._repository.save_edit_turn_result(context, turn_id, reply=humanize_reply(reply, pieces), changes=describe_changes(type_id, content, changes), new_evidence=new_evidence)
 
     def _material(self, context: StudioContext, output_id: str, type_id: str, instruction: str, pieces: Sequence[Piece], content: Mapping[str, Any], cancel_check: Callable[[], None]) -> _Material:
         """더 찾을지는 LLM이 정한다. 찾지 못해도 대화는 끊지 않고 그 사실을 LLM에 알린다."""

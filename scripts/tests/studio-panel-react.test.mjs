@@ -578,3 +578,39 @@ test("panel hides chat for other types and without the adapter", async () => {
     } finally { await view.close(); }
   }
 });
+
+test("설정 변경 후 다시 생성은 고른 형식을 함께 보내고 지금 형식으로 창을 연다", async () => {
+  // 실제 화면: 형식을 바꿔도 regenerate에 formatId가 가지 않아 형식이 그대로였다.
+  const studio = fakeStudio();
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "더보기: 보고서 1"));
+    const menuitem = findElements(view.container, (n) => n.getAttribute?.("role") === "menuitem" && n.textContent.trim() === "설정 변경 후 다시 생성")[0];
+    await view.click(menuitem);
+    const select = findElements(view.container, (n) => n.getAttribute?.("id") === "studio-format")[0];
+    assert.equal(reactProps(select).value, "summary");
+    await view.act(async () => { reactProps(select).onChange({ target: { value: "custom" } }); });
+    const custom = findElements(view.container, (n) => n.getAttribute?.("id") === "studio-custom")[0];
+    await view.act(async () => { reactProps(custom).onChange({ target: { value: "세 줄로" } }); });
+    const form = findElements(view.container, (n) => n.tagName === "FORM")[0];
+    await view.act(async () => { reactProps(form).onSubmit({ preventDefault() {} }); });
+    const [name, id, options] = studio.calls.at(-1);
+    assert.deepEqual([name, id, options.formatId, options.settings.custom_instruction], ["regenerate", OID("a"), "custom", "세 줄로"]);
+  } finally { await view.close(); }
+});
+
+test("메모를 고친 뒤 자동 저장 전에 목록으로 나가도 마지막 입력을 저장한다", async () => {
+  // 실제 화면: 입력 후 1.5초 안에 나가면 타이머만 지워져 마지막 입력이 사라졌다.
+  const memo = item({ output_id: OID("m"), type_id: "memo", format_id: null, title: "메모 1" });
+  const studio = fakeStudio([memo]);
+  studio.getOutput = async (id) => ({ ...memo, output_id: id, settings: {}, evidence: [], assets: [], revision: { content: { schema: "studio.memo.v1", body: { markdown: "처음" } } } });
+  studio.createRevision = async (id, input) => { studio.calls.push(["revision", id, input.content.body.markdown]); return { output_id: id, revision_no: 2 }; };
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "열기: 메모 1"));
+    const area = findElements(view.container, (n) => n.getAttribute?.("id") === "studio-memo-text")[0];
+    await view.act(async () => { reactProps(area).onChange({ target: { value: "고친 메모" } }); });
+    await view.click(byLabel(view.container, "목록으로"));
+    assert.deepEqual(studio.calls.filter((call) => call[0] === "revision"), [["revision", OID("m"), "고친 메모"]]);
+  } finally { await view.close(); }
+});
