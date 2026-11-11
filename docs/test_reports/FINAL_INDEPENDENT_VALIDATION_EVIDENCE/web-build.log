@@ -1,0 +1,59 @@
+
+> @daon2-user/web@0.0.0 build
+> next build && node ../../scripts/verify-product-ui-boundary.mjs --target web
+
+▲ Next.js 16.4.3 (Turbopack)
+✓ Running next.config.mjs took 19ms
+- Experiments (use with caution):
+  ✓ authInterrupts
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 3.8s
+  Running TypeScript ...
+  Finished TypeScript in 9ms ...
+  Collecting page data using 15 workers ...
+  Generating static pages using 15 workers (0/22) ...
+  Generating static pages using 15 workers (5/22) 
+  Generating static pages using 15 workers (10/22) 
+  Generating static pages using 15 workers (16/22) 
+✓ Generating static pages using 15 workers (22/22) in 532ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /admin
+├ ƒ /api/v1/[...path]
+├ ○ /auth/android/authorize
+├ ƒ /bff/api/[...path]
+├ ƒ /bff/shell/runtime
+├ ○ /inbox
+├ ƒ /notebooks
+├ ƒ /notebooks/[notebook_id]
+├ ○ /notifications
+├ ○ /operations
+├ ○ /organization-admin
+├ ○ /organization/join
+├ ƒ /password-change
+├ ○ /settings/account
+├ ○ /settings/authoring-templates
+├ ○ /settings/export-policy
+├ ○ /settings/knowledge-connectors
+├ ○ /settings/license
+├ ○ /settings/manual
+├ ○ /settings/model-connections
+├ ○ /settings/organization
+├ ○ /settings/screen
+├ ○ /settings/tts-engines
+└ ƒ /workspaces/[workspace_id]
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+{
+  "ok": true,
+  "scannedFiles": 731,
+  "violations": [],
+  "boundaryErrors": []
+}
