@@ -162,6 +162,8 @@ function lineageSummary(response,roots) {
 
 const COMPONENT_NAMES = { provider: "Provider 설정", api: "API", storage: "DB·Object Storage", sync: "동기화", queue: "작업 Queue" };
 const STATUS_NAMES = { ready: "준비", warning: "주의", error: "오류" };
+// 서버 시각(ISO)은 사용자 현지 시각으로 읽기 쉽게 보여 준다.
+const displayTime = value => new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "medium" }).format(new Date(value));
 const OBSERVATION_NAMES = {
   document_pending: "문서 처리 대기", document_retry_wait: "문서 재시도 대기", document_leased: "문서 lease", document_dead_letter: "문서 처리 실패 대기",
   object_pending: "Object 대기", object_retry_wait: "Object 재시도 대기", object_leased: "Object lease", object_dead_letter: "Object 실패 대기",
@@ -357,11 +359,11 @@ function WorkspaceTelemetry({status}){
     <h3>Worker·자원 관측</h3>
     <ul>{(status.worker_samples??[]).map(r=><li key={r.worker_kind}>
       {kinds[r.worker_kind]} · {states[r.state]??"조회 불가"} · {{alive:"프로세스 관측",processing:"처리 중",poll_stale:"poll 지연",stopped:"종료 관측",unknown:"실행 미확인"}[r.process_state]}
-      {serverTimestamp(r.observed_at)?` · ${r.observed_at}`:""}
+      {serverTimestamp(r.observed_at)?` · ${displayTime(r.observed_at)}`:""}
     </li>)}</ul>
     <dl>{(status.resource_samples??[]).map(r=><div key={`${r.worker_kind}:${r.metric_id}`}><dt>{kinds[r.worker_kind]} · {metrics[r.metric_id]}</dt>
       <dd>{states[r.state]??"조회 불가"} · {resourceDisplay(r)}
-        {r.worker_kind==='server_host'&&serverTimestamp(r.observed_at)?` · 관측 ${r.observed_at} · 수신 ${r.received_at}`:''}
+        {r.worker_kind==='server_host'&&serverTimestamp(r.observed_at)?` · 관측 ${displayTime(r.observed_at)}${serverTimestamp(r.received_at)?` · 수신 ${displayTime(r.received_at)}`:''}`:''}
         {r.worker_kind==='server_host'&&<span title="WSL-server CPU·RAM 실측입니다. 30초 수집, 조회 시각 기준 60초 유효이며 첫 CPU는 미수집입니다. GPU·모델 적재 허용을 뜻하지 않습니다."> ⓘ</span>}
       </dd></div>)}</dl>
     <h3>차단·재처리 관측 <span title="현재 접근 가능한 기록만 집계합니다. 추가 인증·접근·외부 송신 차단과 최초 억제 조건은 직전 24시간이며 역할 대기는 현재값입니다. 억제는 시도 횟수가 아닌 고유 조건의 관측 하한입니다. 부분 집계는 전체 수가 아니며 미수집·조회 실패는 0건으로 계산하지 않습니다.">ⓘ</span></h3>
@@ -677,9 +679,9 @@ export function RecoveryOperationsWorkspace({ api = recoveryApi } = {}) {
               onClick={()=>setMetricsScope("workspace_visible")}>현재 열람 가능한 Workspace 기록</button>
           </fieldset>
           {loaded.home.status ? <>
-            <p>기존 5종 상태: {STATUS_NAMES[loaded.home.status.overall_status]} · 확인 시각: {loaded.home.status.checked_at}</p>
+            <p>기존 5종 상태: {STATUS_NAMES[loaded.home.status.overall_status]} · 확인 시각: {serverTimestamp(loaded.home.status.checked_at) ? displayTime(loaded.home.status.checked_at) : "미확인"}</p>
             <ul>{loaded.home.status.components.map(item => <li key={item.component_id}>
-              {COMPONENT_NAMES[item.component_id]} · {STATUS_NAMES[item.status]} · {item.safe_code} · 대기 {item.pending_count}건
+              {COMPONENT_NAMES[item.component_id]} · {STATUS_NAMES[item.status]} · 대기 {item.pending_count}건
             </li>)}</ul>
             <p>Provider는 설정 상태이며 모델 실제 호출 결과가 아닙니다. 대기 건수는 실패 건수가 아닙니다.</p>
             <h3>기존 기록 운영 관측 16종</h3>
@@ -688,7 +690,7 @@ export function RecoveryOperationsWorkspace({ api = recoveryApi } = {}) {
               const state = row && Object.hasOwn(OBSERVATION_STATES, row.state) ? row.state : "unavailable";
               const measured = ["measured", "partial"].includes(state) && Number.isSafeInteger(row?.value) && row.value >= 0;
               return <div key={id} data-metric-id={id}><dt>{label}</dt><dd>{OBSERVATION_STATES[state]} · {measured ? `${row.value} ${OBSERVATION_UNITS[row.unit] ?? ""}` : "값 미확인"}
-                {measured && serverTimestamp(row.observed_at) ? ` · ${row.observed_at}` : ""}</dd></div>;
+                {measured && serverTimestamp(row.observed_at) ? ` · ${displayTime(row.observed_at)}` : ""}</dd></div>;
             })}</dl>
             <p>자료·Token은 본인의 현재 접근 가능한 기록만 집계합니다. Queue는 기존 Workspace 운영 집계입니다. Token 누락은 0으로 계산하지 않으며 기간 전체 사용량이 아닙니다.</p>
             <WorkspaceTelemetry status={loaded.home.status}/>
