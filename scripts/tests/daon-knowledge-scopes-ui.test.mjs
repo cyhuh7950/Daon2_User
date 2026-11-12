@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { getNotebookKnowledgeScopes, listDaonKnowledgeScopes, saveNotebookKnowledgeScopes } from "../../apps/web/lib/daon-knowledge-scopes-api.js";
+import { getNotebookKnowledgeScopes, getNotebookKnowledgeStatus, listDaonKnowledgeScopes, saveNotebookKnowledgeScopes } from "../../apps/web/lib/daon-knowledge-scopes-api.js";
 import { registerKnowledgeConnector } from "../../apps/web/lib/knowledge-connectors-api.js";
 import { MinimalEvent, buttonByText, findElements, installMinimalDom } from "./product-studio-dom.mjs";
 
@@ -109,4 +109,43 @@ test("BFF는 목록·선택 경로만 열고 선택 저장에 CSRF 출처 확인
   const source = await readFile(path.join(root, "apps/web/lib/bff-api-proxy.js"), "utf8");
   assert.match(source, /segments\[2\] === "daon-knowledge-scopes"/u);
   assert.match(source, /segments\[4\] === "knowledge-scopes"[\s\S]{0,400}csrfProvenanceRequired: method === "PUT"/u);
+});
+
+// WO-K6: 패키지마다 어떤 승인 지식을 쓸 수 있는지 패널에 보인다.
+const status = (id, count, kinds) => ({ ...selected(id, id), document_count: count, kinds });
+
+test("패널은 패키지별로 쓸 수 있는 지식 종류를 보여 준다", async () => {
+  const view = await mount({ getNotebookKnowledgeScopes: async () => ({ items: [selected("w1", "제안서 작업"), selected("w2", "보험 지원")] }),
+    getNotebookKnowledgeStatus: async () => ({ items: [
+      status("w1", 7, { rag: "ready", ontology: "ready", ruleset: "ready", approved: "empty", graphrag: "unknown" }),
+      status("w2", 2, { rag: "ready", ontology: "not_ready", ruleset: "not_ready", approved: "not_ready", graphrag: "not_ready" })] }) });
+  try {
+    const text = view.container.textContent;
+    assert.ok(text.includes("문서 7건 · 온톨로지 · 규칙 · GraphRAG 질문 때 확인"), text);
+    assert.ok(text.includes("문서 2건 · 온톨로지·규칙·승인 자산 준비 안 됨"), text);
+  } finally { await view.close(); }
+});
+
+test("Daon2 연결이 없으면 문서만 보이고 상태 확인 실패는 패널을 막지 않는다", async () => {
+  const none = await mount({ getNotebookKnowledgeScopes: async () => ({ items: [selected("w1", "제안서 작업")] }),
+    getNotebookKnowledgeStatus: async () => ({ items: [status("w1", 7, { rag: "ready", ontology: "none", ruleset: "none", approved: "none", graphrag: "none" })] }) });
+  try {
+    assert.ok(none.container.textContent.includes("문서 7건"));
+    assert.ok(!none.container.textContent.includes("온톨로지"));
+  } finally { await none.close(); }
+  const failing = await mount({ getNotebookKnowledgeScopes: async () => ({ items: [selected("w1", "제안서 작업")] }),
+    getNotebookKnowledgeStatus: async () => { throw new Error("x"); } });
+  try {
+    assert.ok(failing.container.textContent.includes("제안서 작업"));
+    assert.equal(findElements(failing.container, (node) => node.getAttribute?.("role") === "alert").length, 0);
+  } finally { await failing.close(); }
+});
+
+test("상태 조회는 노트북의 상태 경로를 쓰고 BFF가 그 경로만 GET으로 연다", async () => {
+  const calls = [];
+  await getNotebookKnowledgeStatus("ws-1", "nb-1", { fetchImpl: async (url, init) => { calls.push([url, init]); return respond({ data: { items: [] } }); } });
+  assert.equal(calls[0][0], "/bff/api/workspaces/ws-1/notebooks/nb-1/knowledge-scopes/status");
+  assert.equal(calls[0][1].method, "GET");
+  const source = await readFile(path.join(root, "apps/web/lib/bff-api-proxy.js"), "utf8");
+  assert.match(source, /segments\[5\] === "status"[\s\S]{0,300}method === "GET"/u);
 });

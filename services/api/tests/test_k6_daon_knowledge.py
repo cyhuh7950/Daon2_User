@@ -124,7 +124,7 @@ class Daon2KindEvidenceTests(unittest.TestCase):
         self.assertEqual(len(finder.run(daon2_target("A"), (("P1", "보험금", "ontology"),))), 1)
 
     def test_approved_asset_is_read_and_cited(self):
-        finder = self.finder(approved_knowledge_search={"assets": [{"asset_id": "a1", "version_id": "v1", "title": "지급 안내", "provenance": APPROVED}], "provenance": APPROVED},
+        finder = self.finder(approved_knowledge_search={"assets": [{"asset_id": "a1", "version_id": "v1", "asset_name": "지급 안내", "provenance": APPROVED}], "provenance": APPROVED},
                              approved_knowledge_read={"asset_id": "a1", "version_id": "v1", "approval_status": "APPROVED", "version": "1", "content": {"body": "지급은 7일 안에 한다."},
                                                       "evidence": [], "expires_at": None, "revoked_at": None, "provenance": APPROVED})
         found = finder.run(daon2_target("A"), (("P1", "지급", "approved"),))
@@ -246,3 +246,65 @@ class FactServiceTests(unittest.TestCase):
         self.evidence(_Costs())
         self.assertEqual(self.facts, {})
         self.assertFalse(any("fact extractor" in str(p) for p in self.transport.payloads))
+
+
+class KnowledgeStatusTests(unittest.TestCase):
+    """선택한 업무 패키지마다 문서·온톨로지·규칙·승인 자산이 준비됐는지 가볍게 확인한다."""
+
+    def service(self, daon2=True, **responses):
+        from daon2_user_api.mcp_client import McpError  # noqa: F401
+        from test_knowledge_scope_service import CTX, _Store, scope
+        rag_page = {"scopes": [scope("p1", "w1", 7), scope("p1", "w2", 2)], "next_cursor": None}
+        calls = self.calls = []
+
+        class Connectors:
+            def list(self, _context):  # noqa: A003
+                items = [{"connector_id": "kc-rag", "kind": "daon2_rag", "status": "verified"}]
+                return items + ([{"connector_id": "kc-d2", "kind": "daon2", "status": "verified"}] if daon2 else [])
+
+            def call(self, context, connector_id, tool, arguments):
+                calls.append((connector_id, tool, dict(arguments)))
+                if tool == "list_knowledge_scopes":
+                    return SimpleNamespace(structured=rag_page, is_error=False)
+                value = responses[tool]
+                value = value(arguments) if callable(value) else value
+                if isinstance(value, Exception):
+                    raise value
+                return SimpleNamespace(structured=value, is_error=False)
+
+        from daon2_user_api.knowledge_scope_service import KnowledgeScopeService
+        self.ctx = CTX
+        return KnowledgeScopeService(_Store(rows=[("p1", "프로젝트", "w1", "제안서 작업"), ("p1", "프로젝트", "w2", "보험")]), Connectors())
+
+    def ready(self):
+        from daon2_user_api.mcp_client import McpError
+        def by_package(ok):
+            return lambda arguments: ok if arguments["scope"]["work_package_id"] == "w1" else McpError("SCOPE_FORBIDDEN")
+        return dict(
+            ontology_search_concepts=by_package({"concepts": [], "result_state": "EMPTY_RESULT", "provenance": "EXPERT_APPROVED"}),
+            ruleset_list=by_package({"rulesets": [{"ruleset_id": "r1"}], "provenance": "EXPERT_APPROVED"}),
+            approved_knowledge_search=by_package({"assets": [], "provenance": "EXPERT_APPROVED"}))
+
+    def test_each_selected_package_reports_its_knowledge(self):
+        result = self.service(**self.ready()).knowledge_status(self.ctx, "nb-1")
+        first, second = result["items"]
+        self.assertEqual((first["work_package_id"], first["document_count"]), ("w1", 7))
+        self.assertEqual(first["kinds"], {"rag": "ready", "ontology": "ready", "ruleset": "ready", "approved": "empty", "graphrag": "unknown"})
+        self.assertEqual(second["kinds"], {"rag": "ready", "ontology": "not_ready", "ruleset": "not_ready", "approved": "not_ready", "graphrag": "not_ready"})
+        scope_sent = next(c[2]["scope"] for c in self.calls if c[1] == "ruleset_list")
+        self.assertEqual(scope_sent, {"tenant_id": "src-tenant", "project_id": "p1", "work_package_id": "w1"})
+
+    def test_graphrag_is_never_called_for_status(self):
+        self.service(**self.ready()).knowledge_status(self.ctx, "nb-1")
+        self.assertNotIn("graphrag_query", [c[1] for c in self.calls])
+
+    def test_without_daon2_connection_only_documents_are_shown(self):
+        result = self.service(daon2=False).knowledge_status(self.ctx, "nb-1")
+        self.assertEqual(result["items"][0]["kinds"], {"rag": "ready", "ontology": "none", "ruleset": "none", "approved": "none", "graphrag": "none"})
+
+    def test_server_failure_is_unknown_not_an_error(self):
+        from daon2_user_api.mcp_client import McpError
+        broken = {name: McpError("UPSTREAM_UNAVAILABLE") for name in ("ontology_search_concepts", "ruleset_list", "approved_knowledge_search")}
+        kinds = self.service(**broken).knowledge_status(self.ctx, "nb-1")["items"][0]["kinds"]
+        self.assertEqual(kinds["ontology"], "unknown")
+        self.assertEqual(kinds["ruleset"], "unknown")

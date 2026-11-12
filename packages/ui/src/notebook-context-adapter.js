@@ -269,6 +269,9 @@ export function createNotebookContextWorkspaceAdapter(baseAdapter, inputContext)
     getNotebookKnowledgeScopes: typeof baseAdapter.getNotebookKnowledgeScopes === "function"
       ? (options) => baseAdapter.getNotebookKnowledgeScopes({ ...options, notebookId: context.notebook_id })
       : undefined,
+    getNotebookKnowledgeStatus: typeof baseAdapter.getNotebookKnowledgeStatus === "function"
+      ? (options) => baseAdapter.getNotebookKnowledgeStatus({ ...options, notebookId: context.notebook_id })
+      : undefined,
     saveNotebookKnowledgeScopes: typeof baseAdapter.saveNotebookKnowledgeScopes === "function"
       ? (items, options) => baseAdapter.saveNotebookKnowledgeScopes(items, { ...options, notebookId: context.notebook_id })
       : undefined,

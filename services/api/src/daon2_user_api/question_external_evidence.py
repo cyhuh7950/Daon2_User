@@ -483,7 +483,7 @@ class NotebookKnowledgeEvidence:
             content = asset.get("content")
             if asset.get("provenance") != DAON2_APPROVED or asset.get("revoked_at") or not isinstance(content, Mapping):
                 continue
-            title = next((str(v) for k in ("title", "name") for v in (row.get(k), content.get(k)) if isinstance(v, str) and v), "승인 지식")
+            title = next((str(v) for k in ("asset_name", "title", "name") for v in (row.get(k), content.get(k)) if isinstance(v, str) and v), "승인 지식")
             body = "\n".join(str(value) for value in content.values() if isinstance(value, str) and value.strip()) or json.dumps(content, ensure_ascii=False)
             found.append(cls._named_evidence(connector_id, package, f"승인 자산 · {title}", row["asset_id"], row["version_id"], body, 0.55))
         return found

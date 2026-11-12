@@ -530,6 +530,17 @@ function routeFor(method, segments) {
       : { methodRejected: true };
   }
   if (
+    segments.length === 6 && segments[0] === "workspaces"
+    && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "knowledge-scopes" && segments[5] === "status"
+  ) {
+    // 패키지마다 Daon2를 가볍게 조회하므로 목록보다 조금 더 기다린다.
+    return method === "GET"
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/knowledge-scopes/status`,
+          query: new Set(), strictQuery: true, timeoutMs: 90_000 }
+      : { methodRejected: true };
+  }
+  if (
     segments.length === 5 && segments[0] === "workspaces"
     && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
     && SAFE_SEGMENT.test(segments[3]) && segments[4] === "knowledge-scopes"
