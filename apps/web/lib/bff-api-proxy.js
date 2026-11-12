@@ -1498,7 +1498,7 @@ export function createBffProxy({
     const abortScope = createAbortScope(
       request.signal,
       route.law ? 30_000 : route.websiteImport || websiteQuery ? 25_000 : route.groundedQuestion
-        ? (route.path.endsWith('/questions') ? questionTimeoutMs : questionTimeoutMs ?? 100_000) : (route.timeoutMs ?? timeoutMs),
+        ? (route.path.endsWith('/questions') ? questionTimeoutMs : questionTimeoutMs ?? 240_000) : (route.timeoutMs ?? timeoutMs),
     );
     try {
       if (abortScope.signal.aborted) return cancellationError(abortScope, trace);

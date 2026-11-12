@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+from datetime import datetime, timezone
 import json
 import re
 from contextlib import contextmanager
@@ -46,7 +47,12 @@ DAON2_APPROVED = "EXPERT_APPROVED"
 # 그 업무 패키지에 게시된 지식이 없거나(NOT_READY), 그 조합이 Daon2에 없는 경우(SCOPE_FORBIDDEN, Daon2 2026-11-12 배포 이후)라 장애로 보지 않는다.
 DAON2_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN"})
 # GraphRAG는 모델을 불러 오래 걸리고 실패도 잦다. 실패하면 그 요청만 건너뛰고 다른 지식으로 답한다.
-DAON2_SKIPPABLE = {"graphrag": DAON2_NOT_READY | {"UPSTREAM_UNAVAILABLE", "MCP_UNAVAILABLE", "LIMIT_EXCEEDED"}}
+# 이 기능 이전에 등록된 연결은 허용 도구에 새 도구가 없을 수 있다. 그 지식 종류만 건너뛴다.
+DAON2_SKIP = DAON2_NOT_READY | {"MCP_TOOL_NOT_ALLOWED"}
+# GraphRAG는 모델을 불러 오래 걸리고 실패 원인이 다양하다(게이트웨이 502/504 등). 어떤 실패든 그 요청만 건너뛴다.
+SKIP_ANY_FAILURE = frozenset({"graphrag"})
+# 승인 자산은 Daon2가 승인·게시한 것만 검색하지만, 명백히 승인이 아닌 상태는 한 번 더 거른다.
+UNAPPROVED_ASSET_STATES = frozenset({"DRAFT", "PENDING", "REJECTED", "REVOKED", "EXPIRED", "WITHDRAWN", "ARCHIVED"})
 GRAPHRAG_EVIDENCE_LIMIT = 5
 TRAVERSE_NODE_LIMIT = 10
 JUDGMENT_RULE_LIMIT = 3
@@ -415,7 +421,11 @@ class NotebookKnowledgeEvidence:
                 return self._judgment(call, target.daon2_connector_id, package, query, remaining, extract_facts), used[0]
             return readers[kind](call, target.daon2_connector_id, package, query, budget, remaining), used[0]
         except McpError as error:
-            if error.code not in DAON2_SKIPPABLE.get(kind, DAON2_NOT_READY):
+            if kind not in SKIP_ANY_FAILURE and error.code not in DAON2_SKIP:
+                raise
+            return [], used[0]
+        except ExternalEvidenceError:
+            if kind not in SKIP_ANY_FAILURE:
                 raise
             return [], used[0]
 
@@ -466,7 +476,8 @@ class NotebookKnowledgeEvidence:
         if result.get("provenance") != DAON2_APPROVED or not isinstance(answer, str) or not answer.strip():
             return []
         lines = [f"GraphRAG 답: {answer.strip()}"]
-        for item in (result.get("evidence") or [])[:GRAPHRAG_EVIDENCE_LIMIT]:
+        evidence = result.get("evidence")
+        for item in (evidence if isinstance(evidence, list) else [])[:GRAPHRAG_EVIDENCE_LIMIT]:
             if isinstance(item, Mapping):
                 text = " · ".join(str(item[key]) for key in ("label", "name", "title", "text", "content", "summary") if isinstance(item.get(key), str) and item[key].strip())
                 lines.append(f"- {text or json.dumps(item, ensure_ascii=False)[:300]}")
@@ -476,17 +487,39 @@ class NotebookKnowledgeEvidence:
     @classmethod
     def _approved(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int, remaining: Any = lambda: 0) -> list[ExternalEvidence]:
         listed = call("approved_knowledge_search", {"query": query[:200], "limit": DAON2_ITEM_LIMIT})
-        rows = [{"provenance": listed.get("provenance"), **row} for row in listed.get("assets") or [] if isinstance(row, Mapping)]
+        rows = [{"provenance": listed.get("provenance"), **row} for row in listed.get("assets") or [] if isinstance(row, Mapping) and cls._asset_usable(row)]
         found: list[ExternalEvidence] = []
         for row in cls._readable(rows, "asset_id", "version_id", budget):
             asset = call("approved_knowledge_read", {"asset_id": row["asset_id"], "version_id": row["version_id"]})
             content = asset.get("content")
-            if asset.get("provenance") != DAON2_APPROVED or asset.get("revoked_at") or not isinstance(content, Mapping):
+            if asset.get("provenance") != DAON2_APPROVED or not cls._asset_usable(asset) or not isinstance(content, Mapping):
                 continue
             title = next((str(v) for k in ("asset_name", "title", "name") for v in (row.get(k), content.get(k)) if isinstance(v, str) and v), "승인 지식")
             body = "\n".join(str(value) for value in content.values() if isinstance(value, str) and value.strip()) or json.dumps(content, ensure_ascii=False)
             found.append(cls._named_evidence(connector_id, package, f"승인 자산 · {title}", row["asset_id"], row["version_id"], body, 0.55))
         return found
+
+    @staticmethod
+    def _asset_usable(item: Mapping[str, Any]) -> bool:
+        """철회됐거나 유효기간이 지났거나 승인이 아닌 상태의 자산은 쓰지 않는다."""
+        if item.get("revoked_at") or str(item.get("approval_status") or "").upper() in UNAPPROVED_ASSET_STATES:
+            return False
+        expires = item.get("expires_at")
+        if expires:
+            try:
+                moment = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return moment > datetime.now(timezone.utc)
+        return True
+
+    @staticmethod
+    def _rule_conditions(rule: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        formal = rule.get("formal")
+        conditions = formal.get("if") if isinstance(formal, Mapping) else None
+        return [c for c in conditions if isinstance(c, Mapping)] if isinstance(conditions, list) else []
 
     @classmethod
     def _judgment(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, remaining: Any, extract_facts: Any) -> list[ExternalEvidence]:
@@ -501,18 +534,18 @@ class NotebookKnowledgeEvidence:
                 break
             rule = call("ruleset_get", {"ruleset_id": row["ruleset_id"]})
             if rule.get("provenance") == DAON2_APPROVED and rule.get("published") is True and isinstance(rule.get("name"), str):
-                rules.append(rule)
+                rules.append({**rule, "ruleset_id": row["ruleset_id"]})  # 목록의 id를 쓴다(본문에 빠져도 판정 가능)
         if not rules:
             return []
         subjects: dict[str, str] = {}
         for rule in rules:
-            for condition in (rule.get("formal") or {}).get("if") or []:
-                subject = condition.get("subject") if isinstance(condition, Mapping) else None
+            for condition in cls._rule_conditions(rule):
+                subject = condition.get("subject")
                 if isinstance(subject, str) and subject not in subjects and len(subjects) < JUDGMENT_FACT_LIMIT:
                     subjects[subject] = cls._concept_label(call, subject) if remaining() > 1 else ""
         conditions, by_id = [], {}
         for index, (subject, label) in enumerate(subjects.items(), start=1):
-            sample = next((c for rule in rules for c in (rule.get("formal") or {}).get("if") or [] if isinstance(c, Mapping) and c.get("subject") == subject), {})
+            sample = next((c for rule in rules for c in cls._rule_conditions(rule) if c.get("subject") == subject), {})
             by_id[f"F{index}"] = subject
             conditions.append({"id": f"F{index}", "label": label or f"조건 {index}", "datatype": sample.get("datatype"), "operator": sample.get("operator"), "value": sample.get("value")})
         values = extract_facts(query, conditions) or {}

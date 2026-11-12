@@ -308,3 +308,46 @@ class KnowledgeStatusTests(unittest.TestCase):
         kinds = self.service(**broken).knowledge_status(self.ctx, "nb-1")["items"][0]["kinds"]
         self.assertEqual(kinds["ontology"], "unknown")
         self.assertEqual(kinds["ruleset"], "unknown")
+
+
+class ReviewFixTests(unittest.TestCase):
+    """2026-11-12 브랜치 검토에서 나온 결함."""
+
+    def finder(self, **responses):
+        self.connectors = _ToolConnectors(**responses)
+        return NotebookKnowledgeEvidence(_Scopes([]), self.connectors)
+
+    def test_any_graphrag_failure_skips_only_that_request(self):
+        for code in ("MCP_HTTP_ERROR", "MCP_RATE_LIMITED", "MCP_RESPONSE_TOO_LARGE", "MCP_RESPONSE_INVALID", "MCP_TOOL_NOT_ALLOWED"):
+            with self.subTest(code=code):
+                self.assertEqual(self.finder(graphrag_query=McpError(code)).run(daon2_target("A"), (("P1", "q", "graphrag"),)), ())
+
+    def test_graphrag_error_result_is_skipped(self):
+        finder = self.finder()
+        finder._connectors.call = lambda *a, **k: SimpleNamespace(structured=None, is_error=True)  # noqa: SLF001
+        self.assertEqual(finder.run(daon2_target("A"), (("P1", "q", "graphrag"),)), ())
+
+    def test_tool_not_allowed_on_an_older_connection_is_skipped(self):
+        # 이 기능 이전에 등록된 연결은 허용 도구에 새 도구가 없다. 질문 전체를 실패시키지 않는다.
+        self.assertEqual(self.finder(approved_knowledge_search=McpError("MCP_TOOL_NOT_ALLOWED")).run(daon2_target("A"), (("P1", "q", "approved"),)), ())
+
+    def test_expired_withdrawn_or_unapproved_assets_are_not_used(self):
+        content = {"asset_id": "a1", "version_id": "v1", "approval_status": "APPROVED", "content": {"body": "본문"}, "expires_at": None, "revoked_at": None, "provenance": APPROVED}
+        cases = {
+            "search_revoked": ({"revoked_at": "2026-01-01T00:00:00Z"}, {}),
+            "search_expired": ({"expires_at": "2000-01-01T00:00:00Z"}, {}),
+            "search_unapproved": ({"approval_status": "DRAFT"}, {}),
+            "read_expired": ({}, {"expires_at": "2000-01-01T00:00:00Z"}),
+        }
+        for name, (row_over, read_over) in cases.items():
+            with self.subTest(name):
+                row = {"asset_id": "a1", "version_id": "v1", "asset_name": "안내", "approval_status": "APPROVED", "expires_at": None, "revoked_at": None, **row_over}
+                finder = self.finder(approved_knowledge_search={"assets": [row], "provenance": APPROVED}, approved_knowledge_read={**content, **read_over})
+                self.assertEqual(finder.run(daon2_target("A"), (("P1", "q", "approved"),)), ())
+
+    def test_unexpected_rule_shape_does_not_fail_the_question(self):
+        rule = {"revision": 1, "name": "규칙", "purpose": "", "formal": "깨진 형식", "published": True, "provenance": APPROVED}
+        finder = self.finder(ruleset_list={"rulesets": [{"ruleset_id": "r1", "published": True}], "provenance": APPROVED}, ruleset_get=rule,
+                             ruleset_evaluate={"results": [{"ruleset_id": "r1", "revision": 1, "result": "needs_review", "resolution_trace": []}], "provenance": APPROVED})
+        found = finder.run(daon2_target("A"), (("P1", "q", "judgment"),), extract_facts=lambda q, c: {})
+        self.assertEqual([item.document_name for item in found], ["규칙 판정 · 규칙"])
