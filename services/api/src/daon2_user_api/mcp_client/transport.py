@@ -42,14 +42,14 @@ class HttpJsonRpcTransport:
         return f"HttpJsonRpcTransport(endpoint={self._endpoint!r}, token={'set' if self._token or self._token_provider else 'none'})"
 
     def request(self, method: str, params: Mapping[str, Any] | None = None, *, protocol_version: str | None = None,
-                session_id: str | None = None) -> tuple[Mapping[str, Any], Mapping[str, str]]:
+                session_id: str | None = None, timeout_seconds: float | None = None) -> tuple[Mapping[str, Any], Mapping[str, str]]:
         self._counter += 1
         body: dict[str, Any] = {"jsonrpc": "2.0", "id": self._counter, "method": method}
         if params is not None:
             body["params"] = dict(params)
         if protocol_version == STATELESS_PROTOCOL:
             body["params"] = {**body.get("params", {}), "_meta": _STATELESS_META}
-        return self._post(body, protocol_version, session_id, expect_result=True)
+        return self._post(body, protocol_version, session_id, expect_result=True, timeout_seconds=timeout_seconds)
 
     def notify(self, method: str, params: Mapping[str, Any] | None = None, *, protocol_version: str | None = None,
                session_id: str | None = None) -> None:
@@ -58,7 +58,7 @@ class HttpJsonRpcTransport:
             body["params"] = dict(params)
         self._post(body, protocol_version, session_id, expect_result=False)
 
-    def _post(self, body: Mapping[str, Any], protocol_version: str | None, session_id: str | None, *, expect_result: bool):  # type: ignore[no-untyped-def]
+    def _post(self, body: Mapping[str, Any], protocol_version: str | None, session_id: str | None, *, expect_result: bool, timeout_seconds: float | None = None):  # type: ignore[no-untyped-def]
         headers = {"Content-Type": "application/json", "Accept": "application/json", **self._extra}
         token = self._token_provider() if self._token_provider else self._token
         if token:
@@ -74,7 +74,7 @@ class HttpJsonRpcTransport:
             headers["Mcp-Session-Id"] = session_id
         request = urllib.request.Request(self._endpoint, data=json.dumps(body, separators=(",", ":")).encode("utf-8"), headers=headers, method="POST")
         try:
-            with self._opener.open(request, timeout=self._timeout) as response:
+            with self._opener.open(request, timeout=timeout_seconds or self._timeout) as response:
                 raw = response.read(self._max + 1)
                 response_headers = {k.lower(): v for k, v in response.headers.items()}
                 status = response.status

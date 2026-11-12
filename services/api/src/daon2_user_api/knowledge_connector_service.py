@@ -26,12 +26,15 @@ KINDS = {"daon2_rag": "knowledge-rag", "daon2": "knowledge-ops", "law": "law"}
 # Connector 종류별로 호출을 허용하는 도구의 상한(등록 시 허용 목록은 이 안에서만 고른다).
 KIND_TOOLS: Mapping[str, frozenset[str]] = {
     "daon2_rag": frozenset({"search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section",
-                            "get_document_version_status", "list_knowledge_scopes"}),
-    "daon2": frozenset({"ontology_search_concepts", "ontology_get_concept", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search"}),
+                            "get_document_version_status", "list_knowledge_scopes", "get_document_text", "list_approved_documents"}),
+    "daon2": frozenset({"ontology_search_concepts", "ontology_get_concept", "ontology_traverse", "graphrag_query", "ruleset_list", "ruleset_get",
+                        "ruleset_evaluate", "approved_knowledge_search", "approved_knowledge_read"}),
     "law": frozenset({"search_law", "get_law_text"}),
 }
 _PROVIDER_CODE = "CUSTOM"
 _OAUTH_AUTH_KIND = "oauth_client_credentials"
+# 모델을 부르는 도구는 오래 걸린다. Daon2 안내: graphrag_query 최대 약 2분, 클라이언트 대기 130초 이상(WO-K6).
+SLOW_TOOL_TIMEOUTS: Mapping[str, float] = {"graphrag_query": 135.0}
 _OAUTH_LIMITS = {"token_url": 2048, "client_id": 256, "client_secret": 8192, "resource": 2048, "scope": 1024}
 
 
@@ -293,7 +296,8 @@ class KnowledgeConnectorService:
             raise ConnectorError("CONNECTOR_SCOPE_DENIED", 403)
         if client._connection is None:  # noqa: SLF001
             client.connect()
-        return client.call_tool(tool, arguments)
+        slow = SLOW_TOOL_TIMEOUTS.get(tool)
+        return client.call_tool(tool, arguments, timeout_seconds=slow) if slow else client.call_tool(tool, arguments)
 
     def _authorize_egress(self, context: ConnectorContext, view: Mapping[str, Any], arguments: Mapping[str, Any]) -> None:
         if self._egress_gate is None or view["virtual"]:
