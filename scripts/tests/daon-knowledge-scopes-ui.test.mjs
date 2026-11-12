@@ -122,7 +122,7 @@ test("패널은 패키지별로 쓸 수 있는 지식 종류를 보여 준다", 
   try {
     const text = view.container.textContent;
     assert.ok(text.includes("문서 7건 · 온톨로지 · 규칙 · GraphRAG 질문 때 확인"), text);
-    assert.ok(text.includes("문서 2건 · 온톨로지·규칙·승인 자산 준비 안 됨"), text);
+    assert.ok(text.includes("문서 2건 · 온톨로지·규칙·승인 자산·GraphRAG 준비 안 됨"), text);
   } finally { await view.close(); }
 });
 
@@ -148,4 +148,17 @@ test("상태 조회는 노트북의 상태 경로를 쓰고 BFF가 그 경로만
   assert.equal(calls[0][1].method, "GET");
   const source = await readFile(path.join(root, "apps/web/lib/bff-api-proxy.js"), "utf8");
   assert.match(source, /segments\[5\] === "status"[\s\S]{0,300}method === "GET"/u);
+});
+
+test("범용 토큰의 services로 GraphRAG 준비 여부가 정확히 보인다", async () => {
+  const view = await mount({ getNotebookKnowledgeScopes: async () => ({ items: [selected("w1", "제안서 작업"), selected("w2", "보험 지원")] }),
+    getNotebookKnowledgeStatus: async () => ({ items: [
+      status("w1", 7, { rag: "ready", ontology: "ready", ruleset: "ready", approved: "empty", graphrag: "ready" }),
+      status("w2", 2, { rag: "ready", ontology: "ready", ruleset: "not_ready", approved: "empty", graphrag: "not_ready" })] }) });
+  try {
+    const text = view.container.textContent;
+    assert.ok(text.includes("문서 7건 · 온톨로지 · 규칙 · GraphRAG"), text);
+    assert.ok(!text.includes("질문 때 확인"), text);
+    assert.ok(text.includes("문서 2건 · 온톨로지 · 규칙·GraphRAG 준비 안 됨"), text);
+  } finally { await view.close(); }
 });

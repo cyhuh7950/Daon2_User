@@ -48,7 +48,10 @@ DAON2_APPROVED = "EXPERT_APPROVED"
 DAON2_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN"})
 # GraphRAG는 모델을 불러 오래 걸리고 실패도 잦다. 실패하면 그 요청만 건너뛰고 다른 지식으로 답한다.
 # 이 기능 이전에 등록된 연결은 허용 도구에 새 도구가 없을 수 있다. 그 지식 종류만 건너뛴다.
-DAON2_SKIP = DAON2_NOT_READY | {"MCP_TOOL_NOT_ALLOWED"}
+# Daon2 범용 토큰(단일 주소)은 범위 밖을 HTTP 403, 한도 초과를 429로 답한다. 그 지식 종류만 건너뛴다.
+DAON2_SKIP = DAON2_NOT_READY | {"MCP_TOOL_NOT_ALLOWED", "MCP_FORBIDDEN", "MCP_RATE_LIMITED"}
+# 토큰이 무효·철회·만료(401)면 건너뛰지 않고 지식 연결 확인을 안내한다.
+REJECTED_CONNECTION = "MCP_UNAUTHENTICATED"
 # GraphRAG는 모델을 불러 오래 걸리고 실패 원인이 다양하다(게이트웨이 502/504 등). 어떤 실패든 그 요청만 건너뛴다.
 SKIP_ANY_FAILURE = frozenset({"graphrag"})
 # 승인 자산은 Daon2가 승인·게시한 것만 검색하지만, 명백히 승인이 아닌 상태는 한 번 더 거른다.
@@ -273,6 +276,10 @@ def _unavailable() -> ExternalEvidenceError:
     return ExternalEvidenceError("KNOWLEDGE_EVIDENCE_UNAVAILABLE", 503, True)
 
 
+def _connection_rejected() -> ExternalEvidenceError:
+    return ExternalEvidenceError("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409)
+
+
 @contextmanager
 def _knowledge_errors() -> Iterator[None]:
     try:
@@ -281,7 +288,9 @@ def _knowledge_errors() -> Iterator[None]:
         if error.code == "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED":
             raise ExternalEvidenceError(error.code, error.status) from None
         raise _unavailable() from None
-    except (McpError, ConnectorError):
+    except McpError as error:
+        raise (_connection_rejected() if error.code == REJECTED_CONNECTION else _unavailable()) from None
+    except ConnectorError:
         raise _unavailable() from None
 
 
@@ -421,6 +430,8 @@ class NotebookKnowledgeEvidence:
                 return self._judgment(call, target.daon2_connector_id, package, query, remaining, extract_facts), used[0]
             return readers[kind](call, target.daon2_connector_id, package, query, budget, remaining), used[0]
         except McpError as error:
+            if error.code == REJECTED_CONNECTION:
+                raise _connection_rejected() from None
             if kind not in SKIP_ANY_FAILURE and error.code not in DAON2_SKIP:
                 raise
             return [], used[0]
