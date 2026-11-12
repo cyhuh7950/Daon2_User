@@ -351,3 +351,57 @@ class ReviewFixTests(unittest.TestCase):
                              ruleset_evaluate={"results": [{"ruleset_id": "r1", "revision": 1, "result": "needs_review", "resolution_trace": []}], "provenance": APPROVED})
         found = finder.run(daon2_target("A"), (("P1", "q", "judgment"),), extract_facts=lambda q, c: {})
         self.assertEqual([item.document_name for item in found], ["규칙 판정 · 규칙"])
+
+
+class SingleTokenTests(unittest.TestCase):
+    """WO-K6 C: Daon2 범용 토큰(단일 주소)의 HTTP 오류와 패키지 목록의 services."""
+
+    def finder(self, **responses):
+        self.connectors = _ToolConnectors(**responses)
+        return NotebookKnowledgeEvidence(_Scopes([]), self.connectors)
+
+    def test_out_of_scope_and_rate_limit_skip_that_kind(self):
+        # 범용 토큰은 범위 밖을 HTTP 403(MCP_FORBIDDEN), 한도 초과를 429(MCP_RATE_LIMITED)로 답한다.
+        for code in ("MCP_FORBIDDEN", "MCP_RATE_LIMITED"):
+            for kind, tool in (("ontology", "ontology_search_concepts"), ("ruleset", "ruleset_list"), ("approved", "approved_knowledge_search")):
+                with self.subTest(code=code, kind=kind):
+                    self.assertEqual(self.finder(**{tool: McpError(code)}).run(daon2_target("A"), (("P1", "q", kind),)), ())
+
+    def test_rejected_token_asks_to_check_the_connection(self):
+        from daon2_user_api.question_external_evidence import ExternalEvidenceError
+        with self.assertRaises(ExternalEvidenceError) as caught:
+            self.finder(ontology_search_concepts=McpError("MCP_UNAUTHENTICATED")).run(daon2_target("A"), (("P1", "q", "ontology"),))
+        self.assertEqual(caught.exception.code, "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED")
+
+
+class StatusFromServicesTests(KnowledgeStatusTests):
+    """패키지 목록에 services가 오면 온톨로지·규칙·GraphRAG는 조회 없이 그 값을 쓴다."""
+
+    def service(self, daon2=True, services=None, **responses):
+        svc = super().service(daon2=daon2, **responses)
+        original = svc._connectors.call  # noqa: SLF001
+
+        def call(context, connector_id, tool, arguments):
+            result = original(context, connector_id, tool, arguments)
+            if tool == "list_knowledge_scopes" and services is not None:
+                rows = [{**row, "services": services.get(row["work_package_id"])} for row in result.structured["scopes"]]
+                return SimpleNamespace(structured={**result.structured, "scopes": rows}, is_error=False)
+            return result
+        svc._connectors.call = call  # noqa: SLF001
+        return svc
+
+    def test_services_replace_probes_for_ontology_ruleset_and_graphrag(self):
+        from daon2_user_api.mcp_client import McpError as Err
+        services = {"w1": {"ontology": True, "graphrag": True, "ruleset": False, "rag_evidence": True},
+                    "w2": {"ontology": False, "graphrag": False, "ruleset": False, "rag_evidence": True}}
+        result = self.service(services=services, approved_knowledge_search={"assets": [{"asset_id": "a"}], "provenance": "EXPERT_APPROVED"},
+                              ontology_search_concepts=Err("X"), ruleset_list=Err("X")).knowledge_status(self.ctx, "nb-1")
+        first, second = result["items"]
+        self.assertEqual(first["kinds"], {"rag": "ready", "ontology": "ready", "ruleset": "not_ready", "approved": "ready", "graphrag": "ready"})
+        self.assertEqual(second["kinds"]["graphrag"], "not_ready")
+        self.assertEqual(sorted({c[1] for c in self.calls}), ["approved_knowledge_search", "list_knowledge_scopes"])
+
+    def test_forbidden_probe_means_not_ready(self):
+        from daon2_user_api.mcp_client import McpError as Err
+        kinds = self.service(ontology_search_concepts=Err("MCP_FORBIDDEN"), ruleset_list=Err("MCP_FORBIDDEN"), approved_knowledge_search=Err("MCP_FORBIDDEN")).knowledge_status(self.ctx, "nb-1")["items"][0]["kinds"]
+        self.assertEqual((kinds["ontology"], kinds["ruleset"], kinds["approved"]), ("not_ready", "not_ready", "not_ready"))

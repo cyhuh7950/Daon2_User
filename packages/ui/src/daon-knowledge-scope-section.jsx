@@ -13,7 +13,9 @@ const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하�
 const keyOf = (projectId, workPackageId) => JSON.stringify([projectId, workPackageId]);
 
 // WO-K6: 패키지별로 쓸 수 있는 지식 종류를 한 줄로 보인다. Daon2 연결이 없으면(none) 문서만 보인다.
-const KIND_LABEL = [["ontology", "온톨로지"], ["ruleset", "규칙"], ["approved", "승인 자산"]];
+const KIND_LABEL = [["ontology", "온톨로지"], ["ruleset", "규칙"], ["approved", "승인 자산"], ["graphrag", "GraphRAG"]];
+// GraphRAG의 unknown은 상태 조회를 하지 않았다는 뜻이라 "확인 못 함"이 아니라 "질문 때 확인"으로 보인다.
+const PROBED = KIND_LABEL.filter(([key]) => key !== "graphrag");
 export function knowledgeKindsText(status) {
   if (!status?.kinds) return "";
   const kinds = status.kinds;
@@ -21,7 +23,7 @@ export function knowledgeKindsText(status) {
   parts.push(...KIND_LABEL.filter(([key]) => kinds[key] === "ready").map(([, label]) => label));
   const notReady = KIND_LABEL.filter(([key]) => kinds[key] === "not_ready").map(([, label]) => label);
   if (notReady.length) parts.push(`${notReady.join("·")} 준비 안 됨`);
-  const unknown = KIND_LABEL.filter(([key]) => kinds[key] === "unknown").map(([, label]) => label);
+  const unknown = PROBED.filter(([key]) => kinds[key] === "unknown").map(([, label]) => label);
   if (unknown.length) parts.push(`${unknown.join("·")} 확인 못 함`);
   if (kinds.graphrag === "unknown" && (kinds.ontology === "ready" || kinds.ontology === "empty")) parts.push("GraphRAG 질문 때 확인");
   return parts.join(" · ");

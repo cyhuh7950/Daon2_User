@@ -26,7 +26,9 @@ _STATUS_PROBES = (
     ("ruleset", "ruleset_list", "rulesets"),
     ("approved", "approved_knowledge_search", "assets"),
 )
-_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN"})
+_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN", "MCP_FORBIDDEN"})
+# Daon2 범용 토큰의 패키지 목록은 services로 서비스별 사용 가능 여부를 준다(승인 자산은 없음).
+_SERVICE_KINDS = (("ontology", "ontology"), ("ruleset", "ruleset"), ("graphrag", "graphrag"))
 MAX_SELECTION_BODY = 200
 PAGE_SIZE = 200
 MAX_PAGES = 100
@@ -139,10 +141,12 @@ class KnowledgeScopeService:
         for item in selected:
             row = approved.get((item["project_id"], item["work_package_id"]))
             kinds: dict[str, str] = {"rag": "ready" if row else "not_ready"}
+            services = row.get("services") if row else None
+            known = {kind: ("ready" if services.get(key) is True else "not_ready") for kind, key in _SERVICE_KINDS} if isinstance(services, Mapping) else {}
             for kind, tool, field in _STATUS_PROBES:
-                kinds[kind] = "none" if daon2 is None else "unknown" if row is None else self._probe(daon2, row, item, tool, field)
+                kinds[kind] = "none" if daon2 is None else "unknown" if row is None else known.get(kind) or self._probe(daon2, row, item, tool, field)
             ontology = kinds["ontology"]
-            kinds["graphrag"] = "unknown" if ontology in {"ready", "empty"} else ontology
+            kinds["graphrag"] = known.get("graphrag") if daon2 is not None and "graphrag" in known else "unknown" if ontology in {"ready", "empty"} else ontology
             items.append({**item, "document_count": row["approved_document_count"] if row else 0, "kinds": kinds})
         return {"items": items}
 
