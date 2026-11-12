@@ -67,7 +67,7 @@ class CatalogTests(unittest.TestCase):
         service = self.service([{"scopes": [scope("p1", "w1")], "next_cursor": "next"}, {"scopes": [scope("p1", "w2")], "next_cursor": None}])
         result = service.catalog(CTX)
         self.assertEqual([c[1:] for c in self.connectors.calls], [
-            ("kc-rag", "list_knowledge_scopes", {"limit": 200}), ("kc-rag", "list_knowledge_scopes", {"limit": 200, "cursor": "next"})])
+            ("kc-rag", "list_knowledge_scopes", {"limit": 50}), ("kc-rag", "list_knowledge_scopes", {"limit": 50, "cursor": "next"})])
         self.assertEqual(result, {"projects": [{"project_id": "p1", "project_name": "p1 이름", "work_packages": [
             {"work_package_id": "w1", "work_package_name": "w1 이름", "updated_at": "2026-11-09T00:00:00Z"},
             {"work_package_id": "w2", "work_package_name": "w2 이름", "updated_at": "2026-11-09T00:00:00Z"}]}]})

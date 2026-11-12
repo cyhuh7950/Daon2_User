@@ -30,7 +30,7 @@ _NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN", "MCP_FORBIDDEN"})
 # Daon2 범용 토큰의 패키지 목록은 services로 서비스별 사용 가능 여부를 준다(승인 자산은 없음).
 _SERVICE_KINDS = (("ontology", "ontology"), ("ruleset", "ruleset"), ("graphrag", "graphrag"))
 MAX_SELECTION_BODY = 200
-PAGE_SIZE = 200
+PAGE_SIZE = 50  # Daon2 단일 주소는 도구 설명(최대 200)과 달리 50을 넘으면 거부한다(2026-11-12 ysna 실측). 다음 쪽은 cursor로 읽는다.
 MAX_PAGES = 100
 _TEXT_FIELDS = ("tenant_id", "project_id", "project_name", "work_package_id", "work_package_name")
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
