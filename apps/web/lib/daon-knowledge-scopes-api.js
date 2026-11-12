@@ -52,6 +52,11 @@ export async function getNotebookKnowledgeScopes(workspaceId, notebookId, option
   return validSelection(await call("GET", selectionPath(workspaceId, notebookId), options));
 }
 
+// WO-K6: 선택한 업무 패키지별로 쓸 수 있는 지식 종류(문서·온톨로지·규칙·승인 자산·GraphRAG).
+export async function getNotebookKnowledgeStatus(workspaceId, notebookId, options = {}) {
+  return validSelection(await call("GET", `${selectionPath(workspaceId, notebookId)}/status`, options));
+}
+
 export async function saveNotebookKnowledgeScopes(workspaceId, notebookId, items, options = {}) {
   return validSelection(await call("PUT", selectionPath(workspaceId, notebookId), { ...options, body: { items } }));
 }

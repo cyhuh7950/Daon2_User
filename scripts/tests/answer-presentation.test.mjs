@@ -38,10 +38,14 @@ test("목록 안의 굵은 글씨와 제목 기호를 처리한다", () => {
 });
 
 test("승인 지식 인용은 문서명과 쪽수로 표시하고 문서명이 없으면 쪽수만 쓴다", () => {
-  assert.equal(approvedKnowledgeCitationLabel({ document_name: "제안요청서.pdf", page: 12 }), "제안요청서.pdf 12쪽");
-  assert.equal(approvedKnowledgeCitationLabel({ page: 3 }), "승인 지식 3쪽");
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "제안요청서.pdf", page: 12 }), "문서 · 제안요청서.pdf 12쪽");
+  assert.equal(approvedKnowledgeCitationLabel({ page: 3 }), "문서 · 승인 지식 3쪽");
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "온톨로지 · 보험금 지급", page: 1 }), "온톨로지 · 보험금 지급");
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "규칙 · 제외기간", page: 1 }), "규칙 · 제외기간");
+  // WO-K6: GraphRAG·승인 자산·규칙 판정도 쪽 번호 없이 종류가 앞에 보인다.
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "GraphRAG · 제출 서류", page: 1 }), "GraphRAG · 제출 서류");
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "승인 자산 · 지급 안내", page: 1 }), "승인 자산 · 지급 안내");
+  assert.equal(approvedKnowledgeCitationLabel({ document_name: "규칙 판정 · 입찰무효", page: 1 }), "규칙 판정 · 입찰무효");
 });
 
 test("승인 지식 인용이 있는 답변만 승인 지식 사용으로 본다", () => {

@@ -2387,7 +2387,7 @@ test("승인 지식 답변은 근거 사용으로 표시되고 본문 형식과 
     assert.deepEqual(findElements(message, (node) => node.tagName === "STRONG").map((node) => node.textContent), ["자격"]);
     assert.deepEqual(findElements(message, (node) => node.tagName === "LI").map((node) => node.textContent), ["자격: 등록 업체", "서류 제출"]);
     const link = findElements(container, (node) => node.tagName === "A" && /제안요청서/u.test(node.textContent))[0];
-    assert.equal(link.textContent, "제안요청서.pdf 3쪽");
+    assert.equal(link.textContent, "문서 · 제안요청서.pdf 3쪽");
     assert.equal(link.getAttribute("target"), "_blank");
   } finally {
     if (reactRoot) await import("react").then(({ act }) => act(async () => reactRoot.unmount()));

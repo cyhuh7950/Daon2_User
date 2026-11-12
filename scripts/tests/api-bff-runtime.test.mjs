@@ -1297,7 +1297,7 @@ test('BFF 질문 authorization과 법령 조회는 기존 유한 timer를 유지
       const result=await proxy(new Request('https://app.example.com/bff/api/'+path.join('/'),{method:'POST',headers:{Origin:'https://app.example.com','Content-Type':'application/json',Referer:'https://app.example.com/notebooks/test'},body:'{}'}),path);
       assert.equal(result.status,200);
     }
-    assert.deepEqual(timers,[100000,30000]);
+    assert.deepEqual(timers,[240000,30000]); // WO-K6: 승인 단계에서 GraphRAG(최대 135초)와 LLM 계획·사실 읽기를 함께 기다린다
   }finally{globalThis.setTimeout=priorSet;globalThis.clearTimeout=priorClear;}
 });
 

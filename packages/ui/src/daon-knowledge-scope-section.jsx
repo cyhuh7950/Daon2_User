@@ -12,9 +12,25 @@ const ERROR_TEXT = {
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const keyOf = (projectId, workPackageId) => JSON.stringify([projectId, workPackageId]);
 
+// WO-K6: 패키지별로 쓸 수 있는 지식 종류를 한 줄로 보인다. Daon2 연결이 없으면(none) 문서만 보인다.
+const KIND_LABEL = [["ontology", "온톨로지"], ["ruleset", "규칙"], ["approved", "승인 자산"]];
+export function knowledgeKindsText(status) {
+  if (!status?.kinds) return "";
+  const kinds = status.kinds;
+  const parts = [kinds.rag === "ready" ? `문서 ${status.document_count}건` : "문서 없음"];
+  parts.push(...KIND_LABEL.filter(([key]) => kinds[key] === "ready").map(([, label]) => label));
+  const notReady = KIND_LABEL.filter(([key]) => kinds[key] === "not_ready").map(([, label]) => label);
+  if (notReady.length) parts.push(`${notReady.join("·")} 준비 안 됨`);
+  const unknown = KIND_LABEL.filter(([key]) => kinds[key] === "unknown").map(([, label]) => label);
+  if (unknown.length) parts.push(`${unknown.join("·")} 확인 못 함`);
+  if (kinds.graphrag === "unknown" && (kinds.ontology === "ready" || kinds.ontology === "empty")) parts.push("GraphRAG 질문 때 확인");
+  return parts.join(" · ");
+}
+
 export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
   const [items, setItems] = useState([]);
   const [loadError, setLoadError] = useState(null);
+  const [statusByKey, setStatusByKey] = useState({});
   const [dialog, setDialog] = useState(null); // { status, projects, chosen: string[], error, pending }
   const dialogRef = useRef(null);
 
@@ -28,6 +44,17 @@ export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
   }, [adapter]);
 
   useEffect(() => { onCountChange?.(items.length); }, [items.length, onCountChange]);
+
+  // 상태는 보조 정보라 실패해도 알리지 않고 비워 둔다.
+  const itemsKey = items.map((item) => keyOf(item.project_id, item.work_package_id)).join("|");
+  useEffect(() => {
+    if (!itemsKey || typeof adapter.getNotebookKnowledgeStatus !== "function") { setStatusByKey({}); return undefined; }
+    const controller = new AbortController();
+    adapter.getNotebookKnowledgeStatus({ signal: controller.signal }).then((data) => {
+      if (!controller.signal.aborted) setStatusByKey(Object.fromEntries(data.items.map((row) => [keyOf(row.project_id, row.work_package_id), row])));
+    }, () => { if (!controller.signal.aborted) setStatusByKey({}); });
+    return () => controller.abort();
+  }, [adapter, itemsKey]);
 
   const opened = dialog !== null;
   useEffect(() => {
@@ -70,7 +97,8 @@ export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
     <ul className="source-list knowledge-list" aria-label="선택한 Daon 승인 지식">
       {items.map((item) => <li className="source-list-row knowledge-list-row" key={keyOf(item.project_id, item.work_package_id)}>
         <div className="daon-scope-row"><span className="source-file-icon knowledge-icon" aria-hidden="true">K</span>
-          <span className="source-row-copy"><strong>{item.work_package_name}</strong><small>{item.project_name}</small></span></div>
+          <span className="source-row-copy"><strong>{item.work_package_name}</strong><small>{item.project_name}</small>
+            {knowledgeKindsText(statusByKey[keyOf(item.project_id, item.work_package_id)]) ? <small className="daon-scope-kinds">{knowledgeKindsText(statusByKey[keyOf(item.project_id, item.work_package_id)])}</small> : null}</span></div>
       </li>)}
     </ul>
     {loadError ? <div className="inline-alert compact" role="alert">{loadError}</div> : null}

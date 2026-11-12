@@ -16,9 +16,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .cloud_storage import CloudAccessContext, CloudDatabaseError
-from .knowledge_connector_service import ConnectorContext
+from .knowledge_connector_service import ConnectorContext, ConnectorError
+from .mcp_client import McpError
 
 MAX_SELECTED = 8
+# 지식 상태 확인(WO-K6): 선택한 패키지마다 가벼운 조회 1건씩. GraphRAG는 모델을 불러 오래 걸리므로 상태 확인에 쓰지 않는다.
+_STATUS_PROBES = (
+    ("ontology", "ontology_search_concepts", "concepts"),
+    ("ruleset", "ruleset_list", "rulesets"),
+    ("approved", "approved_knowledge_search", "assets"),
+)
+_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN"})
 MAX_SELECTION_BODY = 200
 PAGE_SIZE = 200
 MAX_PAGES = 100
@@ -122,6 +130,40 @@ class KnowledgeScopeService:
             project["work_packages"].append({"work_package_id": row["work_package_id"], "work_package_name": row["work_package_name"], "updated_at": row.get("updated_at")})
         return {"projects": list(projects.values())}
 
+    def knowledge_status(self, context: KnowledgeScopeContext, notebook_id: str) -> dict[str, Any]:
+        """선택한 업무 패키지별로 쓸 수 있는 지식 종류. ready·empty(준비됐지만 없음)·not_ready·unknown(확인 실패)·none(연결 없음)."""
+        selected = self.selection(context, notebook_id)["items"]
+        approved = self._approved_scopes(context) if selected else {}
+        daon2 = self.daon2_target(context)
+        items = []
+        for item in selected:
+            row = approved.get((item["project_id"], item["work_package_id"]))
+            kinds: dict[str, str] = {"rag": "ready" if row else "not_ready"}
+            for kind, tool, field in _STATUS_PROBES:
+                kinds[kind] = "none" if daon2 is None else "unknown" if row is None else self._probe(daon2, row, item, tool, field)
+            ontology = kinds["ontology"]
+            kinds["graphrag"] = "unknown" if ontology in {"ready", "empty"} else ontology
+            items.append({**item, "document_count": row["approved_document_count"] if row else 0, "kinds": kinds})
+        return {"items": items}
+
+    def _probe(self, daon2: tuple[ConnectorContext, str], row: Mapping[str, Any], item: Mapping[str, Any], tool: str, field: str) -> str:
+        scope = {"tenant_id": row["tenant_id"], "project_id": row["project_id"], "work_package_id": row["work_package_id"]}
+        arguments: dict[str, Any] = {"scope": scope, "limit": 1}
+        if tool == "ontology_search_concepts":
+            arguments["query"] = (item.get("work_package_name") or "개념")[:200]
+        try:
+            result = self._connectors.call(daon2[0], daon2[1], tool, arguments)
+        except McpError as error:
+            return "not_ready" if error.code in _NOT_READY else "unknown"
+        except ConnectorError:
+            return "unknown"
+        page = getattr(result, "structured", None)
+        if getattr(result, "is_error", False) or not isinstance(page, Mapping) or page.get("provenance") != "EXPERT_APPROVED":
+            return "unknown"
+        if tool == "ontology_search_concepts":
+            return "ready"  # 검색 결과가 비어도 패키지의 온톨로지는 준비된 상태다
+        return "ready" if page.get(field) else "empty"
+
     @staticmethod
     def _require_notebook(connection: Any, context: KnowledgeScopeContext, notebook_id: str) -> None:
         if connection.execute("SELECT 1 FROM notebooks WHERE tenant_id=%s AND workspace_id=%s AND notebook_id=%s",
@@ -204,6 +246,10 @@ def register_knowledge_scope_routes(app: FastAPI, dependencies: Any, service: Kn
     @app.get("/api/v1/workspaces/{id}/notebooks/{notebook_id}/knowledge-scopes")
     async def get_notebook_knowledge_scopes(id: str, notebook_id: str, request: Request) -> JSONResponse:
         return _ok(await asyncio.to_thread(service.selection, _context(id, Action.VIEW, request), _notebook(notebook_id)), id, request)
+
+    @app.get("/api/v1/workspaces/{id}/notebooks/{notebook_id}/knowledge-scopes/status")
+    async def get_notebook_knowledge_status(id: str, notebook_id: str, request: Request) -> JSONResponse:
+        return _ok(await asyncio.to_thread(service.knowledge_status, _context(id, Action.VIEW, request), _notebook(notebook_id)), id, request)
 
     @app.put("/api/v1/workspaces/{id}/notebooks/{notebook_id}/knowledge-scopes")
     async def put_notebook_knowledge_scopes(id: str, notebook_id: str, body: SelectionBody, request: Request) -> JSONResponse:

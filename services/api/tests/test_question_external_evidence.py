@@ -160,6 +160,7 @@ def daon2_target(*names):
 
 
 CONCEPT = {"concept_id": "c1", "label": "보험금 지급", "definition": "지급 절차를 규정한다.", "parents": [{"label": "주계약"}], "children": [{"label": "지급기준표"}], "snapshot_id": "s1", "provenance": "EXPERT_APPROVED"}
+TRAVERSE = {"nodes": [], "edges": [], "provenance": "EXPERT_APPROVED"}
 RULE = {"ruleset_id": "r1", "revision": 6, "name": "제외기간 규칙", "purpose": "90일 제외기간을 판단한다", "formal": {"if": [], "then": []}, "published": True, "provenance": "EXPERT_APPROVED"}
 
 
@@ -181,7 +182,7 @@ class Daon2KnowledgeTests(unittest.TestCase):
         return NotebookKnowledgeEvidence(_Scopes([]), self.connectors)
 
     def ontology(self, **over):
-        return self.finder(ontology_search_concepts={"concepts": [{"concept_id": "c1", "snapshot_id": "s1", "score": 0.8, "provenance": "EXPERT_APPROVED"}]}, ontology_get_concept={**CONCEPT, **over})
+        return self.finder(ontology_search_concepts={"concepts": [{"concept_id": "c1", "snapshot_id": "s1", "score": 0.8, "provenance": "EXPERT_APPROVED"}]}, ontology_get_concept={**CONCEPT, **over}, ontology_traverse=TRAVERSE)
 
     def test_kinds_are_offered_only_with_a_daon2_connection(self):
         self.assertNotIn("ontology", build_plan_prompt("질문", (), target("A")))
@@ -195,7 +196,7 @@ class Daon2KnowledgeTests(unittest.TestCase):
 
     def test_ontology_request_returns_definition_as_evidence(self):
         found = self.ontology().run(daon2_target("A"), (("P1", "보험금", "ontology"),))
-        self.assertEqual([c[2] for c in self.connectors.calls], ["ontology_search_concepts", "ontology_get_concept"])
+        self.assertEqual([c[2] for c in self.connectors.calls], ["ontology_search_concepts", "ontology_get_concept", "ontology_traverse"])
         self.assertEqual(self.connectors.calls[0][0:2], ("ctx-daon2", "kc-daon2"))
         self.assertEqual(self.connectors.calls[0][3]["scope"], {"tenant_id": "t-1", "project_id": "p1", "work_package_id": "w1"})
         item = found[0]
@@ -237,7 +238,7 @@ class Daon2KnowledgeTests(unittest.TestCase):
 
     def test_calls_stop_at_the_limit(self):
         concepts = [{"concept_id": f"c{i}", "snapshot_id": "s1", "score": 0.5, "provenance": "EXPERT_APPROVED"} for i in range(3)]
-        finder = self.finder(ontology_search_concepts={"concepts": concepts}, ontology_get_concept=CONCEPT)
+        finder = self.finder(ontology_search_concepts={"concepts": concepts}, ontology_get_concept=CONCEPT, ontology_traverse=TRAVERSE)
         finder.run(daon2_target("A", "B", "C"), tuple((f"P{i}", f"q{j}", "ontology") for i in (1, 2, 3) for j in (1, 2, 3)))
         self.assertLessEqual(len(self.connectors.calls), 8)
 

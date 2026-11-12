@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
+from datetime import datetime, timezone
 import json
 import re
 from contextlib import contextmanager
@@ -34,14 +35,30 @@ KNOWLEDGE_KINDS: Mapping[str, str] = {
     "rag": "승인 문서의 원문 근거를 문장으로 검색한다.",
     "ontology": "업무 용어의 정의와 상위·하위 개념을 찾는다. 검색어는 찾을 용어 하나만 쓴다.",
     "ruleset": "승인된 업무 규칙의 조건과 결과를 찾는다.",
+    "graphrag": "승인 그래프에서 개념과 관계를 따라가며 답을 찾는다. 여러 사실을 잇거나 흐름·관계를 묻는 질문에 쓴다.",
+    "approved": "전문가가 게시한 승인 지식 자산(정리된 안내·답변)을 찾는다.",
+    "judgment": "질문의 상황이 승인된 업무 규칙을 충족하는지 판정한다. '~이면 되나요', '~해도 되나요'처럼 판단을 묻는 질문에 쓴다. 검색어에는 판단할 상황을 쓴다.",
 }
 DAON2_ITEM_LIMIT = 2
 MAX_CONCEPT_QUERIES = 8
 MAX_CONCEPT_CALLS = 20
 DAON2_TEXT_LIMIT = 4000
 DAON2_APPROVED = "EXPERT_APPROVED"
-DAON2_NOT_READY = frozenset({"NOT_READY"})  # 그 업무 패키지에 아직 게시된 지식이 없다는 뜻이라 장애로 보지 않는다
-UNPAGED_EVIDENCE = ("온톨로지 · ", "규칙 · ")
+# 그 업무 패키지에 게시된 지식이 없거나(NOT_READY), 그 조합이 Daon2에 없는 경우(SCOPE_FORBIDDEN, Daon2 2026-11-12 배포 이후)라 장애로 보지 않는다.
+DAON2_NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN"})
+# GraphRAG는 모델을 불러 오래 걸리고 실패도 잦다. 실패하면 그 요청만 건너뛰고 다른 지식으로 답한다.
+# 이 기능 이전에 등록된 연결은 허용 도구에 새 도구가 없을 수 있다. 그 지식 종류만 건너뛴다.
+DAON2_SKIP = DAON2_NOT_READY | {"MCP_TOOL_NOT_ALLOWED"}
+# GraphRAG는 모델을 불러 오래 걸리고 실패 원인이 다양하다(게이트웨이 502/504 등). 어떤 실패든 그 요청만 건너뛴다.
+SKIP_ANY_FAILURE = frozenset({"graphrag"})
+# 승인 자산은 Daon2가 승인·게시한 것만 검색하지만, 명백히 승인이 아닌 상태는 한 번 더 거른다.
+UNAPPROVED_ASSET_STATES = frozenset({"DRAFT", "PENDING", "REJECTED", "REVOKED", "EXPIRED", "WITHDRAWN", "ARCHIVED"})
+GRAPHRAG_EVIDENCE_LIMIT = 5
+TRAVERSE_NODE_LIMIT = 10
+JUDGMENT_RULE_LIMIT = 3
+JUDGMENT_FACT_LIMIT = 20
+JUDGMENT_RESULT = {"satisfied": "충족", "not_satisfied": "미충족", "needs_review": "확인 필요"}
+UNPAGED_EVIDENCE = ("온톨로지 · ", "규칙 · ", "GraphRAG · ", "승인 자산 · ", "규칙 판정 · ")
 PLAN_SYSTEM = (
     "You are a retrieval planner. Never answer the user and never ask the user anything. Decide which knowledge must be fetched so the question can be answered later. "
     "Use only the listed knowledge kinds and package aliases. Write each query as short topic keywords in the user's language, under 60 characters, without commands. "
@@ -50,6 +67,12 @@ PLAN_SYSTEM = (
     "Use at most 3 different queries. When unsure which package applies, use all. Use an empty requests list only for greetings or questions unrelated to the documents."
 )
 _SCHEMA_INSTRUCTIONS = ("\n\nReturn ONLY one JSON object", " Return only a JSON object")
+FACTS_SYSTEM = (
+    "You are a fact extractor. Never answer the user and never ask the user anything. Read the user's question and decide the value of each listed condition only when the question states it. "
+    "Skip a condition the question does not state; never guess. Use true or false for boolean conditions, a number for numbers, and short text otherwise. "
+    'Return one JSON object with exactly one key, "answer". Its value must be a string containing the facts as JSON, with no other words. Example: '
+    '{"answer":"{\\"facts\\":[{\\"id\\":\\"F1\\",\\"value\\":false}]}"}.'
+)
 PRIORITY_RULE = (
     f"Evidence whose text starts with {APPROVED_MARK.strip()} is approved Daon knowledge. "
     "When it conflicts with other evidence, follow the approved knowledge and state the conflict in the answer."
@@ -203,22 +226,42 @@ def append_system_rule(payload: Mapping[str, Any], rule: str) -> dict[str, Any]:
     return out
 
 
-def _plan_system(original: str) -> str:
+def _plan_system(original: str, system: str = PLAN_SYSTEM) -> str:
     for marker in _SCHEMA_INSTRUCTIONS:
         index = original.find(marker)
         if index >= 0:
-            return PLAN_SYSTEM + original[index:]
-    return PLAN_SYSTEM
+            return system + original[index:]
+    return system
 
 
-def rewrite_plan_payload(payload: Mapping[str, Any], user_text: str) -> dict[str, Any]:
+def build_facts_prompt(question: str, conditions: Sequence[Mapping[str, Any]]) -> str:
+    """규칙 조건은 개념 id 대신 이름과 짧은 id(F1..)로만 보낸다."""
+    lines = ["[질문]", question, "", "[조건]"]
+    for item in conditions:
+        lines.append(f"- {item['id']}: {item.get('label') or ''} (형식: {item.get('datatype') or 'text'})")
+    return "\n".join(lines)
+
+
+def parse_facts(raw: str, conditions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """LLM이 준 사실 중 아는 조건이고 값이 있는 것만 남긴다. 읽을 수 없으면 사실 없이 판정한다(결과는 확인 필요)."""
+    loaded = _load_plan(raw)
+    known = {item["id"] for item in conditions}
+    rows = loaded.get("facts") if isinstance(loaded, Mapping) else None
+    found: dict[str, Any] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, Mapping) and row.get("id") in known and "value" in row and isinstance(row["value"], (bool, int, float, str)):
+            found.setdefault(row["id"], row["value"])
+    return found
+
+
+def rewrite_plan_payload(payload: Mapping[str, Any], user_text: str, system: str = PLAN_SYSTEM) -> dict[str, Any]:
     """일반 호출 형식을 그대로 쓰고 지시문과 사용자 내용만 바꾼다. 어댑터가 붙인 응답 형식 규칙은 유지한다."""
     out = copy.deepcopy(dict(payload))
     if isinstance(out.get("system"), str):
-        out["system"] = _plan_system(out["system"])
+        out["system"] = _plan_system(out["system"], system)
     for item in _chat_items(out):
         if item.get("role") == "system" and isinstance(item.get("content"), str):
-            item["content"] = _plan_system(item["content"])
+            item["content"] = _plan_system(item["content"], system)
         elif item.get("role") == "user":
             item["content"] = user_text
     if isinstance(out.get("options"), dict) and "num_predict" in out["options"]:
@@ -303,7 +346,8 @@ class NotebookKnowledgeEvidence:
     def _source_tenant(row: Mapping[str, Any]) -> Mapping[str, str]:
         return {"tenant_id": row["tenant_id"]} if isinstance(row.get("tenant_id"), str) else {}
 
-    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], limit: int = EXTERNAL_LIMIT) -> tuple[ExternalEvidence, ...]:
+    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], limit: int = EXTERNAL_LIMIT, extract_facts: Any = None) -> tuple[ExternalEvidence, ...]:
+        """extract_facts(검색어, 조건 목록) -> {조건 id: 값}: 규칙 판정에 쓸 사실을 LLM으로 뽑는 함수. 없으면 판정 대신 규칙 본문을 근거로 준다."""
         packages = {package["alias"]: package for package in target.packages}
         by_query: dict[tuple[str, str], list[ExternalEvidence]] = {}
         budget = MAX_PLAN_CALLS
@@ -315,7 +359,7 @@ class NotebookKnowledgeEvidence:
                 kind = request[2] if len(request) > 2 else "rag"
                 package = packages[alias]
                 if kind != "rag":
-                    found, used = self._daon2_evidence(target, package, query, kind, budget)
+                    found, used = self._daon2_evidence(target, package, query, kind, budget, extract_facts)
                     budget -= used
                     by_query.setdefault((kind, query), []).extend(found)
                     continue
@@ -354,7 +398,7 @@ class NotebookKnowledgeEvidence:
                     break
         return list(found.values())
 
-    def _daon2_evidence(self, target: EvidenceTarget, package: Mapping[str, str], query: str, kind: str, budget: int) -> tuple[list[ExternalEvidence], int]:
+    def _daon2_evidence(self, target: EvidenceTarget, package: Mapping[str, str], query: str, kind: str, budget: int, extract_facts: Any = None) -> tuple[list[ExternalEvidence], int]:
         """온톨로지와 규칙을 근거 형태로 가져온다. 전문가 승인·게시된 것만 쓰고, 지식이 준비되지 않은 패키지는 건너뛴다."""
         if not package.get("tenant_id") or target.daon2_connector_id is None:
             return [], 0
@@ -368,31 +412,176 @@ class NotebookKnowledgeEvidence:
                 raise _unavailable()
             return result.structured
 
+        def remaining() -> int:
+            return budget - used[0]
+
+        readers = {"ontology": self._ontology, "ruleset": self._rulesets, "graphrag": self._graphrag, "approved": self._approved}
         try:
-            read = self._ontology if kind == "ontology" else self._rulesets
-            return read(call, target.daon2_connector_id, package, query, budget), used[0]
+            if kind == "judgment":
+                return self._judgment(call, target.daon2_connector_id, package, query, remaining, extract_facts), used[0]
+            return readers[kind](call, target.daon2_connector_id, package, query, budget, remaining), used[0]
         except McpError as error:
-            if error.code not in DAON2_NOT_READY:
+            if kind not in SKIP_ANY_FAILURE and error.code not in DAON2_SKIP:
+                raise
+            return [], used[0]
+        except ExternalEvidenceError:
+            if kind not in SKIP_ANY_FAILURE:
                 raise
             return [], used[0]
 
     @classmethod
-    def _ontology(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int) -> list[ExternalEvidence]:
+    def _ontology(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int, remaining: Any = lambda: 0) -> list[ExternalEvidence]:
         rows = call("ontology_search_concepts", {"query": query[:200], "limit": DAON2_ITEM_LIMIT}).get("concepts")
         found: list[ExternalEvidence] = []
-        for row in cls._readable(rows, "concept_id", "snapshot_id", budget):
+        readable = cls._readable(rows, "concept_id", "snapshot_id", budget)
+        for index, row in enumerate(readable):
             concept = call("ontology_get_concept", {"concept_id": row["concept_id"], "snapshot_id": row["snapshot_id"]})
             label, definition = concept.get("label"), concept.get("definition")
             if concept.get("provenance") != DAON2_APPROVED or not isinstance(label, str) or not label or not isinstance(definition, str):
                 continue
             lines = [f"개념: {label}", f"정의: {definition}"]
             lines += [f"{title}: {names}" for title, names in (("상위 개념", cls._labels(concept.get("parents"))), ("하위 개념", cls._labels(concept.get("children")))) if names]
+            # 남은 개념 조회 몫을 먼저 남기고, 여유가 있을 때만 연결 개념을 따라간다.
+            related = cls._related(call, row["concept_id"]) if remaining() > len(readable) - index - 1 else ""
+            if related:
+                lines.append(f"관련 개념: {related}")
             score = row.get("score")
             found.append(cls._named_evidence(connector_id, package, f"온톨로지 · {label}", row["concept_id"], row["snapshot_id"], "\n".join(lines), float(score) if isinstance(score, (int, float)) and not isinstance(score, bool) else 0.5))
         return found
 
     @classmethod
-    def _rulesets(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int) -> list[ExternalEvidence]:
+    def _related(cls, call: Any, concept_id: str) -> str:
+        """개념에서 한 단계 연결된 승인 개념. 따라가기를 쓸 수 없으면 빈 값으로 두고 개념 근거는 그대로 쓴다."""
+        try:
+            graph = call("ontology_traverse", {"concept_id": concept_id, "depth": 1, "max_nodes": TRAVERSE_NODE_LIMIT})
+        except (McpError, ExternalEvidenceError):
+            return ""
+        if graph.get("provenance") != DAON2_APPROVED:
+            return ""
+        labels = {node.get("concept_id"): node.get("label") for node in graph.get("nodes") or [] if isinstance(node, Mapping) and isinstance(node.get("label"), str)}
+        parts = []
+        for edge in graph.get("edges") or []:
+            if not isinstance(edge, Mapping):
+                continue
+            other = edge.get("target") if edge.get("source") == concept_id else edge.get("source") if edge.get("target") == concept_id else None
+            relation = edge.get("relation_type") or edge.get("type") or ""
+            if other in labels and other != concept_id:
+                parts.append(f"{labels[other]}({relation})" if relation else str(labels[other]))
+        return ", ".join(dict.fromkeys(parts))
+
+    @classmethod
+    def _graphrag(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int, remaining: Any = lambda: 0) -> list[ExternalEvidence]:
+        result = call("graphrag_query", {"mode": "local", "query": query[:2000], "limit": GRAPHRAG_EVIDENCE_LIMIT})
+        answer = result.get("answer")
+        if result.get("provenance") != DAON2_APPROVED or not isinstance(answer, str) or not answer.strip():
+            return []
+        lines = [f"GraphRAG 답: {answer.strip()}"]
+        evidence = result.get("evidence")
+        for item in (evidence if isinstance(evidence, list) else [])[:GRAPHRAG_EVIDENCE_LIMIT]:
+            if isinstance(item, Mapping):
+                text = " · ".join(str(item[key]) for key in ("label", "name", "title", "text", "content", "summary") if isinstance(item.get(key), str) and item[key].strip())
+                lines.append(f"- {text or json.dumps(item, ensure_ascii=False)[:300]}")
+        snapshot = str(result.get("snapshot_id") or "graphrag")
+        return [cls._named_evidence(connector_id, package, f"GraphRAG · {query}", hashlib.sha256(query.encode("utf-8")).hexdigest()[:32], snapshot, "\n".join(lines), 0.6)]
+
+    @classmethod
+    def _approved(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int, remaining: Any = lambda: 0) -> list[ExternalEvidence]:
+        listed = call("approved_knowledge_search", {"query": query[:200], "limit": DAON2_ITEM_LIMIT})
+        rows = [{"provenance": listed.get("provenance"), **row} for row in listed.get("assets") or [] if isinstance(row, Mapping) and cls._asset_usable(row)]
+        found: list[ExternalEvidence] = []
+        for row in cls._readable(rows, "asset_id", "version_id", budget):
+            asset = call("approved_knowledge_read", {"asset_id": row["asset_id"], "version_id": row["version_id"]})
+            content = asset.get("content")
+            if asset.get("provenance") != DAON2_APPROVED or not cls._asset_usable(asset) or not isinstance(content, Mapping):
+                continue
+            title = next((str(v) for k in ("asset_name", "title", "name") for v in (row.get(k), content.get(k)) if isinstance(v, str) and v), "승인 지식")
+            body = "\n".join(str(value) for value in content.values() if isinstance(value, str) and value.strip()) or json.dumps(content, ensure_ascii=False)
+            found.append(cls._named_evidence(connector_id, package, f"승인 자산 · {title}", row["asset_id"], row["version_id"], body, 0.55))
+        return found
+
+    @staticmethod
+    def _asset_usable(item: Mapping[str, Any]) -> bool:
+        """철회됐거나 유효기간이 지났거나 승인이 아닌 상태의 자산은 쓰지 않는다."""
+        if item.get("revoked_at") or str(item.get("approval_status") or "").upper() in UNAPPROVED_ASSET_STATES:
+            return False
+        expires = item.get("expires_at")
+        if expires:
+            try:
+                moment = datetime.fromisoformat(str(expires).replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return moment > datetime.now(timezone.utc)
+        return True
+
+    @staticmethod
+    def _rule_conditions(rule: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+        formal = rule.get("formal")
+        conditions = formal.get("if") if isinstance(formal, Mapping) else None
+        return [c for c in conditions if isinstance(c, Mapping)] if isinstance(conditions, list) else []
+
+    @classmethod
+    def _judgment(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, remaining: Any, extract_facts: Any) -> list[ExternalEvidence]:
+        """규칙 판정: 게시 규칙의 조건 대상(개념)을 이름으로 바꿔 LLM이 사실값을 뽑고, Daon2 판정기로 판정한다. 판정은 저장되지 않는 참고 결과다."""
+        if extract_facts is None:
+            return cls._rulesets(call, connector_id, package, query, remaining())
+        listed = call("ruleset_list", {"limit": 10})
+        rows = [{"provenance": listed.get("provenance"), **row} for row in listed.get("rulesets") or [] if isinstance(row, Mapping) and row.get("published") is True]
+        rules = []
+        for row in [r for r in rows if r.get("provenance") == DAON2_APPROVED and isinstance(r.get("ruleset_id"), str)][:JUDGMENT_RULE_LIMIT]:
+            if remaining() < 2:
+                break
+            rule = call("ruleset_get", {"ruleset_id": row["ruleset_id"]})
+            if rule.get("provenance") == DAON2_APPROVED and rule.get("published") is True and isinstance(rule.get("name"), str):
+                rules.append({**rule, "ruleset_id": row["ruleset_id"]})  # 목록의 id를 쓴다(본문에 빠져도 판정 가능)
+        if not rules:
+            return []
+        subjects: dict[str, str] = {}
+        for rule in rules:
+            for condition in cls._rule_conditions(rule):
+                subject = condition.get("subject")
+                if isinstance(subject, str) and subject not in subjects and len(subjects) < JUDGMENT_FACT_LIMIT:
+                    subjects[subject] = cls._concept_label(call, subject) if remaining() > 1 else ""
+        conditions, by_id = [], {}
+        for index, (subject, label) in enumerate(subjects.items(), start=1):
+            sample = next((c for rule in rules for c in cls._rule_conditions(rule) if c.get("subject") == subject), {})
+            by_id[f"F{index}"] = subject
+            conditions.append({"id": f"F{index}", "label": label or f"조건 {index}", "datatype": sample.get("datatype"), "operator": sample.get("operator"), "value": sample.get("value")})
+        values = extract_facts(query, conditions) or {}
+        facts = [{"key": by_id[key], "value": value} for key, value in values.items() if key in by_id]
+        result = call("ruleset_evaluate", {"ruleset_ids": [rule["ruleset_id"] for rule in rules], "facts": facts})
+        if result.get("provenance") != DAON2_APPROVED:
+            return []
+        label_of = {by_id[c["id"]]: c["label"] for c in conditions}
+        given = ", ".join(f"{label_of[f['key']]} = {cls._fact_text(f['value'])}" for f in facts) or "없음"
+        found = []
+        for outcome in result.get("results") or []:
+            rule = next((r for r in rules if isinstance(outcome, Mapping) and r["ruleset_id"] == outcome.get("ruleset_id")), None)
+            if rule is None:
+                continue
+            missing = [label_of.get(step.split(":", 1)[1], "") for step in outcome.get("resolution_trace") or [] if isinstance(step, str) and step.startswith("missing_fact:")]
+            lines = [f"규칙 판정(참고 판정, 저장되지 않는 시뮬레이션): {rule['name']}", f"결과: {JUDGMENT_RESULT.get(str(outcome.get('result')), '확인 필요')}",
+                     f"사용한 사실: {given}", f"규칙 목적: {rule.get('purpose') or ''}"]
+            if any(missing):
+                lines.insert(3, f"부족한 사실: {', '.join(m for m in dict.fromkeys(missing) if m)}")
+            found.append(cls._named_evidence(connector_id, package, f"규칙 판정 · {rule['name']}", rule["ruleset_id"], f"judgment-rev-{rule.get('revision')}", "\n".join(lines), 0.65))
+        return found
+
+    @staticmethod
+    def _fact_text(value: Any) -> str:
+        return "예" if value is True else "아니오" if value is False else str(value)
+
+    @staticmethod
+    def _concept_label(call: Any, concept_id: str) -> str:
+        try:
+            graph = call("ontology_traverse", {"concept_id": concept_id, "depth": 1, "max_nodes": 1})
+        except (McpError, ExternalEvidenceError):
+            return ""
+        return next((str(node["label"]) for node in graph.get("nodes") or [] if isinstance(node, Mapping) and node.get("concept_id") == concept_id and isinstance(node.get("label"), str)), "")
+
+    @classmethod
+    def _rulesets(cls, call: Any, connector_id: str, package: Mapping[str, str], query: str, budget: int, remaining: Any = lambda: 0) -> list[ExternalEvidence]:
         listed = call("ruleset_list", {"limit": 5})
         rows = listed.get("rulesets")
         # 목록의 승인 표시는 응답 전체에 한 번만 온다. 각 규칙은 상세 조회에서 다시 확인한다.

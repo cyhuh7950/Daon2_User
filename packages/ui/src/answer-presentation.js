@@ -11,9 +11,12 @@ export function validCitationDocumentName(value) {
   return !("document_name" in value) || (typeof value.document_name === "string" && value.document_name.length >= 1 && value.document_name.length <= 1024);
 }
 
+// 서버가 붙인 지식 종류(온톨로지·규칙·GraphRAG·승인 자산·규칙 판정)는 그대로, 문서는 "문서 · 이름 N쪽"으로 보인다.
+const NAMED_KNOWLEDGE = /^(온톨로지|규칙|규칙 판정|GraphRAG|승인 자산) · /u;
+
 export function approvedKnowledgeCitationLabel(citation) {
-  if (/^(온톨로지|규칙) · /u.test(citation.document_name ?? "")) return citation.document_name;
-  return `${citation.document_name ?? "승인 지식"} ${citation.page}쪽`;
+  if (NAMED_KNOWLEDGE.test(citation.document_name ?? "")) return citation.document_name;
+  return `문서 · ${citation.document_name ?? "승인 지식"} ${citation.page}쪽`;
 }
 
 export function usesApprovedKnowledge(answer) {

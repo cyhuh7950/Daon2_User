@@ -62,7 +62,7 @@ class McpClient:
                 raise McpError("LIMIT_EXCEEDED", retryable=True)
             self._calls.append(now)
 
-    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> McpToolResult:
+    def call_tool(self, name: str, arguments: Mapping[str, Any], *, timeout_seconds: float | None = None) -> McpToolResult:
         """선언된(허용된) 도구만 호출한다. 입력·출력은 서버가 알린 스키마로 검증한다."""
         if self._allowed is not None and name not in self._allowed:
             raise McpError("MCP_TOOL_NOT_ALLOWED")
@@ -80,7 +80,8 @@ class McpClient:
         try:
             conn = self.connection
             result, _ = self._transport.request("tools/call", {"name": name, "arguments": dict(arguments)},
-                                                protocol_version=conn.protocol_version, session_id=conn.session_id)
+                                                protocol_version=conn.protocol_version, session_id=conn.session_id,
+                                                **({"timeout_seconds": timeout_seconds} if timeout_seconds else {}))
         finally:
             self._slots.release()
         structured = result.get("structuredContent")

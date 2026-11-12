@@ -18,7 +18,7 @@ from .document_processing import DocumentProcessingContext
 from .question_answering import strip_citation_labels
 from .question_external_evidence import (
     ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt, run_planned,
-    default_requests, merge_evidence, parse_plan, rewrite_plan_payload,
+    default_requests, merge_evidence, parse_plan, rewrite_plan_payload, FACTS_SYSTEM, build_facts_prompt, parse_facts,
 )
 from .document_index_postgres import IndexedEvidenceChunk
 from .document_understanding_adapter import DocumentUnderstandingError, _evidence_anchors
@@ -653,7 +653,32 @@ class QuestionAnsweringService:
         requests = self._plan_requests(context, question, target)
         fallback = default_requests(target, question)
         chosen = fallback if requests is None else requests
-        return run_planned(self._external_planner, target, chosen, fallback)
+        judging = any(len(item) > 2 and item[2] == "judgment" for item in chosen)
+        options = {"extract_facts": self._fact_reader(context, question)} if judging else {}
+        return run_planned(self._external_planner, target, chosen, fallback, **options)
+
+    def _fact_reader(self, context: QuestionContext, question: str):  # type: ignore[no-untyped-def]
+        """규칙 판정용 사실을 질문에서 LLM으로 읽는 함수. 전송 승인을 따로 받고, 실패하면 사실 없이 판정한다.
+
+        비용 장부가 붙은 실행은 자료 계획 호출만 장부에 올리므로 사실 읽기를 하지 않는다(판정 결과는 확인 필요).
+        """
+        def read(_query: str, conditions):  # type: ignore[no-untyped-def]
+            model_context = WorkspaceModelContext(context.tenant_id, context.workspace_id, context.actor_id)
+            try:
+                with self._resolve_selected(context, model_context) as (selection, _explicit):
+                    if self._run_cost_sessions is not None and self._run_cost_sessions.applies(context, selection, run_kind="question"):
+                        return {}
+                    prepared = self._adapter_registry.prepare_general(selection, question, context.trace_id, self._transport)
+                    prepared = replace(prepared, provider_payload=rewrite_plan_payload(prepared.provider_payload, build_facts_prompt(question, conditions), FACTS_SYSTEM))
+                    authorize = getattr(self._egress, "authorize_plan", None)
+                    if not callable(authorize) or not authorize(context, selection, canonical_json_bytes(prepared.provider_payload)):
+                        return {}
+                    if self._external_plan_audit is not None:
+                        self._external_plan_audit(context, selection)
+                    return parse_facts(self._adapter_registry.generate_general(prepared).answer, conditions)
+            except (ValueError, DocumentUnderstandingError, WorkspaceModelUnavailable, QuestionAnsweringError):
+                return {}
+        return read
 
     def _plan_requests(self, context: QuestionContext, question: str, target):  # type: ignore[no-untyped-def]
         """LLM에 필요한 자료를 묻는다. 답을 받지 못하면 None이고 호출자는 사용자 문장으로 검색한다."""
