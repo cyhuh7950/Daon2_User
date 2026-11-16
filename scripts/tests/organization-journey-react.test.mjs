@@ -52,7 +52,7 @@ test("J3 중지 조직 Notebook 거부와 현재조직 목록제외에도 개인
     tenants: () => ({ current_tenant_id: "organization", tenants: [personal] }) });
   try {
     assert.match(view.container.textContent, /Notebook을 불러오지 못했습니다/u);
-    await click(view, "⚙ 설정"); assert.ok(buttonByText(view.container, "개인 · 개인"));
+    await click(view, "설정"); assert.ok(buttonByText(view.container, "개인 · 개인"));
     assert.equal(view.navigations.length, 0);
   } finally { await view.cleanup(); }
 });
@@ -61,7 +61,7 @@ test("J3 개인전용에서 명시 새로고침으로 승인 조직을 표시하
   let approved = false;
   const view = await render({ tenants: () => ({ current_tenant_id: "personal", tenants: approved ? [personal, organization] : [personal] }) });
   try {
-    await click(view, "⚙ 설정"); assert.equal(buttonByText(view.container, "조직 · 승인 조직"), undefined);
+    await click(view, "설정"); assert.equal(buttonByText(view.container, "조직 · 승인 조직"), undefined);
     approved = true; await click(view, "작업 범위 새로고침");
     assert.ok(buttonByText(view.container, "조직 · 승인 조직"));
     assert.equal(view.requests.filter(row => row.init.method === "POST").length, 0);
@@ -87,10 +87,10 @@ test("J3 전환 응답유실은 본인 세션 확인 전 다른 조직 요청과
     tenants: () => ({ current_tenant_id: "personal", tenants: [personal, organization] }),
     switchTenant: async () => { posted++; throw new TypeError("합성 응답 유실"); } });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직", true);
+    await click(view, "설정"); await click(view, "조직 · 승인 조직", true);
     assert.equal(posted, 1); assert.equal(reads, 3); assert.equal(view.navigations.length, 0);
     await view.act(async () => { verify.reject(new TypeError("합성 세션 조회 실패")); });
-    await click(view, "⚙ 설정");
+    await click(view, "설정");
     assert.match(view.container.textContent, /전환 결과.*확인/u);
     assert.equal(posted, 1);
   } finally { verify.resolve(session()); await view.cleanup(); }
@@ -112,9 +112,9 @@ test("J3 전송 중 같은 세션 재조회는 잠금을 해제하지 않고 늦
   const view = await render({ tenants: () => ({ current_tenant_id: "personal", tenants: [personal, organization] }),
     switchTenant: async () => { posted++; return sent.promise; } });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직");
+    await click(view, "설정"); await click(view, "조직 · 승인 조직");
     await view.act(async () => { view.dom.document.dispatchEvent(new MinimalEvent("popstate")); });
-    await click(view, "⚙ 설정");
+    await click(view, "설정");
     assert.equal(buttonByText(view.container, "조직 · 승인 조직").disabled, true);
     await view.act(async () => { sent.reject(new TypeError("합성 늦은 응답 유실")); });
     assert.match(view.container.textContent, /전환 결과.*확인/u);
@@ -128,7 +128,7 @@ test("J3 전환 성공은 이전 Notebook을 폐기하고 새 세션 scope 재�
     tenants: () => ({ current_tenant_id: "personal", tenants: [personal, organization] }),
     switchTenant: async target => Response.json({ data: { user_id: "member", tenant_id: target, workspace_id: "org-workspace", session_id: "session-new" }, meta: { trace_id: "trace" } }) });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직");
+    await click(view, "설정"); await click(view, "조직 · 승인 조직");
     assert.deepEqual(view.navigations, ["/notebooks"]);
     assert.doesNotMatch(view.container.textContent, /이전 개인 자료/u);
     assert.equal(view.requests.filter(row => row.init.method === "POST").length, 1);
@@ -140,7 +140,7 @@ test("J3 다른 탭 세션 변경을 전송 직전 확인하면 이전 선택을
   const view = await render({ getSession: async () => ++reads === 1 ? session() : { ...session("organization", "session-b"), user_id: "member-b" },
     tenants: () => ({ current_tenant_id: reads === 1 ? "personal" : "organization", tenants: [personal, organization] }) });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직");
+    await click(view, "설정"); await click(view, "조직 · 승인 조직");
     assert.equal(view.requests.filter(row => row.init.method === "POST").length, 0);
     assert.equal(view.navigations.length, 0);
   } finally { await view.cleanup(); }
@@ -155,7 +155,7 @@ test("J3 focus 재검증의 새 세션보다 늦은 이전 Notebook 응답은 �
     await view.act(async () => { view.dom.document.dispatchEvent(new MinimalEvent("focus")); });
     await view.act(async () => { late.resolve({ data: [{ notebook_id: "old", title: "이전 세션 자료", status: "active" }] }); });
     assert.doesNotMatch(view.container.textContent, /이전 세션 자료/u);
-    await click(view, "⚙ 설정"); assert.match(view.container.textContent, /현재 범위: 승인 조직/u);
+    await click(view, "설정"); assert.match(view.container.textContent, /현재 범위: 승인 조직/u);
   } finally { late.resolve({ data: [] }); await view.cleanup(); }
 });
 
@@ -164,10 +164,10 @@ test("J3 전송 중 확인된 실제 다른 세션에는 이전 미확정 결과
   const view = await render({ getSession: async () => changed ? { ...session("organization", "session-b"), user_id: "member-b", login_id: "member-b" } : session(),
     tenants: () => ({ current_tenant_id: changed ? "organization" : "personal", tenants: [personal, organization] }), switchTenant: () => sent.promise });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직"); changed = true;
+    await click(view, "설정"); await click(view, "조직 · 승인 조직"); changed = true;
     await view.act(async () => { view.dom.document.dispatchEvent(new MinimalEvent("focus")); });
     await view.act(async () => { sent.reject(new TypeError("합성 이전 세션 응답 유실")); });
-    await click(view, "⚙ 설정");
+    await click(view, "설정");
     assert.match(view.container.textContent, /member-b/u);
     assert.doesNotMatch(view.container.textContent, /전환 결과.*확인/u);
     assert.equal(buttonByText(view.container, "개인 · 개인").disabled, false);
@@ -179,7 +179,7 @@ test("J3 같은 세션 재조회 뒤 늦은 전환 성공도 이전 범위 본�
   const view = await render({ tenants: () => ({ current_tenant_id: "personal", tenants: [personal, organization] }),
     getNotebooks: async () => ({ data: [{ notebook_id: "old", title: "이전 범위 비공개자료", status: "active" }] }), switchTenant: () => sent.promise });
   try {
-    await click(view, "⚙ 설정"); await click(view, "조직 · 승인 조직");
+    await click(view, "설정"); await click(view, "조직 · 승인 조직");
     await view.act(async () => { view.dom.document.dispatchEvent(new MinimalEvent("popstate")); });
     assert.match(view.container.textContent, /이전 범위 비공개자료/u);
     await view.act(async () => { sent.resolve(Response.json({ data: { user_id: "member", tenant_id: "organization", workspace_id: "org-workspace", session_id: "session-new" }, meta: { trace_id: "trace" } })); });
@@ -191,7 +191,7 @@ const createdNotebook = () => Response.json({ data: { notebook_id: "created-a", 
   updated_at: "2026-10-17T00:00:00Z", status: "empty", etag: '"notebook:1"' },
   meta: { trace_id: "j3-create", workspace_id: "personal-workspace", replayed: false } }, { status: 201, headers: { ETag: '"notebook:1"' } });
 async function create(view) {
-  await click(view, "＋ 새 Notebook");
+  await click(view, "새 Notebook");
   const input = findElements(view.container, node => node.tagName === "INPUT" && node.hasAttribute("required"))[0];
   assert.ok(input);
   const props = input[Object.keys(input).find(key => key.startsWith("__reactProps"))];
