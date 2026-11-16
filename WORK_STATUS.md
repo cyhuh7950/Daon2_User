@@ -46,7 +46,7 @@
 - 다른 쪽 대기: Daon2 Insurance 재생성(끝나면 Insurance 온톨로지·규칙·GraphRAG 재확인), ysna nginx proxy_read_timeout 300초(proxy_host 8의 anvil-web 설정 정리 후 proxy_host 21 고급 설정에 적용)
 - "PDF만 된다"는 증상: 재현 정보(파일 형식·올린 화면·나온 문구) 받으면 확인. 파일 업로드 칸은 모든 형식을 받고, PDF 전용 칸은 화면에서 누를 수 없는 숨은 칸(product-workspace-shell.jsx `source-legacy-input`)
 - 실서버 미확인: PDF 자료 질문(근거 검증 실패 시 `text_grounding_failure reason=` 로그로 원인 확인), 문서 작성 반복 정지 해소, TXT 업로드 처리, 운영 상태 화면 표시
-- 이미 색인된 TXT Source는 재처리해야 원문 구간이 색인됨(대상 조사는 2026-11-16 진행 기록 참조)
+- ~~이미 색인된 TXT Source 재처리~~ → 하지 않음(2026-11-16 신산님 결정): 대상 admin 2개는 '화면 확인용 Notebook'에 붙여넣은 시험용 글(343·522바이트, 10-20), 나머지 10개는 시험용 조직(tenant-B…). 제품 재처리는 실패한 Source만 허용
 - 서버 임시 로그(`/tmp/*deploy*.log` 등)는 저장소 정리 때 삭제
 
 ### 2026-10-20 당시 목록(참고)
