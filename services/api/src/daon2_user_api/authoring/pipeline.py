@@ -256,7 +256,14 @@ class AuthoringPipeline:
 
     def _gather_unit(self, ctx: GenerationContext, unit: Mapping[str, Any], knowledge: list[dict[str, Any]]) -> list[dict[str, Any]]:
         target = self._evidence.prepare(ctx.context) if self._evidence is not None else None
-        found = run_planned(self._evidence, target, self._plan_unit(ctx, unit, target), default_requests(target, f"{unit['title']} {unit['purpose']}"), limit=evidence_limit(unit["target_chars"])) if target is not None else ()
+        found: Any = ()
+        if target is not None:
+            # 규칙 판정을 고르면 소목차 설명을 상황으로 삼아 사실을 읽는다(WO-K6 C 2단계).
+            from ..studio_knowledge import judging_options
+            requests = self._plan_unit(ctx, unit, target)
+            situation = f"{unit['section_title']} / {unit['title']}: {unit['purpose']}"
+            found = run_planned(self._evidence, target, requests, default_requests(target, f"{unit['title']} {unit['purpose']}"), limit=evidence_limit(unit["target_chars"]),
+                                **judging_options(self._llm, ctx.context, situation, requests, ctx.cancel_check))
         by_block = {(row["connector_id"], row["version_id"], row["block_id"]): row for row in knowledge}
         material: list[dict[str, Any]] = []
         for item in found:
