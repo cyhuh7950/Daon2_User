@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -26,11 +28,14 @@ _STATUS_PROBES = (
     ("ruleset", "ruleset_list", "rulesets"),
     ("approved", "approved_knowledge_search", "assets"),
 )
+STATUS_REUSE_SECONDS = 60  # 상태 조회는 질문과 같은 호출 한도를 쓴다. 같은 노트북·같은 선택이면 잠시 다시 쓴다.
 _NOT_READY = frozenset({"NOT_READY", "SCOPE_FORBIDDEN", "MCP_FORBIDDEN"})
 # Daon2 범용 토큰의 패키지 목록은 services로 서비스별 사용 가능 여부를 준다(승인 자산은 없음).
 _SERVICE_KINDS = (("ontology", "ontology"), ("ruleset", "ruleset"), ("graphrag", "graphrag"))
 MAX_SELECTION_BODY = 200
-PAGE_SIZE = 50  # Daon2 단일 주소는 도구 설명(최대 200)과 달리 50을 넘으면 거부한다(2026-11-12 ysna 실측). 다음 쪽은 cursor로 읽는다.
+# 한 번에 받을 개수는 서버 도구 설명의 limit 최댓값을 따른다(Daon2 2026-11-12 권고). 모르면 50, 많아도 200. 다음 쪽은 cursor로 읽는다.
+PAGE_SIZE = 50
+MAX_PAGE_SIZE = 200
 MAX_PAGES = 100
 # tenant_id는 없어도 된다: Daon2 범용 토큰은 서버가 tenant를 정하고, 재생성 중인 패키지는 tenant 없이 오기도 한다(2026-11-16 ysna).
 _TEXT_FIELDS = ("project_id", "project_name", "work_package_id", "work_package_name")
@@ -76,6 +81,9 @@ class KnowledgeScopeService:
         self._store = store
         self._connectors = connectors
         self._shared_connector_tenant = shared_connector_tenant  # 조직마다 등록하지 않고 쓰는 시스템 공용 연결(WO-K4 D4)
+        self._clock = time.monotonic
+        self._status_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
+        self._status_lock = threading.Lock()
 
     @staticmethod
     def _scope(context: KnowledgeScopeContext, capability: str) -> CloudAccessContext:
@@ -105,12 +113,21 @@ class KnowledgeScopeService:
                           if item["kind"] == "daon2" and item["status"] == "verified" and not item.get("virtual")), None)
         return None if connector is None else (connector_context, connector["connector_id"])
 
+    def _page_size(self, connector_context: ConnectorContext, connector_id: str) -> int:
+        reader = getattr(self._connectors, "tool_limit", None)
+        try:
+            maximum = reader(connector_context, connector_id, "list_knowledge_scopes") if callable(reader) else None
+        except (McpError, ConnectorError):
+            maximum = None
+        return min(maximum, MAX_PAGE_SIZE) if maximum else PAGE_SIZE
+
     def _read_approved(self, connector_context: ConnectorContext, connector: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
         found: dict[tuple[str, str], Mapping[str, Any]] = {}
         cursor: str | None = None
         seen: set[str] = set()
+        page_size = self._page_size(connector_context, connector["connector_id"])
         for _ in range(MAX_PAGES):
-            arguments: dict[str, Any] = {"limit": PAGE_SIZE, **({"cursor": cursor} if cursor else {})}
+            arguments: dict[str, Any] = {"limit": page_size, **({"cursor": cursor} if cursor else {})}
             page = self._connectors.call(connector_context, connector["connector_id"], "list_knowledge_scopes", arguments).structured
             if not isinstance(page, Mapping) or not isinstance(page.get("scopes"), list):
                 raise _invalid()
@@ -136,6 +153,19 @@ class KnowledgeScopeService:
     def knowledge_status(self, context: KnowledgeScopeContext, notebook_id: str) -> dict[str, Any]:
         """선택한 업무 패키지별로 쓸 수 있는 지식 종류. ready·empty(준비됐지만 없음)·not_ready·unknown(확인 실패)·none(연결 없음)."""
         selected = self.selection(context, notebook_id)["items"]
+        key = (context.tenant_id, context.workspace_id, notebook_id, tuple((i["project_id"], i["work_package_id"]) for i in selected))
+        now = self._clock()
+        with self._status_lock:
+            self._status_cache = {k: v for k, v in self._status_cache.items() if v[0] > now}
+            cached = self._status_cache.get(key)
+        if cached is not None:
+            return cached[1]
+        result = self._fresh_status(context, selected)
+        with self._status_lock:
+            self._status_cache[key] = (now + STATUS_REUSE_SECONDS, result)
+        return result
+
+    def _fresh_status(self, context: KnowledgeScopeContext, selected: list[dict[str, Any]]) -> dict[str, Any]:
         approved = self._approved_scopes(context) if selected else {}
         daon2 = self.daon2_target(context)
         items = []

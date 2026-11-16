@@ -303,6 +303,19 @@ class KnowledgeConnectorService:
             raise ConnectorError("CONNECTOR_NOT_FOUND", 404)
         return _view(row)
 
+    def tool_limit(self, context: ConnectorContext, connector_id: str, tool: str) -> int | None:
+        """서버 도구 설명의 limit 최댓값(Daon2 권고: 고정값 대신 이 값을 쓴다). 모르면 None."""
+        client, view = self._client(context, connector_id)
+        if view.get("status") == "disabled":
+            return None
+        self._authorize_egress(context, view, {"tool": tool})  # 일반 호출과 같은 외부 전송 확인을 거친다
+        if client._connection is None:  # noqa: SLF001
+            client.connect()
+        tools = client._tools or {t["name"]: t for t in client.list_tools()}  # noqa: SLF001
+        limit = (((tools.get(tool) or {}).get("inputSchema") or {}).get("properties") or {}).get("limit") or {}
+        maximum = limit.get("maximum") if isinstance(limit, Mapping) else None
+        return maximum if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum >= 1 else None
+
     def call(self, context: ConnectorContext, connector_id: str, tool: str, arguments: Mapping[str, Any]) -> McpToolResult:
         client, view = self._client(context, connector_id)
         if view["status"] == "disabled":
