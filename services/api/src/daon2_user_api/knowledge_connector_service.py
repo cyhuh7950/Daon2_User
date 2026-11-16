@@ -35,6 +35,20 @@ _PROVIDER_CODE = "CUSTOM"
 _OAUTH_AUTH_KIND = "oauth_client_credentials"
 # 모델을 부르는 도구는 오래 걸린다. Daon2 안내: graphrag_query 최대 약 2분, 클라이언트 대기 130초 이상(WO-K6).
 SLOW_TOOL_TIMEOUTS: Mapping[str, float] = {"graphrag_query": 135.0}
+# 도구를 고르지 않고 등록하면 종류의 기본 도구가 모두 들어간다. 서버(예: Daon2 단일 주소)가 그중 일부만 주면
+# 연결 확인 때 서버에 있는 것만 남긴다. 단, 그 종류가 제 역할을 하는 데 꼭 필요한 도구는 있어야 한다.
+REQUIRED_TOOLS: Mapping[str, frozenset[str]] = {
+    "daon2_rag": frozenset({"search_document_evidence", "list_knowledge_scopes"}),
+    "daon2": frozenset({"ontology_search_concepts", "ruleset_list"}),
+}
+
+
+def narrowed_default_tools(kind: str, allowed: Sequence[str], offered: set[str]) -> list[str] | None:
+    """기본 도구 그대로인 연결에서 서버에 없는 도구를 뺀 목록. 바꿀 것이 없거나 사용자가 고른 목록이면 None."""
+    if set(allowed) <= offered or set(allowed) != set(KIND_TOOLS.get(kind, ())):
+        return None
+    kept = [tool for tool in allowed if tool in offered]
+    return kept if REQUIRED_TOOLS.get(kind, frozenset()) <= set(kept) and kept else None
 _OAUTH_LIMITS = {"token_url": 2048, "client_id": 256, "client_secret": 8192, "resource": 2048, "scope": 1024}
 
 
@@ -270,9 +284,16 @@ class KnowledgeConnectorService:
             client, view = self._client(context, connector_id)
             protocol = client.connect().protocol_version
             names = {t["name"] for t in client.list_tools()}
-            if not set(view["allowed_tools"]) <= names:
+            narrowed = narrowed_default_tools(view["kind"], view["allowed_tools"], names)
+            if narrowed is not None:
+                # 연결은 되지만 빠진 도구가 쓰는 기능(문서 목록·템플릿 원문 등)은 안 된다. 종류를 잘못 고른 것일 수도 있어 화면에 남긴다.
+                view = self.set_allowed_tools(context, connector_id, narrowed, view["version"])
+                error = "CONNECTOR_TOOLS_REDUCED"
+            elif not set(view["allowed_tools"]) <= names:
                 status, error = "failed", "CONNECTOR_TOOLS_MISSING"
         except McpError as exc:
+            status, error = "failed", exc.code
+        except ConnectorError as exc:  # 도구를 줄이는 사이 다른 저장과 겹친 경우 등: 확인 결과로 기록한다
             status, error = "failed", exc.code
         with self._store._transaction(self._scope(context, "connector.write")) as connection:
             row = connection.execute(

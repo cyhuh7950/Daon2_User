@@ -405,3 +405,146 @@ class StatusFromServicesTests(KnowledgeStatusTests):
         from daon2_user_api.mcp_client import McpError as Err
         kinds = self.service(ontology_search_concepts=Err("MCP_FORBIDDEN"), ruleset_list=Err("MCP_FORBIDDEN"), approved_knowledge_search=Err("MCP_FORBIDDEN")).knowledge_status(self.ctx, "nb-1")["items"][0]["kinds"]
         self.assertEqual((kinds["ontology"], kinds["ruleset"], kinds["approved"]), ("not_ready", "not_ready", "not_ready"))
+
+
+class DefaultToolNarrowingTests(unittest.TestCase):
+    """도구를 고르지 않고 등록한 연결은 연결 확인 때 서버에 있는 기본 도구만 남긴다(2026-11-12 잘못 등록된 사례)."""
+
+    def test_untouched_defaults_keep_only_tools_the_server_offers(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        offered = {"search_document_evidence", "get_document_evidence", "get_document_text", "list_approved_documents", "list_knowledge_scopes", "ruleset_list"}
+        kept = narrowed_default_tools("daon2_rag", sorted(KIND_TOOLS["daon2_rag"]), offered)
+        self.assertEqual(set(kept), {"search_document_evidence", "get_document_evidence", "get_document_text", "list_approved_documents", "list_knowledge_scopes"})
+
+    def test_chosen_tools_are_never_changed(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2_rag", ["search_document_evidence", "list_documents"], {"search_document_evidence"}))
+
+    def test_server_without_the_core_tools_still_fails(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2_rag", sorted(KIND_TOOLS["daon2_rag"]), {"get_document_text"}))
+        self.assertIsNone(narrowed_default_tools("daon2", sorted(KIND_TOOLS["daon2"]), {"search_document_evidence"}))
+
+    def test_nothing_to_narrow_when_everything_exists(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2", sorted(KIND_TOOLS["daon2"]), set(KIND_TOOLS["daon2"])))
+
+
+class StudioJudgmentTests(unittest.TestCase):
+    """C 2단계: 스튜디오가 규칙 판정을 고르면 스튜디오 LLM으로 사실을 읽어 판정한다."""
+    CONDITIONS = [{"id": "F1", "label": "제안서 제출", "datatype": "boolean", "operator": "eq", "value": True}]
+
+    def make(self, kind="judgment", facts_error=None):
+        from daon2_user_api.question_external_evidence import EvidenceTarget
+        from daon2_user_api.studio_knowledge import StudioKnowledge
+        test = self
+        self.prompts, self.seen = [], []
+
+        class Finder:
+            def prepare(self, context):
+                return EvidenceTarget(SimpleNamespace(tenant_id="t"), "kc-rag", ({"alias": "P1", "project_id": "p1", "project_name": "프로젝트", "work_package_id": "w1",
+                                                                                 "work_package_name": "제안서 작업", "tenant_id": "t-1"},), "ctx-d2", "kc-d2")
+
+            def run(self, target, requests, limit=5, **options):
+                test.seen.append((tuple(requests), options))
+                extract = options.get("extract_facts")
+                test.facts = extract("제안서 미제출", StudioJudgmentTests.CONDITIONS) if extract else None
+                return ()
+
+        class LLM:
+            def generate(self, context, prompt, cancel_check=None):
+                test.prompts.append(prompt)
+                if prompt.schema_name == "authoring_unit_plan":
+                    return SimpleNamespace(data={"requests": [{"knowledge": kind, "package": "P1", "query": "제안서 미제출"}]})
+                if facts_error:
+                    raise facts_error
+                return SimpleNamespace(data={"facts": [{"id": "F1", "value": False}, {"id": "F9", "value": True}]})
+
+        return StudioKnowledge(LLM(), Finder())
+
+    def test_judgment_request_reads_facts_with_the_studio_llm(self):
+        from daon2_user_api.studio_text_generation import StudioPrompt  # noqa: F401
+        self.make().find_requested(CTX_STUDIO, "제안서를 안 내면 입찰이 무효인가")
+        self.assertEqual(self.facts, {"F1": False})
+        facts_prompt = self.prompts[-1]
+        self.assertEqual(facts_prompt.schema_name, "studio_rule_facts")
+        self.assertIn("제안서 제출", facts_prompt.user)
+        self.assertIn("제안서를 안 내면 입찰이 무효인가", facts_prompt.user)
+
+    def test_other_kinds_do_not_pass_a_fact_reader(self):
+        self.make(kind="ontology").find_requested(CTX_STUDIO, "용어")
+        self.assertEqual(self.seen[0][1], {})
+
+    def test_fact_reading_failure_judges_without_facts(self):
+        from daon2_user_api.studio_workspace import StudioError
+        self.make(facts_error=StudioError("PROVIDER_UNAVAILABLE", 503)).find_requested(CTX_STUDIO, "질문")
+        self.assertEqual(self.facts, {})
+
+
+from daon2_user_api.studio_workspace import StudioContext as _StudioContext  # noqa: E402
+CTX_STUDIO = _StudioContext("tenant-1", "workspace-1", "actor-1", "trace-1", "policy-1", "notebook-1")
+
+
+class AuthoringJudgmentTests(StudioJudgmentTests):
+    """문서 작성의 소목차 자료 수집도 규칙 판정을 고르면 사실을 읽는다."""
+
+    def gather(self, kind="judgment"):
+        from daon2_user_api.authoring.pipeline import AuthoringPipeline
+        from daon2_user_api.studio_v2_generation import GenerationContext
+        knowledge = self.make(kind=kind)
+        pipeline = AuthoringPipeline(None, None, knowledge._llm, None, lambda *a: None, evidence=knowledge._finder)  # noqa: SLF001
+        ctx = GenerationContext(CTX_STUDIO, "out-1", "report", None, {}, (), "", "ko", "create", lambda p, n: None, lambda: None)
+        unit = {"section_title": "입찰", "title": "제안서 제출 의무", "purpose": "제출하지 않으면 어떻게 되는지", "target_chars": 800}
+        return pipeline._gather_unit(ctx, unit, [])  # noqa: SLF001
+
+    def test_unit_with_judgment_reads_facts(self):
+        self.gather()
+        self.assertEqual(self.facts, {"F1": False})
+        self.assertIn("제안서 제출 의무", self.prompts[-1].user)
+
+    def test_unit_without_judgment_passes_no_reader(self):
+        self.gather(kind="ontology")
+        self.assertEqual(self.seen[0][1], {})
+
+
+class VerifyNarrowingTests(unittest.TestCase):
+    """검토 반영: 도구를 줄였으면 연결됨이어도 그 사실을 남기고, 줄이다 충돌하면 확인 실패로 기록한다."""
+
+    def service(self, narrow_error=None):
+        from contextlib import contextmanager
+        svc = KnowledgeConnectorService.__new__(KnowledgeConnectorService)
+        self.updates = []
+        test = self
+        client = SimpleNamespace(connect=lambda: SimpleNamespace(protocol_version="2026-07-28"),
+                                 list_tools=lambda: [{"name": n} for n in ("search_document_evidence", "list_knowledge_scopes", "get_document_text")])
+        view = {"kind": "daon2_rag", "allowed_tools": sorted(KIND_TOOLS["daon2_rag"]), "version": 1}
+        svc._client = lambda context, cid: (client, view)
+
+        def set_tools(context, cid, tools, version):
+            if narrow_error:
+                raise narrow_error
+            return {**view, "allowed_tools": tools, "version": 2}
+        svc.set_allowed_tools = set_tools
+
+        class Conn:
+            def execute(self, sql, params):
+                test.updates.append(params)
+                return SimpleNamespace(fetchone=lambda: params)
+
+        @contextmanager
+        def tx(scope):
+            yield Conn()
+        svc._store = SimpleNamespace(_transaction=tx)
+        svc._scope = lambda context, cap: None
+        return svc
+
+    def verify(self, **kw):
+        with patch("daon2_user_api.knowledge_connector_service._view", lambda row: {"status": row[0], "error_code": row[1]}):
+            return self.service(**kw).verify(ConnectorContext("t", "a"), "kc-1")
+
+    def test_reduced_tools_are_recorded_on_a_verified_connection(self):
+        self.assertEqual(self.verify(), {"status": "verified", "error_code": "CONNECTOR_TOOLS_REDUCED"})
+
+    def test_conflict_while_narrowing_is_recorded_not_raised(self):
+        from daon2_user_api.knowledge_connector_service import ConnectorError
+        self.assertEqual(self.verify(narrow_error=ConnectorError("CONNECTOR_VERSION_CONFLICT", 409)), {"status": "failed", "error_code": "CONNECTOR_VERSION_CONFLICT"})

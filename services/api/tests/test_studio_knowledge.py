@@ -31,7 +31,7 @@ class Finder:
             return None
         return EvidenceTarget(SimpleNamespace(tenant_id="t"), "kc-rag", ({"alias": "P1", "project_id": "p1", "project_name": "프로젝트", "work_package_id": "w1", "work_package_name": "제안서 작업"},))
 
-    def run(self, target, requests, limit=5):
+    def run(self, target, requests, limit=5, **options):
         self.runs.append(tuple(requests))
         self.limits.append(limit)
         if self.error:
@@ -186,7 +186,7 @@ class StudioKnowledgeTests(unittest.TestCase):
                 base = super().prepare(context)
                 return EvidenceTarget(base.connector_context, base.connector_id, base.packages, "ctx", "kc-daon2")
 
-            def run(self, target, requests, limit=5):
+            def run(self, target, requests, limit=5, **options):
                 self.runs.append(tuple(requests))
                 return () if any(len(item) > 2 for item in requests) else (evidence("doc"),)
 

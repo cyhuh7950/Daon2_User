@@ -6,7 +6,8 @@ import json
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring.agent import UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM
-from .question_external_evidence import EXTERNAL_LIMIT, ExternalEvidence, ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
+from .question_external_evidence import (EXTERNAL_LIMIT, ExternalEvidence, ExternalEvidenceError, build_facts_prompt, build_plan_prompt, default_requests,
+                                         parse_facts, parse_plan, run_planned)
 from .studio_context_builder import ContextPack, Passage
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import GenerationContext
@@ -16,6 +17,31 @@ from .studio_workspace import StudioContext, StudioError
 MAX_UNITS = 5
 UNIT_EVIDENCE_LIMIT = 3
 UNITS_SCHEMA = {"type": "object", "properties": {"units": {"type": "array", "items": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}}}, "required": ["units"]}
+
+
+FACTS_SYSTEM = ("사실 추출 도구입니다. 요청 문장을 읽고 나열된 조건의 값을 문장이 밝힌 경우에만 정합니다. 문장에 없는 조건은 넣지 않고 추측하지 않습니다. "
+                "boolean 조건은 true/false, 숫자는 숫자, 그 밖은 짧은 글로 씁니다. JSON 객체 하나만 출력합니다.")
+FACTS_SCHEMA = {"type": "object", "properties": {"facts": {"type": "array", "items": {"type": "object", "properties": {
+    "id": {"type": "string"}, "value": {"type": ["boolean", "number", "string"]}}, "required": ["id", "value"]}}}, "required": ["facts"]}
+
+
+def studio_fact_reader(llm: Any, context: StudioContext, question: str, cancel_check: Callable[[], None] | None = None) -> Callable[[str, Sequence[Mapping[str, Any]]], dict[str, Any]]:
+    """규칙 판정용 사실을 스튜디오 LLM으로 읽는 함수(WO-K6 C 2단계). 외부 전송 확인은 스튜디오 LLM이 한다. 실패하면 사실 없이 판정한다."""
+    def read(_query: str, conditions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        prompt = StudioPrompt(system=FACTS_SYSTEM, user=build_facts_prompt(question, conditions), json_schema=FACTS_SCHEMA, max_output_tokens=300,
+                              prompt_version="studio-rule-facts-v1", schema_name="studio_rule_facts")
+        try:
+            data = llm.generate(context, prompt, cancel_check=cancel_check).data
+        except (StudioError, ValueError, KeyError, TypeError):
+            return {}
+        return parse_facts(json.dumps(data, ensure_ascii=False), conditions)
+    return read
+
+
+def judging_options(llm: Any, context: StudioContext, question: str, requests: Sequence[tuple[str, ...]], cancel_check: Callable[[], None] | None = None) -> dict[str, Any]:
+    """계획에 규칙 판정이 있을 때만 사실 읽기 함수를 넘긴다(없으면 기존 호출과 같다)."""
+    judging = any(len(item) > 2 and item[2] == "judgment" for item in requests)
+    return {"extract_facts": studio_fact_reader(llm, context, question, cancel_check)} if judging else {}
 
 
 def _key(ref: Any) -> tuple[Any, Any, Any]:
@@ -68,7 +94,10 @@ class StudioKnowledge:
             requests = self._plan(context, question, target, cancel_check)
         except (StudioError, ValueError, KeyError, TypeError):
             return ()
-        return tuple(run_planned(self._finder, target, requests, default_requests(target, question), limit=limit)) if requests else ()
+        if not requests:
+            return ()
+        return tuple(run_planned(self._finder, target, requests, default_requests(target, question), limit=limit,
+                                 **judging_options(self._llm, context, question, requests, cancel_check)))
 
     def extend_if_requested(self, context: StudioContext, question: str, pack: ContextPack, *, limit: int = EXTERNAL_LIMIT, first_number: int = 1,
                             cancel_check: Callable[[], None] | None = None) -> tuple[ContextPack, tuple[Passage, ...]]:
@@ -80,7 +109,9 @@ class StudioKnowledge:
             target = self._finder.prepare(ctx.context)
             if target is None:
                 return pack, ()
-            found = run_planned(self._finder, target, self._requests(ctx, question, target), default_requests(target, question), limit=limit)
+            requests = self._requests(ctx, question, target)
+            found = run_planned(self._finder, target, requests, default_requests(target, question), limit=limit,
+                                **judging_options(self._llm, ctx.context, question, requests, ctx.cancel_check))
         except ExternalEvidenceError as error:
             raise StudioError("PROVIDER_UNAVAILABLE", 503) from error
         return self._merge(pack, found)

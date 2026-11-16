@@ -33,7 +33,7 @@ class Finder:
         package = {"alias": "P1", "project_id": "p1", "project_name": "프로젝트", "work_package_id": "w1", "work_package_name": "제안서 작업"}
         return EvidenceTarget(SimpleNamespace(tenant_id="tenant-1"), "kc-rag", (package,))
 
-    def run(self, target, requests, limit=5):
+    def run(self, target, requests, limit=5, **options):
         self.runs.append(tuple(requests))
         self.limits.append(limit)
         if self.error:
