@@ -285,6 +285,7 @@ test("S38 review Minor1 성공한 빈 Workspace 목록만 선택 범위의 역�
     assert.match(view.container.textContent, /조직 역할 없음/u);
     await selectValue(view, "조직 선택", "tb");
     assert.match(view.container.textContent, /선택 범위의 역할 조회 실패/u);
+    assert.match(view.container.textContent, /선택한 조직에 이 사용자의 멤버십이 없습니다/u);
     assert.doesNotMatch(view.container.textContent, /Workspace 역할 없음|조직 역할 없음/u);
   } finally { await view.cleanup(); }
 });
@@ -627,13 +628,15 @@ test("로그인은 초기 admin 단축 비밀번호를 허용하고 새 비밀�
   } finally { await view.cleanup(); }
 });
 
-test("Notebook 설정은 system admin에게만 사용자 관리를 표시하고 조직 항목은 노출하지 않는다", async () => {
+test("Notebook 설정은 system admin에게만 사용자 관리·조직 관리를 표시하고 조직 가입은 모두에게 표시한다", async () => {
   for (const [showUserManagement, expected] of [[false, false], [true, true]]) {
     const view = await render("packages/ui/src/notebook-home.jsx", "NotebookHome", { notebooks: [], showUserManagement }, `.admin-menu-${showUserManagement}-`);
     try {
       await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
       assert.equal(Boolean(buttonByText(view.container, "사용자 관리")), expected);
-      assert.doesNotMatch(view.container.textContent, /조직 가입|조직 관리자/u);
+      assert.equal(Boolean(buttonByText(view.container, "조직 관리")), expected);
+      assert.equal(Boolean(buttonByText(view.container, "조직 가입")), true);
+      assert.doesNotMatch(view.container.textContent, /조직 관리자/u);
     } finally { await view.cleanup(); }
   }
 });
