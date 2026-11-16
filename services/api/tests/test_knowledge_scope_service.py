@@ -201,3 +201,24 @@ class ScopeRowToleranceTests(unittest.TestCase):
         service.replace(CTX, "nb-1", [{"project_id": "p1", "work_package_id": "w2"}])
         insert = next(p for s, p in store.statements if s.startswith("INSERT INTO notebook_knowledge_scopes"))
         self.assertEqual(insert[3], "server")
+
+
+class PageSizeFromServerTests(unittest.TestCase):
+    """목록 한 번에 받을 개수는 서버 도구 설명(limit maximum)을 따른다. 모르면 50, 많아도 200."""
+
+    def limits_sent(self, maximum):
+        connectors = _Connectors([{"scopes": [scope()], "next_cursor": None}])
+        if maximum != "absent":
+            connectors.tool_limit = lambda context, connector_id, tool: maximum
+        KnowledgeScopeService(_Store(), connectors).catalog(CTX)
+        return connectors.calls[0][3]["limit"]
+
+    def test_server_maximum_is_used(self):
+        self.assertEqual(self.limits_sent(20), 20)
+
+    def test_unknown_maximum_falls_back_to_50(self):
+        self.assertEqual(self.limits_sent(None), 50)
+        self.assertEqual(self.limits_sent("absent"), 50)
+
+    def test_large_maximum_is_capped(self):
+        self.assertEqual(self.limits_sent(500), 200)

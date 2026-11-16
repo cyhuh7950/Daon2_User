@@ -305,10 +305,14 @@ def _parsed(row: Any) -> tuple[Mapping[str, Any], float]:
 
 def run_planned(finder: Any, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], fallback: Sequence[tuple[str, ...]], **options: Any) -> tuple[ExternalEvidence, ...]:
     """계획대로 찾는다. 온톨로지·규칙에서 못 찾으면 문서에서 찾고, 질문당 호출 상한은 합쳐서 지킨다."""
-    found = tuple(finder.run(target, requests, **options))
+    # 호출 수를 함께 세는 검색기면 두 번의 검색이 같은 상한을 나눠 쓴다(계획 검색이 상한을 다 쓰면 대체 검색은 하지 않는다).
+    calls = [0]
+    counted = {"calls": calls} if getattr(finder, "COUNTS_CALLS", False) else {}
+    found = tuple(finder.run(target, requests, **options, **counted))
     if found or not requests or any(len(item) == 2 for item in requests):
         return found
-    return tuple(finder.run(target, fallback[:max(0, MAX_PLAN_CALLS - len(requests))], **options))
+    remaining = MAX_PLAN_CALLS - (calls[0] if counted else len(requests))
+    return tuple(finder.run(target, fallback[:remaining], **options, **counted)) if remaining > 0 else ()
 
 
 def _evidence_rank(item: ExternalEvidence) -> tuple[float, str]:
@@ -355,13 +359,20 @@ class NotebookKnowledgeEvidence:
     def _source_tenant(row: Mapping[str, Any]) -> Mapping[str, str]:
         return {"tenant_id": row["tenant_id"]} if isinstance(row.get("tenant_id"), str) else {}
 
-    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], limit: int = EXTERNAL_LIMIT, extract_facts: Any = None) -> tuple[ExternalEvidence, ...]:
-        """extract_facts(검색어, 조건 목록) -> {조건 id: 값}: 규칙 판정에 쓸 사실을 LLM으로 뽑는 함수. 없으면 판정 대신 규칙 본문을 근거로 준다."""
+    COUNTS_CALLS = True  # run_planned가 호출 수 카운터(calls)를 넘겨도 된다는 표시
+
+    def run(self, target: EvidenceTarget, requests: Sequence[tuple[str, ...]], limit: int = EXTERNAL_LIMIT, extract_facts: Any = None,
+            calls: list[int] | None = None) -> tuple[ExternalEvidence, ...]:
+        """extract_facts(검색어, 조건 목록) -> {조건 id: 값}: 규칙 판정에 쓸 사실을 LLM으로 뽑는 함수. 없으면 판정 대신 규칙 본문을 근거로 준다.
+
+        calls: 같은 질문의 앞선 검색과 함께 쓰는 호출 수 카운터(run_planned가 넘긴다). 질문당 상한을 합쳐서 지킨다.
+        """
         packages = {package["alias"]: package for package in target.packages}
         by_query: dict[tuple[str, str], list[ExternalEvidence]] = {}
-        budget = MAX_PLAN_CALLS
+        counter = calls if calls is not None else [0]  # 호출할 때마다 바로 센다(예외로 끝나도 맞게 남는다)
         with _knowledge_errors():
             for request in requests[:MAX_PLAN_CALLS]:
+                budget = MAX_PLAN_CALLS - counter[0]
                 if budget < 1:
                     break
                 alias, query = request[:2]
@@ -369,10 +380,10 @@ class NotebookKnowledgeEvidence:
                 package = packages[alias]
                 if kind != "rag":
                     found, used = self._daon2_evidence(target, package, query, kind, budget, extract_facts)
-                    budget -= used
+                    counter[0] += used
                     by_query.setdefault((kind, query), []).extend(found)
                     continue
-                budget -= 1
+                counter[0] += 1
                 result = self._connectors.call(target.connector_context, target.connector_id, "search_document_evidence", {
                     "project_id": package["project_id"], "work_package_id": package["work_package_id"], "question": query, "limit": PER_PACKAGE_LIMIT})
                 rows = result.structured.get("result") if isinstance(result.structured, Mapping) and not result.is_error else None

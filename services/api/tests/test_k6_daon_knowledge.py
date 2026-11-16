@@ -548,3 +548,62 @@ class VerifyNarrowingTests(unittest.TestCase):
     def test_conflict_while_narrowing_is_recorded_not_raised(self):
         from daon2_user_api.knowledge_connector_service import ConnectorError
         self.assertEqual(self.verify(narrow_error=ConnectorError("CONNECTOR_VERSION_CONFLICT", 409)), {"status": "failed", "error_code": "CONNECTOR_VERSION_CONFLICT"})
+
+
+class ToolLimitTests(unittest.TestCase):
+    def test_reads_limit_maximum_from_the_tool_list(self):
+        svc = KnowledgeConnectorService.__new__(KnowledgeConnectorService)
+        client = SimpleNamespace(_connection=object(), _tools={"list_knowledge_scopes": {"name": "list_knowledge_scopes", "inputSchema": {"properties": {"limit": {"maximum": 50}}}}},
+                                 list_tools=lambda: [])
+        svc._client = lambda context, cid: (client, {"status": "verified"})
+        checked = []
+        svc._authorize_egress = lambda context, view, arguments: checked.append(arguments)
+        self.assertEqual(svc.tool_limit(ConnectorContext("t", "a"), "kc", "list_knowledge_scopes"), 50)
+        self.assertEqual(len(checked), 1)  # 서버에 묻기 전에 외부 전송 확인을 거친다
+        self.assertIsNone(svc.tool_limit(ConnectorContext("t", "a"), "kc", "missing_tool"))
+
+
+class SharedCallBudgetTests(unittest.TestCase):
+    """계획 검색이 상한(8회)을 다 쓰고 아무것도 못 찾으면, 문서 대체 검색이 상한을 새로 받지 않는다."""
+
+    def test_fallback_does_not_get_a_fresh_budget(self):
+        from daon2_user_api.question_external_evidence import MAX_PLAN_CALLS, run_planned
+        rows = [{"concept_id": f"c{i}", "snapshot_id": "s1", "score": 0.5, "provenance": APPROVED} for i in range(3)]
+        connectors = _ToolConnectors(ontology_search_concepts={"concepts": rows}, ontology_get_concept={**CONCEPT, "provenance": "DRAFT"},
+                                     search_document_evidence={"result": []})
+        finder = NotebookKnowledgeEvidence(_Scopes([]), connectors)
+        target = daon2_target("A", "B", "C")
+        requests = tuple((f"P{i}", "q", "ontology") for i in (1, 2, 3))
+        fallback = tuple((f"P{i}", "q") for i in (1, 2, 3))
+        run_planned(finder, target, requests, fallback)
+        self.assertLessEqual(len(connectors.calls), MAX_PLAN_CALLS)
+
+    def test_unused_budget_still_reaches_the_fallback(self):
+        from daon2_user_api.question_external_evidence import run_planned
+        connectors = _ToolConnectors(graphrag_query={"answer": "", "provenance": APPROVED}, search_document_evidence={"result": []})
+        finder = NotebookKnowledgeEvidence(_Scopes([]), connectors)
+        run_planned(finder, daon2_target("A"), (("P1", "q", "graphrag"),), (("P1", "q"),))
+        self.assertEqual([c[2] for c in connectors.calls], ["graphrag_query", "search_document_evidence"])
+
+
+class StatusCacheTests(KnowledgeStatusTests):
+    """패키지 상태는 질문과 같은 호출 한도를 쓰므로, 같은 선택이면 짧게 다시 쓴다."""
+
+    def test_same_selection_is_reused_for_a_short_while(self):
+        service = self.service(**self.ready())
+        now = [100.0]
+        service._clock = lambda: now[0]  # noqa: SLF001
+        first = service.knowledge_status(self.ctx, "nb-1")
+        calls = len(self.calls)
+        self.assertEqual(service.knowledge_status(self.ctx, "nb-1"), first)
+        self.assertEqual(len(self.calls), calls)
+        now[0] += 61
+        service.knowledge_status(self.ctx, "nb-1")
+        self.assertGreater(len(self.calls), calls)
+
+    def test_other_notebook_is_not_reused(self):
+        service = self.service(**self.ready())
+        service.knowledge_status(self.ctx, "nb-1")
+        calls = len(self.calls)
+        service.knowledge_status(self.ctx, "nb-2")
+        self.assertGreater(len(self.calls), calls)
