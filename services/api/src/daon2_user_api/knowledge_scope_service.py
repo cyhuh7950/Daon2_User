@@ -32,7 +32,9 @@ _SERVICE_KINDS = (("ontology", "ontology"), ("ruleset", "ruleset"), ("graphrag",
 MAX_SELECTION_BODY = 200
 PAGE_SIZE = 50  # Daon2 단일 주소는 도구 설명(최대 200)과 달리 50을 넘으면 거부한다(2026-11-12 ysna 실측). 다음 쪽은 cursor로 읽는다.
 MAX_PAGES = 100
-_TEXT_FIELDS = ("tenant_id", "project_id", "project_name", "work_package_id", "work_package_name")
+# tenant_id는 없어도 된다: Daon2 범용 토큰은 서버가 tenant를 정하고, 재생성 중인 패키지는 tenant 없이 오기도 한다(2026-11-16 ysna).
+_TEXT_FIELDS = ("project_id", "project_name", "work_package_id", "work_package_name")
+SERVER_TENANT = "server"  # 저장 칸이 비어 있을 수 없어, 서버가 정하는 tenant를 이 표시로 남긴다
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 KNOWLEDGE_SCOPE_PUBLIC_CODES = frozenset({
     "NOTEBOOK_NOT_FOUND", "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", "KNOWLEDGE_SCOPE_RESPONSE_INVALID", "KNOWLEDGE_SCOPE_NOT_AVAILABLE",
@@ -59,10 +61,9 @@ def _invalid() -> KnowledgeScopeError:
     return KnowledgeScopeError("KNOWLEDGE_SCOPE_RESPONSE_INVALID", 502)
 
 
-def _checked_row(row: Any) -> Mapping[str, Any]:
-    if not isinstance(row, Mapping) or any(not isinstance(row.get(field), str) or not row[field] for field in _TEXT_FIELDS):
-        raise _invalid()
-    return row
+def _usable_row(row: Any) -> bool:
+    """필수 항목이 빠진 행은 그 행만 건너뛴다. 한 행 때문에 목록 전체가 실패하지 않게 한다."""
+    return isinstance(row, Mapping) and all(isinstance(row.get(field), str) and row[field] for field in _TEXT_FIELDS)
 
 
 def _approved(row: Mapping[str, Any]) -> bool:
@@ -113,7 +114,7 @@ class KnowledgeScopeService:
             page = self._connectors.call(connector_context, connector["connector_id"], "list_knowledge_scopes", arguments).structured
             if not isinstance(page, Mapping) or not isinstance(page.get("scopes"), list):
                 raise _invalid()
-            for row in map(_checked_row, page["scopes"]):
+            for row in filter(_usable_row, page["scopes"]):
                 if _approved(row):
                     found[(row["project_id"], row["work_package_id"])] = row
             cursor = page.get("next_cursor")
@@ -151,7 +152,7 @@ class KnowledgeScopeService:
         return {"items": items}
 
     def _probe(self, daon2: tuple[ConnectorContext, str], row: Mapping[str, Any], item: Mapping[str, Any], tool: str, field: str) -> str:
-        scope = {"tenant_id": row["tenant_id"], "project_id": row["project_id"], "work_package_id": row["work_package_id"]}
+        scope = {**({"tenant_id": row["tenant_id"]} if row.get("tenant_id") else {}), "project_id": row["project_id"], "work_package_id": row["work_package_id"]}
         arguments: dict[str, Any] = {"scope": scope, "limit": 1}
         if tool == "ontology_search_concepts":
             arguments["query"] = (item.get("work_package_name") or "개념")[:200]
@@ -203,7 +204,7 @@ class KnowledgeScopeService:
                     connection.execute(
                         "INSERT INTO notebook_knowledge_scopes(tenant_id,workspace_id,notebook_id,source_tenant_id,project_id,project_name,work_package_id,work_package_name,selected_by) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (context.tenant_id, context.workspace_id, notebook_id, row["tenant_id"], row["project_id"], row["project_name"],
+                        (context.tenant_id, context.workspace_id, notebook_id, row.get("tenant_id") or SERVER_TENANT, row["project_id"], row["project_name"],
                          row["work_package_id"], row["work_package_name"], context.actor_id))
         except CloudDatabaseError:
             raise KnowledgeScopeError("KNOWLEDGE_SCOPE_UNAVAILABLE", 503) from None
