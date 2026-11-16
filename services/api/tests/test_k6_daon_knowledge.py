@@ -505,3 +505,46 @@ class AuthoringJudgmentTests(StudioJudgmentTests):
     def test_unit_without_judgment_passes_no_reader(self):
         self.gather(kind="ontology")
         self.assertEqual(self.seen[0][1], {})
+
+
+class VerifyNarrowingTests(unittest.TestCase):
+    """검토 반영: 도구를 줄였으면 연결됨이어도 그 사실을 남기고, 줄이다 충돌하면 확인 실패로 기록한다."""
+
+    def service(self, narrow_error=None):
+        from contextlib import contextmanager
+        svc = KnowledgeConnectorService.__new__(KnowledgeConnectorService)
+        self.updates = []
+        test = self
+        client = SimpleNamespace(connect=lambda: SimpleNamespace(protocol_version="2026-07-28"),
+                                 list_tools=lambda: [{"name": n} for n in ("search_document_evidence", "list_knowledge_scopes", "get_document_text")])
+        view = {"kind": "daon2_rag", "allowed_tools": sorted(KIND_TOOLS["daon2_rag"]), "version": 1}
+        svc._client = lambda context, cid: (client, view)
+
+        def set_tools(context, cid, tools, version):
+            if narrow_error:
+                raise narrow_error
+            return {**view, "allowed_tools": tools, "version": 2}
+        svc.set_allowed_tools = set_tools
+
+        class Conn:
+            def execute(self, sql, params):
+                test.updates.append(params)
+                return SimpleNamespace(fetchone=lambda: params)
+
+        @contextmanager
+        def tx(scope):
+            yield Conn()
+        svc._store = SimpleNamespace(_transaction=tx)
+        svc._scope = lambda context, cap: None
+        return svc
+
+    def verify(self, **kw):
+        with patch("daon2_user_api.knowledge_connector_service._view", lambda row: {"status": row[0], "error_code": row[1]}):
+            return self.service(**kw).verify(ConnectorContext("t", "a"), "kc-1")
+
+    def test_reduced_tools_are_recorded_on_a_verified_connection(self):
+        self.assertEqual(self.verify(), {"status": "verified", "error_code": "CONNECTOR_TOOLS_REDUCED"})
+
+    def test_conflict_while_narrowing_is_recorded_not_raised(self):
+        from daon2_user_api.knowledge_connector_service import ConnectorError
+        self.assertEqual(self.verify(narrow_error=ConnectorError("CONNECTOR_VERSION_CONFLICT", 409)), {"status": "failed", "error_code": "CONNECTOR_VERSION_CONFLICT"})

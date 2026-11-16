@@ -24,6 +24,8 @@ const ERROR_TEXT = {
   KNOWLEDGE_SERVER_UNAVAILABLE: "지식 서버에 연결하지 못했습니다.",
   CONNECTOR_LIMITS_INVALID: "한도 값이 허용 범위를 벗어났습니다.",
 };
+// 연결 확인 결과에 붙는 안내. 그 밖의 코드는 그대로 보인다.
+const CHECK_NOTE = { CONNECTOR_TOOLS_REDUCED: "서버에 없는 도구는 뺐습니다. 종류가 맞는지 확인해 주세요" };
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const stamp = (value) => (value ? String(value).replace("T", " ").slice(0, 16) : "—");
 
@@ -184,7 +186,7 @@ export function KnowledgeConnectorsPane({ api }) {
       <tbody>{state.connectors.map((connector) => <tr key={connector.connector_id}>
         <td>{connector.name}{connector.virtual ? <span className="connector-badge" title="시험용 가상 서버">가상</span> : null}</td>
         <td>{KIND_LABEL[connector.kind] ?? connector.kind}</td>
-        <td><span className={`connector-status status-${connector.status}`}>{STATUS_LABEL[connector.status] ?? connector.status}</span>{connector.error_code ? <small> ({connector.error_code})</small> : null}</td>
+        <td><span className={`connector-status status-${connector.status}`}>{STATUS_LABEL[connector.status] ?? connector.status}</span>{connector.error_code ? <small> ({CHECK_NOTE[connector.error_code] ?? connector.error_code})</small> : null}</td>
         <td>{stamp(connector.last_checked_at)}</td>
         <td>
           <button type="button" aria-label={`${connector.name} 연결 확인`} disabled={busy === connector.connector_id} onClick={() => void verify(connector)}>

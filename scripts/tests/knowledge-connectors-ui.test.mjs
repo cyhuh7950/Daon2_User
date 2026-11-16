@@ -218,3 +218,12 @@ test("종류는 직접 골라야 하고, 고르기 전에는 도구 목록도 �
     assert.deepEqual(calls[0].allowedTools, []);
   } finally { await view.close(); }
 });
+
+test("도구를 줄인 연결은 연결됨과 함께 안내 문구가 보인다", async () => {
+  const view = await mount({ list: async () => [connector({ error_code: "CONNECTOR_TOOLS_REDUCED" })] });
+  try {
+    await view.flush();
+    assert.ok(text(view).includes("서버에 없는 도구는 뺐습니다"), text(view));
+    assert.ok(!text(view).includes("CONNECTOR_TOOLS_REDUCED"));
+  } finally { await view.close(); }
+});

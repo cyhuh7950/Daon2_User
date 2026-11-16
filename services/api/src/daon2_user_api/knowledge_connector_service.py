@@ -286,10 +286,14 @@ class KnowledgeConnectorService:
             names = {t["name"] for t in client.list_tools()}
             narrowed = narrowed_default_tools(view["kind"], view["allowed_tools"], names)
             if narrowed is not None:
+                # 연결은 되지만 빠진 도구가 쓰는 기능(문서 목록·템플릿 원문 등)은 안 된다. 종류를 잘못 고른 것일 수도 있어 화면에 남긴다.
                 view = self.set_allowed_tools(context, connector_id, narrowed, view["version"])
+                error = "CONNECTOR_TOOLS_REDUCED"
             elif not set(view["allowed_tools"]) <= names:
                 status, error = "failed", "CONNECTOR_TOOLS_MISSING"
         except McpError as exc:
+            status, error = "failed", exc.code
+        except ConnectorError as exc:  # 도구를 줄이는 사이 다른 저장과 겹친 경우 등: 확인 결과로 기록한다
             status, error = "failed", exc.code
         with self._store._transaction(self._scope(context, "connector.write")) as connection:
             row = connection.execute(
