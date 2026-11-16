@@ -28,7 +28,7 @@ function LegacySystemAdminConsole({ mode = "system" }) {
   if (status === "loading") return <main className="org-console-page"><State>관리 콘솔을 불러오는 중입니다.</State></main>;
   if (status === "error") return <main className="org-console-page"><State>{failure(error)}</State><Action onClick={() => load()}>다시 시도</Action></main>;
   if (status === "empty") return <main className="org-console-page"><State>조직 컨텍스트가 없어 관리 콘솔을 열 수 없습니다.</State></main>;
-  return <main className="org-console-page"><header className="org-console-header"><div><p>DAON ADMIN</p><h1>전체 관리자</h1><small>조직 생성 신청과 전체 조회</small></div><nav><a href="/notebooks">Notebook</a></nav></header><SystemConsole creationRequests={data.creation} directory={data.directory} reload={() => load()} /></main>;
+  return <main className="org-console-page"><header className="org-console-header"><div><h1>전체 관리자</h1><small>조직 생성 신청과 전체 조회</small></div><nav><a href="/notebooks">Notebook</a></nav></header><SystemConsole creationRequests={data.creation} directory={data.directory} reload={() => load()} /></main>;
 }
 
 const emptyScope = () => ({ workspaces: [], joins: [], members: [], invitations: [] });
@@ -157,7 +157,7 @@ function OrganizationManagementConsole({ api: suppliedApi }) {
     mutate("createInvitation", [tenantId, body]); if (codeInput.current) codeInput.current.value = ""; setCode("");
   };
   return <main className="org-console-page" ref={root}>
-    <header className="org-console-header"><div><p>DAON ADMIN</p><h1>조직 관리자</h1><small>선택한 조직의 가입·사용자·초대 관리</small></div><nav><a href="/notebooks">Notebook</a><a href="/admin">전체 관리자</a></nav></header>
+    <header className="org-console-header"><div><h1>조직 관리자</h1><small>선택한 조직의 가입·사용자·초대 관리</small></div><nav><a href="/notebooks">Notebook</a><a href="/admin">전체 관리자</a></nav></header>
     {session?.is_system_admin && <section className="org-console-card"><label className="org-console-select">관리 조직<select aria-label="관리 조직" value={tenantId} onChange={event => { void loadScope(event.target.value, currentSession.current); }}><option value="">관리할 조직을 선택하세요</option>{tenants.map(value => <option key={value.tenant_id} value={value.tenant_id}>{value.display_name} · {value.tenant_id}</option>)}</select></label></section>}
     {message && <State>{message}</State>}
     {status === "ready" && pending?.status === "uncertain" && <section className="org-console-card"><State>결과 미확정 — 같은 세션의 원래 조직에서만 결과를 확인할 수 있습니다.</State><Action disabled={busy || pending.tenant !== tenantId} onClick={() => { void send(pending); }}>동일 요청 결과 확인</Action></section>}

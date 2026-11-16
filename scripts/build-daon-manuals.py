@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "docs" / "manual" / "dist"
 PUBLIC = ROOT / "apps" / "web" / "public" / "manual"
 RELEASE = "2.0.0"
-RELEASED_AT = "2026-11-11"
+RELEASED_AT = "2026-11-16"
 DOCS = (
     ("daon-user-manual", "Daon 사용자 설명서", "처음 시작하기부터 화면별 설명과 관리자 절차까지"),
 )

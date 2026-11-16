@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_version": "2.0.0",
-  "released_at": "2026-11-11",
+  "released_at": "2026-11-16",
   "language": "ko-KR",
   "documents": [
     {
@@ -15,22 +15,22 @@
         "markdown": {
           "filename": "daon-user-manual.md",
           "href": "/manual/daon-user-manual.md",
-          "bytes": 71574,
-          "sha256": "82c3640cea30836ff78740a07ddb896d03bab1467595c7086d01fbf23dda4513",
+          "bytes": 77888,
+          "sha256": "baebac094950e3f1279b950c6ad0934854df01d79b4b5ff2414ba8b88790aa5e",
           "mime": "text/markdown; charset=utf-8"
         },
         "docx": {
           "filename": "daon-user-manual.docx",
           "href": "/manual/daon-user-manual.docx",
-          "bytes": 1414269,
-          "sha256": "7282d8fca32e58d7d91dfeeefd951eaf35383c6a2ddcf5257ba68dafb65725a7",
+          "bytes": 1470391,
+          "sha256": "ecb2341337cf2554a5232cd30339d719269a88c8e702e609bec788890d5404c6",
           "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         },
         "pdf": {
           "filename": "daon-user-manual.pdf",
           "href": "/manual/daon-user-manual.pdf",
-          "bytes": 2131616,
-          "sha256": "0c1b14a2f79c5548d297bec4eea88cd61ce00dce85e02dcc57fabda9d7990a64",
+          "bytes": 2287258,
+          "sha256": "b9ad1daeb267829ba7584866123a4802137aa1ac15b5d1aa41d0ed9bec577567",
           "mime": "application/pdf"
         }
       }
