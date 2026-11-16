@@ -510,8 +510,10 @@ export function AdminUserConsole({
         <option value="">조직을 선택하세요</option>
         {rolePanel.tenants.map((tenant) => <option key={tenant.tenant_id} value={tenant.tenant_id}>{tenant.name}</option>)}
       </select></label>
+      <small>작업공간이 있는 조직만 표시됩니다.</small>
       {rolePanel.loading && <p role="status">유효 역할 조회 중…</p>}
       {!rolePanel.loading && !rolePanel.membership && <p>{rolePanel.error ? "선택 범위의 역할 조회 실패" : "조직을 선택하세요"}</p>}
+      {!rolePanel.loading && rolePanel.error === "RESOURCE_UNAVAILABLE" && <p role="note">선택한 조직에 이 사용자의 멤버십이 없습니다. 이 사용자가 속한 조직을 선택하세요. 조직에 넣으려면 사용자가 조직 가입을 신청하거나(설정 메뉴 → 조직 가입) 초대코드를 받은 뒤 조직 관리자가 승인합니다(설정 메뉴 → 조직 관리).</p>}
       {rolePanel.membership && <>
         <p>조직 역할 (읽기 전용): {rolePanel.membership.tenant
           ? `${rolePanel.membership.tenant.role} · ${rolePanel.membership.tenant.state} · version ${rolePanel.membership.tenant.version}`

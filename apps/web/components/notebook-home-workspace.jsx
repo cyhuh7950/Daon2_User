@@ -197,6 +197,8 @@ export function NotebookHomeWorkspace({
       "organization-policy": "/settings/organization",
       "user-management": "/admin",
       "tts-engines": "/settings/tts-engines",
+      "organization-join": "/organization/join",
+      "organization-admin": "/organization-admin",
     });
     const route = routes[settingId];
     if (route) window.location.assign(route);
