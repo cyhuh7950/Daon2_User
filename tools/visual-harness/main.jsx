@@ -7,6 +7,8 @@ import { NotebookTools } from "../../packages/ui/src/notebook-menu.jsx";
 import { NotebookHome } from "../../packages/ui/src/notebook-home.jsx";
 import { KnowledgeConnectorsPane } from "../../packages/ui/src/knowledge-connectors-pane.jsx";
 import { TtsEnginesPane } from "../../packages/ui/src/tts-engines-pane.jsx";
+import { OrganizationJoinForm } from "../../apps/web/components/organization-join-form.jsx";
+import OrganizationAdminConsole from "../../apps/web/components/organization-admin-console.jsx";
 import { AuthPane } from "../../apps/web/lib/auth-pane.jsx";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
@@ -72,17 +74,20 @@ const review = { output_id: sid("w"), template_id: "rfp_response_proposal", stat
   output_formats: ["docx"], pending_questions: [], requests: [], inputs: {}, assumptions: [], error_code: null, document: null, knowledge_count: 3, job_status: "completed", revision_no: 3 };
 
 function App() {
-  const [theme, setTheme] = useState("light");
+  const params = new URLSearchParams(location.search);
+  const bare = params.has("bare");
+  const [theme, setTheme] = useState(params.get("theme") === "dark" ? "dark" : "light");
   const [proposal, setProposal] = useState(false);
   const [view, setView] = useState(location.hash.slice(1) || "studio");
   useEffect(() => { document.documentElement.dataset.design = proposal ? "proposal" : "current"; }, [proposal]);
+  useEffect(() => { if (bare) document.documentElement.style.overflow = "hidden"; }, []);
   useEffect(() => { document.documentElement.dataset.theme = theme; document.body.style.background = theme === "dark" ? "#101114" : "#f6f7fb"; }, [theme]);
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["login", "로그인"]];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"]];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
-    h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
+    bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
       h("button", { type: "button", id: "toggle-design", onClick: () => setProposal((v) => !v), style: { fontWeight: proposal ? 700 : 400 } }, proposal ? "시안 보는 중 → 현재로" : "현재 → 시안 보기"),
       h("button", { type: "button", id: "toggle-theme", onClick: () => setTheme((t) => (t === "dark" ? "light" : "dark")) }, theme === "dark" ? "라이트로" : "다크로")),
@@ -101,6 +106,24 @@ function App() {
         { ...base, engine_id: null, slug: "deploy", label: "배포 설정 엔진", status: "deployment", is_default: false, version: 0, source: "deployment", last_checked_at: null }];
       return { list: async () => engines, register: async () => engines[0], verify: async () => ({ ...engines[0], status: "verified" }), update: async () => engines[0], disconnect: async () => {} };
     })() })) : null,
+    view === "orgjoin" ? h(OrganizationJoinForm, { api: {
+      getOrganizationSession: async () => ({ user_id: "js4choi", tenant_id: "personal-tenant", session_id: "session-1", device_id: "device", workspace_id: null, is_system_admin: false }),
+      listOwnJoinRequests: async () => [{ request_id: "jr-1", tenant_id: "tenant-a", user_id: "js4choi", invitation_id: "inv-1", state: "pending", decision_reason: null, decided_by: null, version: 1, created_at: "2026-11-16T01:00:00+00:00", updated_at: "2026-11-16T01:00:00+00:00" }],
+      submitJoinRequest: async () => ({}) } }) : null,
+    view === "orgadmin" ? (() => {
+      const now = "2026-11-16T01:00:00+00:00";
+      const tenant = "tenant-a";
+      const api = {
+        getOrganizationSession: async () => ({ user_id: "admin", tenant_id: "admin", session_id: "s-1", device_id: "device", workspace_id: null, is_system_admin: true }),
+        listManagedOrganizations: async () => [{ tenant_id: tenant, display_name: "예시 조직" }],
+        listManagedWorkspaces: async () => [{ workspace_id: "workspace-a", display_name: "기본 작업공간" }],
+        listJoinRequests: async () => [{ request_id: "jr-1", tenant_id: tenant, user_id: "js4choi", invitation_id: "inv-1", state: "pending", decision_reason: null, decided_by: null, version: 1, created_at: now, updated_at: now }],
+        listMembers: async () => [{ tenant_id: tenant, user_id: "member-1", role: "member", state: "active", version: 1, updated_at: now, join_workspace_id: "workspace-a", access_role: "viewer", access_state: "active", access_version: 1 }],
+        listInvitations: async () => [{ invitation_id: "inv-1", tenant_id: tenant, workspace_id: "workspace-a", created_by: "admin", expires_at: "2099-01-01T00:00:00+00:00", max_uses: 1, used_count: 0, state: "active", version: 1, created_at: now, updated_at: now }],
+        decideJoinRequest: async () => ({}), changeMemberRole: async () => ({}), changeMemberState: async () => ({}), createInvitation: async () => ({}), revokeInvitation: async () => ({}),
+      };
+      return h("div", { style: { maxWidth: 1000 } }, h(OrganizationAdminConsole, { mode: "organization", api }));
+    })() : null,
     view === "login" ? h(AuthPane, {}) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }

@@ -127,7 +127,8 @@ test("기존 사용자 매뉴얼은 보호된 초기 관리자와 사용자 관�
       /Workspace.*Notebook.*Source.*Studio/su,
     ]) assert.match(markdown, required);
     assert.doesNotMatch(markdown, /보호(?:된)? admin.*(?:모든 )?상태 변경 요청.*HTTP 409/su);
-    assert.doesNotMatch(markdown, /##+ .*조직\s*(?:가입|관리|관리자)|설정.{0,30}조직\s*가입|\/organization(?:-admin|\/join)|(?:조직|organization).{0,50}(?:초대\s*코드|가입\s*신청|가입하기|관리\s*(?:화면|콘솔))/isu);
+    // 2026-11-16 조직 가입·관리 화면을 설정 메뉴에 연결하면서 설명서에 절을 둔다(이전에는 미공개 화면이라 금지했다).
+    for (const required of [/### 2-12 조직 가입/u, /### 3-10 조직 관리/u, /\/organization-admin/u, /설정.{0,12}조직 가입/su, /초대코드.*직접 전달/su]) assert.match(markdown, required);
     assert.doesNotMatch(markdown, /(?:[A-Za-z]:\\|\/srv\/|\/opt\/|\/var\/www\/|DAON_CLOUD_DATABASE_DSN\s*=|postgres(?:ql)?:\/\/|argon2(?:id)?\$|Bearer\s+[A-Za-z0-9._~-]+)/u);
   }
   assert.match(userManual, /Workspace 관리자.*Workspace 내부.*(?:정책|멤버 권한)/su);
