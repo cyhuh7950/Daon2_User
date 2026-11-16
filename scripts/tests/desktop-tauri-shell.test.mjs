@@ -1977,7 +1977,7 @@ test("Desktop Notebook async epoch는 Session·Workspace·Hash 전환 뒤 stale 
       const formProps = Object.keys(form).find((key) => key.startsWith("__reactProps$"));
       let createPromise;
       await act(async () => { createPromise = form[formProps].onSubmit({ preventDefault() {} }); await Promise.resolve(); });
-      await act(async () => { buttonByText(mountedCase.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
+      await act(async () => { buttonByText(mountedCase.container, "설정").dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
       await act(async () => { buttonByText(mountedCase.container, "로그아웃").dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
       oldCreate.resolve(view("notebook-old-created", "OLD CREATED"));
       await act(async () => { await createPromise; await Promise.resolve(); });

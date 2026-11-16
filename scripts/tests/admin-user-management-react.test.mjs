@@ -631,7 +631,7 @@ test("Notebook 설정은 system admin에게만 사용자 관리를 표시하고 
   for (const [showUserManagement, expected] of [[false, false], [true, true]]) {
     const view = await render("packages/ui/src/notebook-home.jsx", "NotebookHome", { notebooks: [], showUserManagement }, `.admin-menu-${showUserManagement}-`);
     try {
-      await view.act(async () => { buttonByText(view.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+      await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
       assert.equal(Boolean(buttonByText(view.container, "사용자 관리")), expected);
       assert.doesNotMatch(view.container.textContent, /조직 가입|조직 관리자/u);
     } finally { await view.cleanup(); }
@@ -693,7 +693,7 @@ test("현재 workspace 조회가 거부돼도 본인 조직 전환 메뉴로 복
     const redirects = [];
     globalThis.window.location.replace = (path) => redirects.push(path);
     assert.match(view.container.textContent, /NOTEBOOK_UNAVAILABLE/u);
-    await view.act(async () => { buttonByText(view.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+    await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
     assert.ok(buttonByText(view.container, "조직 · 이동할 조직"));
     await view.act(async () => { buttonByText(view.container, "조직 · 이동할 조직").dispatchEvent(new MinimalEvent("click")); });
     assert.deepEqual(redirects, ["/notebooks"]);
@@ -733,7 +733,7 @@ test("전환 commit 뒤 응답 본문이 깨지면 이전 조직 노트북을 �
     const redirects = [];
     globalThis.window.location.replace = (path) => redirects.push(path);
     assert.match(view.container.textContent, /이전 노트북/u);
-    await view.act(async () => { buttonByText(view.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+    await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
     await view.act(async () => { buttonByText(view.container, "조직 · 새 조직").dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
     const protectedRoot = view.container.firstChild;
     assert.equal(serverTenant, "organization-new");
@@ -775,7 +775,7 @@ test("전환 네트워크 유실은 이전 화면을 숨기고, 명시적 403·4
       }, `.notebook-scope-${outcome}-`);
       const redirects = [];
       globalThis.window.location.replace = (path) => redirects.push(path);
-      await view.act(async () => { buttonByText(view.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+      await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
       await view.act(async () => { buttonByText(view.container, "조직 · 새 조직").dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
       const protectedRoot = view.container.firstChild;
       assert.equal(protectedRoot.hidden, expectedRedirect);
@@ -783,7 +783,7 @@ test("전환 네트워크 유실은 이전 화면을 숨기고, 명시적 403·4
       assert.equal(view.container.textContent.includes("이전 노트북"), !expectedRedirect);
       assert.deepEqual(redirects, expectedRedirect ? ["/"] : []);
       if (!expectedRedirect) {
-        await view.act(async () => { buttonByText(view.container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+        await view.act(async () => { buttonByText(view.container, "설정").dispatchEvent(new MinimalEvent("click")); });
         assert.match(view.container.textContent, /조직 범위를 확인할 수 없습니다/u);
       }
     } finally { if (view) await view.cleanup(); }
@@ -818,7 +818,7 @@ test("HTTP 테스트 화면은 randomUUID 없이도 새 Notebook 요청을 전�
         meta: { trace_id: "trace-test", workspace_id: "workspace-test", replayed: false },
       }, { status: 201, headers: { ETag: '"notebook:1"' } });
     };
-    await view.act(async () => { buttonByText(view.container, "＋ 새 Notebook").dispatchEvent(new MinimalEvent("click")); });
+    await view.act(async () => { buttonByText(view.container, "새 Notebook").dispatchEvent(new MinimalEvent("click")); });
     const dialog = findElements(view.container, (node) => node.getAttribute?.("role") === "dialog")[0];
     const title = findElements(dialog, (node) => node.tagName === "INPUT")[0];
     await view.act(async () => { reactProps(title).onChange({ target: { value: "HTTP Notebook" } }); });

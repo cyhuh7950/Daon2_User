@@ -25,7 +25,7 @@ function SettingsMenu({ onOpenSetting, onLogout, showUserManagement, showOrganiz
       && !tenantScope.tenants.some(item => item.tenant_id === tenantScope.current_tenant_id));
   const currentScope = tenantScope?.tenants?.find((item) => item.tenant_id === tenantScope.current_tenant_id);
   return <div className="notebook-settings-wrap">
-    <button className="notebook-toolbar-button" type="button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}>⚙ 설정</button>
+    <button className="notebook-toolbar-button" type="button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><StudioIcon name="settings_sliders" size={16} /> 설정</button>
     {open && <div className="notebook-settings-menu" role="menu" aria-label="공통 설정">
       {showTenantSelection && <div className="notebook-scope-menu" aria-label="작업 범위">
         <span>현재 범위: {currentScope?.display_name ?? "확인 필요"}</span>
@@ -155,7 +155,7 @@ export function NotebookHome({ state = "ready", notebooks = [], errorCode = null
     <div ref={surfaceRef} className="notebook-home-surface">
     <header className="notebook-home-header"><a className="notebook-brand" href="#notebook-home" aria-label="Daon Notebook 홈"><span aria-hidden="true">D</span>Daon Notebook</a><div className="notebook-session-identity" aria-label="현재 접속자">{displayIdentity || "현재 사용자"}</div><SettingsMenu onOpenSetting={onOpenSetting} onLogout={onLogout} showUserManagement={showUserManagement} showOrganizationPolicy={showOrganizationPolicy} tenantScope={tenantScope} scopeError={scopeError} switchingScope={switchingScope} onSwitchTenant={onSwitchTenant} onReload={onReload} /></header>
     <section id="notebook-home" className="notebook-home-content" aria-labelledby="notebook-home-title">
-      <div className="notebook-home-intro"><div><h1 id="notebook-home-title">지식에서 결과까지, 하나의 Notebook에서</h1></div><button ref={createOpenerRef} className="notebook-create-button" type="button" onClick={() => setCreating(true)}>＋ 새 Notebook</button></div>
+      <div className="notebook-home-intro"><div><h1 id="notebook-home-title">지식에서 결과까지, 하나의 Notebook에서</h1></div><button ref={createOpenerRef} className="notebook-create-button" type="button" onClick={() => setCreating(true)}><StudioIcon name="add" size={16} /> 새 Notebook</button></div>
       <div className="notebook-home-tools">
         <label className="notebook-search" htmlFor="notebook-search"><span aria-hidden="true"><StudioIcon name="search" size={16} /></span><input id="notebook-search" type="search" placeholder="Notebook 제목 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <label className="sr-only" htmlFor="notebook-sort">정렬</label><select id="notebook-sort" value={sortMode} onChange={(event) => setSortMode(event.target.value)}><option value="updated">최근 수정</option><option value="title">제목</option></select>

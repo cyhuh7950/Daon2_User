@@ -47,7 +47,7 @@ test("조직이 있는 계정만 현재 작업 범위와 선택 가능한 조직
         { tenant_id: "organization-001", display_name: "조직 공간", kind: "organization", workspace_id: "organization-workspace" },
       ] }, onSwitchTenant: (tenantId) => selected.push(tenantId),
     })); });
-    await act(async () => { buttonByText(container, "⚙ 설정").dispatchEvent(new MinimalEvent("click")); });
+    await act(async () => { buttonByText(container, "설정").dispatchEvent(new MinimalEvent("click")); });
     assert.ok(findElements(container, (node) => node.textContent?.includes("현재 범위: 내 공간")).length > 0);
     assert.equal(buttonByText(container, "개인 · 내 공간").disabled, true);
     await act(async () => { buttonByText(container, "조직 · 조직 공간").dispatchEvent(new MinimalEvent("click")); });
@@ -70,7 +70,7 @@ test("새 Notebook dialog는 initial focus·Tab trap·Escape·inert·opener focu
     const container = dom.document.createElement("div"); dom.document.body.appendChild(container);
     reactRoot = createRoot(container);
     await act(async () => { reactRoot.render(createElement(NotebookHome, { notebooks: [] })); });
-    const opener = buttonByText(container, "＋ 새 Notebook");
+    const opener = buttonByText(container, "새 Notebook");
     opener.focus();
     await act(async () => { opener.dispatchEvent(new MinimalEvent("click")); await Promise.resolve(); });
     const dialog = findElements(container, (node) => node.getAttribute?.("role") === "dialog")[0];
@@ -115,7 +115,7 @@ test("새 Notebook create 실패는 dialog·안전 오류·retry를 유지하고
     const first = new Promise((_, reject) => { release = () => reject(new Error("database detail must not reflect")); });
     const onCreate = async () => { calls += 1; if (calls === 1) return first; return { notebook_id: "notebook-created" }; };
     await act(async () => { reactRoot.render(createElement(NotebookHome, { notebooks: [], onCreate })); });
-    await act(async () => { buttonByText(container, "＋ 새 Notebook").dispatchEvent(new MinimalEvent("click")); });
+    await act(async () => { buttonByText(container, "새 Notebook").dispatchEvent(new MinimalEvent("click")); });
     let dialog = findElements(container, (node) => node.getAttribute?.("role") === "dialog")[0];
     const title = findElements(dialog, (node) => node.tagName === "INPUT")[0];
     await act(async () => { reactProps(title).onChange({ target: { value: "재시도 Notebook" } }); });
