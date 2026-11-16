@@ -405,3 +405,26 @@ class StatusFromServicesTests(KnowledgeStatusTests):
         from daon2_user_api.mcp_client import McpError as Err
         kinds = self.service(ontology_search_concepts=Err("MCP_FORBIDDEN"), ruleset_list=Err("MCP_FORBIDDEN"), approved_knowledge_search=Err("MCP_FORBIDDEN")).knowledge_status(self.ctx, "nb-1")["items"][0]["kinds"]
         self.assertEqual((kinds["ontology"], kinds["ruleset"], kinds["approved"]), ("not_ready", "not_ready", "not_ready"))
+
+
+class DefaultToolNarrowingTests(unittest.TestCase):
+    """도구를 고르지 않고 등록한 연결은 연결 확인 때 서버에 있는 기본 도구만 남긴다(2026-11-12 잘못 등록된 사례)."""
+
+    def test_untouched_defaults_keep_only_tools_the_server_offers(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        offered = {"search_document_evidence", "get_document_evidence", "get_document_text", "list_approved_documents", "list_knowledge_scopes", "ruleset_list"}
+        kept = narrowed_default_tools("daon2_rag", sorted(KIND_TOOLS["daon2_rag"]), offered)
+        self.assertEqual(set(kept), {"search_document_evidence", "get_document_evidence", "get_document_text", "list_approved_documents", "list_knowledge_scopes"})
+
+    def test_chosen_tools_are_never_changed(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2_rag", ["search_document_evidence", "list_documents"], {"search_document_evidence"}))
+
+    def test_server_without_the_core_tools_still_fails(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2_rag", sorted(KIND_TOOLS["daon2_rag"]), {"get_document_text"}))
+        self.assertIsNone(narrowed_default_tools("daon2", sorted(KIND_TOOLS["daon2"]), {"search_document_evidence"}))
+
+    def test_nothing_to_narrow_when_everything_exists(self):
+        from daon2_user_api.knowledge_connector_service import narrowed_default_tools
+        self.assertIsNone(narrowed_default_tools("daon2", sorted(KIND_TOOLS["daon2"]), set(KIND_TOOLS["daon2"])))

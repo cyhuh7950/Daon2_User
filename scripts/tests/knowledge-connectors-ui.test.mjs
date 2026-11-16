@@ -35,6 +35,8 @@ async function mount(api) {
     click: async (node) => { await act(async () => { node.dispatchEvent(new MinimalEvent("click")); }); await flush(); },
     type: async (label, value) => { const input = findElements(container, (node) => node.getAttribute?.("aria-label") === label)[0];
       input.value = value; await act(async () => props(input).onChange({ target: input, currentTarget: input })); },
+    choose: async (label, value) => { const select = findElements(container, (node) => node.getAttribute?.("aria-label") === label)[0];
+      select.value = value; await act(async () => props(select).onChange({ target: select, currentTarget: select })); },
     close: async () => { await act(async () => reactRoot.unmount()); dom.restore(); await rm(output, { recursive: true, force: true }); } };
 }
 
@@ -68,6 +70,7 @@ test("등록 대화상자: 이름·주소가 있어야 등록되고 토큰·허�
     assert.ok(text(view).includes("등록된 지식 연결이 없습니다"));
     await view.click(buttonByText(view.container, "연결 추가"));
     assert.equal(buttonByText(view.container, "등록").disabled, true);
+    await view.choose("종류", "daon2_rag");
     await view.type("이름", "지식 서버");
     await view.type("서버 주소", "https://knowledge.example/mcp");
     await view.type("인증 토큰", "secret-token-value");
@@ -92,6 +95,7 @@ test("토큰 발급 방식은 다섯 값이 모두 있어야 등록되고 고정
   try {
     await view.flush();
     await view.click(buttonByText(view.container, "연결 추가"));
+    await view.choose("종류", "daon2_rag");
     await view.type("이름", "RAG");
     await view.type("서버 주소", "https://knowledge.example/mcp");
     const mode = findElements(view.container, (node) => node.getAttribute?.("aria-label") === "인증 방식")[0];
@@ -189,4 +193,28 @@ test("소스 코드에는 서버 주소 리터럴(http://)이 없다(보안 스�
   for (const file of ["apps/web/app/settings/knowledge-connectors/page.jsx", "apps/web/lib/knowledge-connectors-api.js", "packages/ui/src/knowledge-connectors-pane.jsx"]) {
     assert.ok(!(await readFile(path.join(root, file), "utf8")).includes("http://"), file);
   }
+});
+
+test("종류는 직접 골라야 하고, 고르기 전에는 도구 목록도 등록도 없다(2026-11-12 잘못 등록된 사례)", async () => {
+  const calls = [];
+  const view = await mount({ list: async () => [], register: async (input) => { calls.push(input); return connector(); } });
+  try {
+    await view.flush();
+    await view.click(buttonByText(view.container, "연결 추가"));
+    const kind = findElements(view.container, (node) => node.getAttribute?.("aria-label") === "종류")[0];
+    assert.equal(kind.value, "");
+    await view.type("이름", "Daon2");
+    await view.type("서버 주소", "https://knowledge.example/mcp");
+    await view.type("인증 토큰", "secret-token-value");
+    assert.equal(buttonByText(view.container, "등록").disabled, true);
+    assert.equal(findElements(view.container, (node) => node.tagName === "LABEL" && node.textContent === "graphrag_query").length, 0);
+    await view.choose("종류", "daon2");
+    for (const tool of ["graphrag_query", "ontology_traverse", "approved_knowledge_read"]) {
+      assert.equal(findElements(view.container, (node) => node.tagName === "LABEL" && node.textContent === tool).length, 1, tool);
+    }
+    assert.ok(text(view).includes("서버에 있는 기본 도구만"));
+    await view.click(buttonByText(view.container, "등록"));
+    assert.equal(calls[0].kind, "daon2");
+    assert.deepEqual(calls[0].allowedTools, []);
+  } finally { await view.close(); }
 });

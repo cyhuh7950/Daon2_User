@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // 규칙: 서버 주소·토큰은 화면에 남기지 않는다(등록 후 토큰 입력칸 비움). 기본 주소·예시는 두지 않는다.
 
 const KIND_LABEL = { daon2_rag: "Daon2-RAG", daon2: "Daon2", law: "법령" };
+// 서버 knowledge_connector_service.KIND_TOOLS와 같은 목록이다.
 const KIND_TOOLS = {
-  daon2_rag: ["search_document_evidence", "get_document_evidence", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status", "list_knowledge_scopes"],
-  daon2: ["ontology_search_concepts", "ontology_get_concept", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search"],
+  daon2_rag: ["search_document_evidence", "get_document_evidence", "get_document_text", "list_approved_documents", "list_knowledge_scopes", "list_documents", "get_document_outline", "read_document_section", "get_document_version_status"],
+  daon2: ["ontology_search_concepts", "ontology_get_concept", "ontology_traverse", "graphrag_query", "ruleset_list", "ruleset_get", "ruleset_evaluate", "approved_knowledge_search", "approved_knowledge_read"],
   law: ["search_law", "get_law_text"],
 };
 const STATUS_LABEL = { verified: "연결됨", registered: "확인 전", unverified: "확인 전", unavailable: "연결 안 됨", failed: "확인 실패", disabled: "사용 안 함" };
@@ -26,7 +27,8 @@ const ERROR_TEXT = {
 const safeMessage = (error) => ERROR_TEXT[error?.code] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const stamp = (value) => (value ? String(value).replace("T", " ").slice(0, 16) : "—");
 
-const emptyForm = () => ({ kind: "daon2_rag", name: "", endpointUrl: "", authMode: "token", token: "", tokenUrl: "", clientId: "", clientSecret: "", resource: "", scope: "", tools: [], scopes: [{ projectId: "", workPackageId: "" }] });
+// 종류는 기본값 없이 직접 고른다(기본값 때문에 Daon2 연결을 Daon2-RAG로 잘못 등록한 일이 있었다).
+const emptyForm = () => ({ kind: "", name: "", endpointUrl: "", authMode: "token", token: "", tokenUrl: "", clientId: "", clientSecret: "", resource: "", scope: "", tools: [], scopes: [{ projectId: "", workPackageId: "" }] });
 const OAUTH_FIELDS = [["tokenUrl", "토큰 발급 주소", "url"], ["clientId", "Client ID", "text"], ["clientSecret", "Secret", "password"], ["resource", "Resource", "url"], ["scope", "Scope", "text"]];
 
 function RegisterDialog({ onSubmit, onCancel, pending, error }) {
@@ -35,10 +37,11 @@ function RegisterDialog({ onSubmit, onCancel, pending, error }) {
   const toggleTool = (tool) => set({ tools: form.tools.includes(tool) ? form.tools.filter((item) => item !== tool) : [...form.tools, tool] });
   const setScope = (index, patch) => set({ scopes: form.scopes.map((scope, position) => (position === index ? { ...scope, ...patch } : scope)) });
   const oauthMode = form.authMode === "oauth";
-  const valid = form.name.trim() && form.endpointUrl.trim() && (!oauthMode || OAUTH_FIELDS.every(([key]) => form[key].trim()));
+  const valid = Boolean(form.kind) && form.name.trim() && form.endpointUrl.trim() && (!oauthMode || OAUTH_FIELDS.every(([key]) => form[key].trim()));
   return <section className="connector-dialog" role="dialog" aria-modal="true" aria-label="지식 연결 등록">
     <h3>지식 연결 등록</h3>
     <label>종류<select aria-label="종류" value={form.kind} onChange={(event) => set({ kind: event.target.value, tools: [] })}>
+      <option value="" disabled>종류를 고르세요</option>
       {Object.entries(KIND_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <label>이름<input type="text" aria-label="이름" maxLength={120} value={form.name} onChange={(event) => set({ name: event.target.value })} /></label>
     <label>서버 주소<input type="url" aria-label="서버 주소" autoComplete="off" value={form.endpointUrl} onChange={(event) => set({ endpointUrl: event.target.value })} /></label>
@@ -46,9 +49,9 @@ function RegisterDialog({ onSubmit, onCancel, pending, error }) {
       <option value="token">고정 토큰</option><option value="oauth">토큰 발급(Client ID·Secret)</option></select></label>
     {oauthMode ? OAUTH_FIELDS.map(([key, label, type]) => <label key={key}>{label}<input type={type} aria-label={label} autoComplete={type === "password" ? "new-password" : "off"} value={form[key]} onChange={(event) => set({ [key]: event.target.value })} /></label>)
       : <label>인증 토큰<input type="password" aria-label="인증 토큰" autoComplete="new-password" maxLength={8192} value={form.token} onChange={(event) => set({ token: event.target.value })} /></label>}
-    <fieldset><legend>허용 도구 (선택하지 않으면 종류의 기본 도구를 모두 허용)</legend>
+    {form.kind ? <fieldset><legend>허용 도구 (선택하지 않으면 연결 확인 때 서버에 있는 기본 도구만 허용)</legend>
       {KIND_TOOLS[form.kind].map((tool) => <label key={tool} className="connector-tool"><input type="checkbox" checked={form.tools.includes(tool)} onChange={() => toggleTool(tool)} />{tool}</label>)}
-    </fieldset>
+    </fieldset> : null}
     <fieldset><legend>허용 컬렉션 (프로젝트·작업 패키지)</legend>
       {form.scopes.map((scope, index) => <div className="connector-scope" key={index}>
         <input type="text" aria-label={`프로젝트 ${index + 1}`} value={scope.projectId} onChange={(event) => setScope(index, { projectId: event.target.value })} />
