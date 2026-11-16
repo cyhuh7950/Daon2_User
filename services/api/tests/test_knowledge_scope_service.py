@@ -124,7 +124,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED")
 
     def test_malformed_or_looping_response_fails_closed(self):
-        bad = [[{"next_cursor": None}], [{"scopes": [{"project_id": "p"}], "next_cursor": None}], [{"scopes": [], "next_cursor": 3}],
+        # 필수 항목이 빠진 행 하나는 이제 그 행만 건너뛴다(ScopeRowToleranceTests). 응답 형식 자체가 틀리면 여전히 실패한다.
+        bad = [[{"next_cursor": None}], [{"scopes": "x", "next_cursor": None}], [{"scopes": [], "next_cursor": 3}],
                [{"scopes": [], "next_cursor": "same"}, {"scopes": [], "next_cursor": "same"}]]
         for pages in bad:
             with self.subTest(pages=pages), self.assertRaises(KnowledgeScopeError) as caught:
@@ -183,3 +184,20 @@ class SelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScopeRowToleranceTests(unittest.TestCase):
+    """2026-11-16 ysna: Daon2가 재생성 중인 패키지 행을 tenant_id 없이 보내자 목록 전체가 실패했다."""
+
+    def test_row_without_tenant_is_kept_and_a_broken_row_is_skipped(self):
+        rows = [scope("p1", "w1"), scope("p1", "w2", tenant_id=None), {**scope("p1", "w3"), "work_package_name": ""}]
+        service = KnowledgeScopeService(_Store(), _Connectors([{"scopes": rows, "next_cursor": None}]))
+        names = [w["work_package_id"] for p in service.catalog(CTX)["projects"] for w in p["work_packages"]]
+        self.assertEqual(names, ["w1", "w2"])
+
+    def test_selecting_a_package_without_tenant_stores_a_marker(self):
+        store = _Store()
+        service = KnowledgeScopeService(store, _Connectors([{"scopes": [scope("p1", "w2", tenant_id=None)], "next_cursor": None}]))
+        service.replace(CTX, "nb-1", [{"project_id": "p1", "work_package_id": "w2"}])
+        insert = next(p for s, p in store.statements if s.startswith("INSERT INTO notebook_knowledge_scopes"))
+        self.assertEqual(insert[3], "server")
