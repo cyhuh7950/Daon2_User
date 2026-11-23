@@ -330,7 +330,9 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     </>}
     {dialog?.kind === "delete" && <ConfirmDeleteDialog onCancel={() => setDialog(null)} onConfirm={async () => {
       const target = dialog.output; setDialog(null);
-      try { await studio.deleteOutput(target.output_id); dispatch({ type: "OUTPUT_REMOVED", outputId: target.output_id }); } catch (error) { dispatch({ type: "ERROR", code: error?.code }); }
+      try { await studio.deleteOutput(target.output_id); dispatch({ type: "OUTPUT_REMOVED", outputId: target.output_id });
+        // 메모를 지우면 그 메모로 만든 소스 줄이 "원본 메모 없음"으로 바뀌도록 셸이 소스 목록을 다시 읽게 한다(N1-B06).
+        if (target.type_id === "memo") onMemoSourceChanged?.({ kind: "deleted", outputId: target.output_id }); } catch (error) { dispatch({ type: "ERROR", code: error?.code }); }
     }} />}
     {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}

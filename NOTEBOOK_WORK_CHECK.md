@@ -150,10 +150,11 @@
 | 결함 ID | 발견 단위 | 내용 | 원인 단위 | 수정 커밋 | 재확인 |
 | --- | --- | --- | --- | --- | --- |
 | N1-B01 | NB1-I1 | 근거 없는 질문이 '근거 부족' 답변 대신 TEXT_GENERATION_GROUNDING_INVALID로 실패(로그 reason=anchors_unsupported, cited 0). 모델의 근거 없음 설명에 숫자가 섞이면 검증이 질문 전체를 실패시킴(기존 결함, UAT-02 차단) | NB1-F1 영역(question_answering.py) | claude/n1-nb1-f1-fix | main c59fd7f7, ysna 재배포 후 근거 부족 답변·과정 ⑤ 확인 필요 표시 확인 ✔ |
-| N1-B02 | NB1-I2 | 메모로 소스를 만든 뒤 소스 줄이 '처리 중'에 머물고 체크할 수 없음(DB는 ready, 새로고침해야 갱신). 메모 소스는 처리 실행 번호가 없어 업로드처럼 상태를 따라가지 않음 | NB1-U2 | claude/n1-nb1-f2-fix | 재배포 후 확인 |
-| N1-B03 | NB1-I2 | '소스에 반영'이 실서버에서 DATABASE_ACCESS_DENIED로 실패. 반영 코드가 sources를 SELECT ... FOR UPDATE로 잠그는데 앱 역할에 UPDATE 권한이 없음(가짜 DB 시험으로는 못 잡음) | NB1-F2 | claude/n1-nb1-f2-fix | 재배포 후 확인 |
-| N1-B04 | NB1-I2 | 반영 후 메모 소스가 목록에서 사라지고 메모 버튼이 '소스로 사용'으로 돌아감. 같은 소스에 v2를 붙였지만 notebook_bindings(소스당 1행, 추가 전용)에 v2를 연결할 수 없어 목록·활성 조건(최신 버전 연결)에서 빠짐 | NB1-F2(계획 C-1 방식) | claude/n1-nb1-f2-reflect b0420da1 | 재배포 후 새 메모로 확인 |
-| N1-B05 | NB1-I2 | 반영 뒤 새 메모 소스 줄이 '처리 중'에 머묾(DB는 ready). N1-B02 수정이 만들기에만 적용되고 반영에는 빠짐(반영도 새 소스를 만들게 바뀜) | NB1-U2 | claude/n1-nb1-u2-fix | 재배포 후 확인 |
+| N1-B02 | NB1-I2 | 메모로 소스를 만든 뒤 소스 줄이 '처리 중'에 머물고 체크할 수 없음(DB는 ready, 새로고침해야 갱신). 메모 소스는 처리 실행 번호가 없어 업로드처럼 상태를 따라가지 않음 | NB1-U2 | main ae3b4abd | ysna에서 만들기 뒤 6초 만에 '사용 가능' ✔ |
+| N1-B03 | NB1-I2 | '소스에 반영'이 실서버에서 DATABASE_ACCESS_DENIED로 실패. 반영 코드가 sources를 SELECT ... FOR UPDATE로 잠그는데 앱 역할에 UPDATE 권한이 없음(가짜 DB 시험으로는 못 잡음) | NB1-F2 | main ae3b4abd | 반영 경로 바뀜(N1-B04) 후 ysna 반영 성공 ✔ |
+| N1-B04 | NB1-I2 | 반영 후 메모 소스가 목록에서 사라지고 메모 버튼이 '소스로 사용'으로 돌아감. 같은 소스에 v2를 붙였지만 notebook_bindings(소스당 1행, 추가 전용)에 v2를 연결할 수 없어 목록·활성 조건(최신 버전 연결)에서 빠짐 | NB1-F2(계획 C-1 방식) | main 63d11b6d | ysna 반영 후 새 소스 목록 유지·이전 소스 뗌·마인드맵 '소스가 변경됨' ✔ |
+| N1-B05 | NB1-I2 | 반영 뒤 새 메모 소스 줄이 '처리 중'에 머묾(DB는 ready). N1-B02 수정이 만들기에만 적용되고 반영에는 빠짐(반영도 새 소스를 만들게 바뀜) | NB1-U2 | main 63affdfb | ysna에서 반영 뒤 6초 만에 '사용 가능' ✔ |
+| N1-B06 | NB1-I2 | 메모를 지운 직후 소스 줄이 새로고침 전까지 '메모'로 남음(새로고침하면 '원본 메모 없음' 정상) | NB1-U2 | claude/n1-nb1-u2-delete | 재배포 후 확인 |
 
 ## 판단 기록 (Ruling)
 

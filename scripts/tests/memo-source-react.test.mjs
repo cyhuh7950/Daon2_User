@@ -401,3 +401,21 @@ test("메모를 소스에 반영해 새 소스가 처리 중이면 처리가 끝
     assert.match(row.textContent, /사용 가능/u);
   } finally { await view.close(); }
 });
+
+test("메모를 지우면 셸에 알려 소스 목록을 다시 읽게 한다(원본 메모 없음 표시, NB1-I2 N1-B06)", async () => {
+  const changed = [];
+  const studio = fakeStudio({ sourceLink: { source_id: "memo-source-1", reflected_revision_no: 2, outdated: false } });
+  let deleted = false;
+  studio.deleteOutput = async (id) => { studio.calls.push(["delete", id]); deleted = true; };
+  studio.listOutputs = async () => ({ items: deleted ? [] : [memoItem({ current_revision: studio.state.revision })], nextCursor: null });
+  const view = await mountPanel(studio, { onMemoSourceChanged: (event) => changed.push(event) });
+  try {
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.getAttribute("aria-label") === "목록으로")[0]);
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.getAttribute("aria-label") === "더보기: 회의 메모")[0]);
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent.trim() === "삭제")[0]);
+    const confirm = findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent.trim() === "삭제").at(-1);
+    await view.click(confirm);
+    assert.deepEqual(studio.calls.filter(([kind]) => kind === "delete"), [["delete", MEMO_ID]]);
+    assert.deepEqual(changed.at(-1), { kind: "deleted", outputId: MEMO_ID });
+  } finally { await view.close(); }
+});
