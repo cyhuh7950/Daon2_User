@@ -31,7 +31,10 @@ _BUSY_STATES = frozenset({"registered", "security_check", "processing", "indexin
 _GONE_STATES = frozenset({"expired", "disabled", "deleting", "deleted"})
 _RECOVERABLE_STATES = frozenset({"failed", "waiting_model", "partial_understanding", "needs_review"})
 
-_LOCK_SOURCE_SQL = ("SELECT state,version FROM sources WHERE tenant_id=%s AND workspace_id=%s AND record_id=%s FOR UPDATE")
+# canon 표(sources)는 앱 역할에 UPDATE 권한이 없어 FOR UPDATE를 쓸 수 없다(NB1-I2 실서버 DATABASE_ACCESS_DENIED).
+# 같은 소스에 동시에 새 버전을 붙이지 않도록 트랜잭션 advisory lock으로 직렬화한 뒤 읽는다.
+_SOURCE_ADVISORY_LOCK_SQL = "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))"
+_LOCK_SOURCE_SQL = ("SELECT state,version FROM sources WHERE tenant_id=%s AND workspace_id=%s AND record_id=%s")
 _DELETED_SQL = ("SELECT 1 FROM deletion_requests WHERE tenant_id=%s AND workspace_id=%s AND source_id=%s AND source_active=false LIMIT 1")
 _LATEST_VERSION_SQL = ("SELECT record_id,version,canonical_json FROM source_versions WHERE tenant_id=%s AND workspace_id=%s "
                        "AND source_id=%s ORDER BY version DESC LIMIT 1")
@@ -153,6 +156,7 @@ class TextSourceService:
         version_id = f"sv-{object_id}"
         scope = (context.tenant_id, context.workspace_id)
         with self._cloud_store._transaction(CloudAccessContext(*scope, context.actor_id, "source.write")) as connection:
+            connection.execute(_SOURCE_ADVISORY_LOCK_SQL, (f"text-source-version|{context.tenant_id}|{context.workspace_id}|{source_id}",))
             source = connection.execute(_LOCK_SOURCE_SQL, (*scope, source_id)).fetchone()
             if source is None or str(source[0]) in _GONE_STATES:
                 raise TextSourceError("TEXT_SOURCE_NOT_FOUND", 404)

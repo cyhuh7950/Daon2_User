@@ -149,7 +149,9 @@
 
 | 결함 ID | 발견 단위 | 내용 | 원인 단위 | 수정 커밋 | 재확인 |
 | --- | --- | --- | --- | --- | --- |
-| N1-B01 | NB1-I1 | 근거 없는 질문이 '근거 부족' 답변 대신 TEXT_GENERATION_GROUNDING_INVALID로 실패(로그 reason=anchors_unsupported, cited 0). 모델의 근거 없음 설명에 숫자가 섞이면 검증이 질문 전체를 실패시킴(기존 결함, UAT-02 차단) | NB1-F1 영역(question_answering.py) | claude/n1-nb1-f1-fix | 재배포 후 NB1-I1 3번 재확인 |
+| N1-B01 | NB1-I1 | 근거 없는 질문이 '근거 부족' 답변 대신 TEXT_GENERATION_GROUNDING_INVALID로 실패(로그 reason=anchors_unsupported, cited 0). 모델의 근거 없음 설명에 숫자가 섞이면 검증이 질문 전체를 실패시킴(기존 결함, UAT-02 차단) | NB1-F1 영역(question_answering.py) | claude/n1-nb1-f1-fix | main c59fd7f7, ysna 재배포 후 근거 부족 답변·과정 ⑤ 확인 필요 표시 확인 ✔ |
+| N1-B02 | NB1-I2 | 메모로 소스를 만든 뒤 소스 줄이 '처리 중'에 머물고 체크할 수 없음(DB는 ready, 새로고침해야 갱신). 메모 소스는 처리 실행 번호가 없어 업로드처럼 상태를 따라가지 않음 | NB1-U2 | claude/n1-nb1-f2-fix | 재배포 후 확인 |
+| N1-B03 | NB1-I2 | '소스에 반영'이 실서버에서 DATABASE_ACCESS_DENIED로 실패. 반영 코드가 sources를 SELECT ... FOR UPDATE로 잠그는데 앱 역할에 UPDATE 권한이 없음(가짜 DB 시험으로는 못 잡음) | NB1-F2 | claude/n1-nb1-f2-fix | 재배포 후 확인 |
 
 ## 판단 기록 (Ruling)
 

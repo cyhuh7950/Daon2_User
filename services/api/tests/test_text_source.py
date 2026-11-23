@@ -218,6 +218,16 @@ class RegisterTextSourceTests(unittest.TestCase):
 
 
 class AppendTextVersionTests(unittest.TestCase):
+    def test_does_not_lock_append_only_canon_rows_for_update(self):
+        """NB1-I2 실서버: 앱 역할에는 sources UPDATE 권한이 없어 SELECT ... FOR UPDATE가 DATABASE_ACCESS_DENIED로 실패했다."""
+        db = FakeDb()
+        service(db=db).append_text_version(CTX, "src-1", "고친 메모")
+        sqls = [sql for sql, _ in db.statements]
+        self.assertFalse([sql for sql in sqls if "FOR UPDATE" in sql.upper()])
+        lock = [index for index, sql in enumerate(sqls) if "pg_advisory_xact_lock" in sql]
+        read = [index for index, sql in enumerate(sqls) if sql == text_source._LOCK_SOURCE_SQL]
+        self.assertTrue(lock and read and lock[0] < read[0])
+
     def test_appends_a_new_version_to_the_same_source_with_lineage(self):
         db, upload = FakeDb(), FakeUpload()
         version_id = service(db=db, upload=upload).append_text_version(CTX, "src-1", "고친 메모", idempotency_key="memo-reflect:x:2")

@@ -283,7 +283,7 @@ const rawSource = (over = {}) => ({ source_id: "source-1", source_version_id: "v
 const memoSource = (exists, over = {}) => rawSource({ source_id: "memo-source-1", source_version_id: "memo-version-1", filename: "회의 메모.txt",
   memo_origin: { memo_output_id: MEMO_ID, memo_exists: exists }, ...over });
 
-async function mountShell(adapter) {
+async function mountShell(adapter, props = {}) {
   const dom = installMinimalDom();
   const scrolled = [];
   globalThis.HTMLElement.prototype.scrollIntoView = function scrollIntoView() { scrolled.push(this.getAttribute("data-source-id")); };
@@ -293,7 +293,7 @@ async function mountShell(adapter) {
   const container = dom.document.createElement("div");
   dom.document.body.appendChild(container);
   const reactRoot = createRoot(container);
-  await act(async () => { reactRoot.render(createElement(module.ProductWorkspaceShell, { workspaceId: "workspace-1", adapter })); await Promise.resolve(); });
+  await act(async () => { reactRoot.render(createElement(module.ProductWorkspaceShell, { workspaceId: "workspace-1", adapter, ...props })); await Promise.resolve(); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
   return { container, act, scrolled,
     wait: async () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); }),
@@ -348,5 +348,31 @@ test("메모로 소스를 만들면 소스 목록을 다시 읽고 새 줄로 �
     assert.ok(listCount > before, "소스 목록 새로고침");
     assert.ok(findElements(view.container, (node) => node.tagName === "LI" && node.getAttribute("data-source-id") === "memo-source-1")[0], "새 줄");
     assert.deepEqual(view.scrolled, ["memo-source-1"]);
+  } finally { await view.close(); }
+});
+
+test("메모로 만든 소스가 처리 중이면 처리가 끝날 때까지 소스 목록을 다시 읽어 '사용 가능'으로 바꾼다(NB1-I2 N1-B02)", async () => {
+  const studio = fakeStudio();
+  let created = false;
+  let reads = 0;
+  const view = await mountShell(shellAdapter(studio, async () => {
+    if (!created) return [rawSource()];
+    reads += 1;
+    return [rawSource(), memoSource(true, reads < 3 ? { source_state: "processing", processing_state: "processing", job_state: "processing" } : {})];
+  }), { memoSourcePollMs: 5 });
+  try {
+    const card = findElements(view.container, (node) => node.tagName === "BUTTON" && node.getAttribute("aria-label") === "열기: 회의 메모")[0];
+    await view.act(async () => { card.dispatchEvent(new MinimalEvent("click")); });
+    await view.wait();
+    created = true;
+    await view.act(async () => { sourceButton(view.container).dispatchEvent(new MinimalEvent("click")); });
+    for (let i = 0; i < 10 && reads < 3; i += 1) await view.wait();
+    await view.wait();
+    const row = findElements(view.container, (node) => node.tagName === "LI" && node.getAttribute("data-source-id") === "memo-source-1")[0];
+    assert.ok(reads >= 3, "처리 중인 동안 다시 읽음");
+    assert.match(row.textContent, /사용 가능/u);
+    const settled = reads;
+    for (let i = 0; i < 3; i += 1) await view.wait();
+    assert.equal(reads, settled, "준비되면 더 읽지 않음");
   } finally { await view.close(); }
 });
