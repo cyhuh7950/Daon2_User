@@ -17,6 +17,7 @@ import { secureUuid } from "./secure-uuid.js";
 import { approvedKnowledgeCitationLabel, citationKeys, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import { ManualMarkdown } from "./manual-markdown.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
+import { MemoOriginBadge } from "./memo-source.jsx";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -834,6 +835,23 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [modalView, setModalView] = useState(null);
   const [loadRevision, setLoadRevision] = useState(0);
+  // 메모를 소스로(NB1-U2): 만들기 성공 뒤 새 소스 줄로 스크롤하고, 소스 줄의 "메모" 표시는 스튜디오 메모 보기를 연다.
+  const [memoSourceFocusId, setMemoSourceFocusId] = useState(null);
+  const memoSourceRowRef = useRef(null);
+  const [studioOpenRequest, setStudioOpenRequest] = useState(null);
+  const handleMemoSourceChanged = ({ kind, sourceId }) => {
+    if (kind === "created" && typeof sourceId === "string") setMemoSourceFocusId(sourceId);
+    setLoadRevision((current) => current + 1);
+  };
+  const openMemoFromSource = (outputId) => {
+    setStudioOpenRequest((current) => ({ outputId, nonce: (current?.nonce ?? 0) + 1 }));
+    setNarrowTab("studio");
+  };
+  useEffect(() => {
+    if (!memoSourceFocusId || !viewState.sources.some((source) => source.sourceId === memoSourceFocusId)) return;
+    memoSourceRowRef.current?.scrollIntoView?.({ block: "nearest" });
+    setMemoSourceFocusId(null);
+  }, [memoSourceFocusId, viewState.sources]);
   const saveAnswerToMemo = async (target) => {
     const answerNow = target ?? viewState.answer;
     if (!adapter?.studioV2 || !answerNow || answerNow.insufficient || memoSave.pending) return;
@@ -1066,6 +1084,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             processingState: source.processing_state,
             jobState: source.job_state,
             safeErrorCode: source.safe_error_code ?? null,
+            // 메모로 만든 소스(NB1-F2 memo_origin)만 값이 있다. 메모가 지워져도 소스는 남는다(D-10).
+            memoOrigin: source.memo_origin ? { memoOutputId: source.memo_origin.memo_output_id, memoExists: source.memo_origin.memo_exists === true } : null,
             websiteSnapshot,
             lawSnapshot,lawCandidate,
             ready: source.source_state === "ready"
@@ -2121,7 +2141,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           {lawSourcesOnly?<button type="button" onClick={()=>setLawSourcesOnly(false)}>모든 Source 보기</button>:null}
           <ul className="source-list" aria-label="Raw Source 목록">
             {viewState.sources.filter(source=>!lawSourcesOnly || source.lawSnapshot).map((source) => (
-              <li className="source-list-row" key={`${source.sourceId}:${source.sourceVersionId}`}>
+              <li className="source-list-row" key={`${source.sourceId}:${source.sourceVersionId}`} data-source-id={source.sourceId}
+                ref={source.sourceId === memoSourceFocusId ? memoSourceRowRef : undefined}>
                 {adapter?.studioV2 ? <input type="checkbox" className="source-use-check" role="checkbox" aria-label={`${source.filename ?? source.sourceId} 사용`}
                   checked={source.ready && !uncheckedSourceVersionIds.has(source.sourceVersionId)} disabled={!source.ready}
                   onChange={()=>setUncheckedSourceVersionIds(current=>{const next=new Set(current);if(next.has(source.sourceVersionId))next.delete(source.sourceVersionId);else next.add(source.sourceVersionId);return next;})} /> : null}
@@ -2129,6 +2150,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
                 <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
+                <MemoOriginBadge origin={source.memoOrigin} name={source.filename ?? source.sourceId} onOpen={openMemoFromSource} />
                 {(new Set(["failed", "waiting_model"]).has(source.sourceState)
                   || (typeof source.filename === "string" && /\.(docx|pptx)$/u.test(source.filename.toLowerCase())
                     && source.sourceState === "needs_review" && source.processingState === "completed" && source.jobState === "completed")) && typeof adapter?.reprocessSource === "function"
@@ -2383,6 +2405,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
         </SafePane>
         <SafePane id="product-pane-studio" title={adapter?.studioV2 && !desktopStudio ? "스튜디오" : "업무 Studio"} description="근거가 확인된 답변으로 보고서를 생성하고 저장 결과를 확인합니다.">
           {desktopStudio ? desktopStudio : <StudioFallbackGate adapter={adapter} sources={viewState.sources} unchecked={uncheckedSourceVersionIds} knowledgeCount={knowledgeCount} refreshToken={studioRefresh} onAskAboutNode={askAboutNode}
+            onMemoSourceChanged={handleMemoSourceChanged} openOutputRequest={studioOpenRequest}
             fallback={<><ProductStudioPane
             key={`${viewState.answer?.run_id ?? "no-run"}:${viewState.selectedSource?.sourceVersionId ?? "no-source"}`}
             adapter={adapter}
