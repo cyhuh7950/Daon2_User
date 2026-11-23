@@ -353,7 +353,11 @@ function validateWebsiteContract(document) {
     && snapshotEnvelope.properties.data.$ref === "#/components/schemas/WebsiteSnapshotView", "snapshot envelope mismatch");
   check(parameters(sources, [["id", "path", true], ["notebook_id", "query", true], ["website_source_version_id", "query", false], ["include_failure_reason", "query", false, (schema) => keys(schema, ["type"]) && schema.type === "boolean"]]), "Source query mismatch");
   const projection = schemas.WorkspaceSourceProjection;
-  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website", "safe_error_code"])
+  const memoOrigin = projection.properties.memo_origin;
+  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website", "safe_error_code", "memo_origin"])
+    && exactObject(memoOrigin, ["memo_output_id", "memo_exists"])
+    && memoOrigin.properties.memo_output_id.type === "string" && memoOrigin.properties.memo_output_id.pattern === "^sv2-[0-9a-f]{32}$"
+    && memoOrigin.properties.memo_exists.type === "boolean"
     && projection.properties.website.$ref === "#/components/schemas/WebsiteSourceOriginal"
     && projection.properties.safe_error_code.type === "string" && projection.properties.safe_error_code.pattern === "^[A-Z][A-Z0-9_]{2,63}$", "Source default6/optional mismatch");
   const original = schemas.WebsiteSourceOriginal;

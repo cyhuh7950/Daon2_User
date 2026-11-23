@@ -5,6 +5,7 @@ import {
   StudioV2Error, cancelStudioOutput, createStudioMemo, createStudioOutput, deleteStudioOutput, downloadStudioExport, getStudioCustomization,
   applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns,
   getStudioEvidenceContent, getStudioOutput, listStudioOutputs, listStudioTypes, regenerateStudioOutput, renameStudioOutput, saveStudioCustomization,
+  createMemoSource, reflectMemoSource,
 } from "../../apps/web/lib/studio-v2-api.js";
 
 const OID = `sv2-${"a".repeat(32)}`;
@@ -131,4 +132,57 @@ test("대화 수정 API는 잘못된 응답과 잘못된 번호를 거부한다"
     await assert.rejects(listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope(bad) }), { code: "STUDIO_RESPONSE_INVALID" });
   }
   await assert.rejects(applyStudioEditTurn("ws-1", EDIT_OID, "../x", { notebookId: "nb-1", fetchImpl: async () => { throw new Error("MUST_NOT_SEND"); } }), { code: "STUDIO_INPUT_INVALID" });
+});
+
+test("메모를 소스로: 만들기·반영 경로와 응답 모양을 지킨다", async () => {
+  const { calls, fetchImpl } = recorder((url) => url.endsWith("/source/reflect")
+    ? reply({ source_id: "src-memo", source_version_id: "sv-memo-2" })
+    : new Response(JSON.stringify({ data: { source_id: "src-memo", source_version_id: "sv-memo-1", state: "processing" }, meta: { trace_id: "t" } }), { status: 201, headers: { "Content-Type": "application/json" } }));
+  const created = await createMemoSource("ws-1", OID, { notebookId: "nb-1", fetchImpl });
+  assert.deepEqual(created, { source_id: "src-memo", source_version_id: "sv-memo-1", state: "processing" });
+  assert.equal(calls[0].url, `${BASE}/outputs/${OID}/source`);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.body, "{}");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  const reflected = await reflectMemoSource("ws-1", OID, { notebookId: "nb-1", fetchImpl });
+  assert.deepEqual(reflected, { source_id: "src-memo", source_version_id: "sv-memo-2" });
+  assert.equal(calls[1].url, `${BASE}/outputs/${OID}/source/reflect`);
+});
+
+test("메모를 소스로: 오류 코드와 잘못된 응답·번호를 다룬다", async () => {
+  for (const code of ["MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_SOURCE_UNCHANGED", "MEMO_SOURCE_NOT_LINKED", "FORBIDDEN"]) {
+    const fetchImpl = async () => new Response(JSON.stringify({ error: { code } }), { status: 409, headers: { "Content-Type": "application/json" } });
+    await assert.rejects(createMemoSource("ws-1", OID, { notebookId: "nb-1", fetchImpl }), { code });
+  }
+  for (const bad of [{ source_id: "src", source_version_id: "sv" }, { source_id: "src", source_version_id: "sv", state: "processing", extra: 1 },
+    { source_id: "../x", source_version_id: "sv", state: "processing" }]) {
+    await assert.rejects(createMemoSource("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply(bad) }), { code: "STUDIO_RESPONSE_INVALID" });
+  }
+  await assert.rejects(reflectMemoSource("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply({ source_id: "src", source_version_id: "sv", state: "x" }) }),
+    { code: "STUDIO_RESPONSE_INVALID" });
+  await assert.rejects(createMemoSource("ws-1", "not-an-output", { notebookId: "nb-1", fetchImpl: async () => { throw new Error("MUST_NOT_SEND"); } }),
+    { code: "STUDIO_INPUT_INVALID" });
+});
+
+test("메모 조회 응답의 source_link는 없거나 null이거나 정확한 모양이어야 한다", async () => {
+  const detail = { output_id: OID, type_id: "memo", evidence: [], assets: [] };
+  const link = { source_id: "src-memo", reflected_revision_no: 3, outdated: true };
+  assert.deepEqual((await getStudioOutput("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply({ ...detail, source_link: link }) })).source_link, link);
+  assert.equal((await getStudioOutput("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply({ ...detail, source_link: null }) })).source_link, null);
+  assert.equal((await getStudioOutput("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply(detail) })).source_link, undefined);
+  for (const bad of [{ ...link, outdated: "yes" }, { ...link, extra: 1 }, { source_id: "src-memo", reflected_revision_no: 0, outdated: false }]) {
+    await assert.rejects(getStudioOutput("ws-1", OID, { notebookId: "nb-1", fetchImpl: async () => reply({ ...detail, source_link: bad }) }),
+      { code: "STUDIO_RESPONSE_INVALID" });
+  }
+});
+
+test("노트북 어댑터는 메모를 소스로 함수를 노트북 범위로 묶는다", async () => {
+  const { createStudioV2Adapter } = await import("../../apps/web/lib/studio-v2-adapter.js");
+  const { calls, fetchImpl } = recorder((url) => url.endsWith("/reflect")
+    ? reply({ source_id: "src-memo", source_version_id: "sv-memo-2" })
+    : reply({ source_id: "src-memo", source_version_id: "sv-memo-1", state: "processing" }));
+  const adapter = createStudioV2Adapter("ws-1", "nb-1", { fetchImpl });
+  assert.equal((await adapter.createMemoSource(OID)).state, "processing");
+  assert.equal((await adapter.reflectMemoSource(OID)).source_version_id, "sv-memo-2");
+  assert.deepEqual(calls.map((c) => c.url), [`${BASE}/outputs/${OID}/source`, `${BASE}/outputs/${OID}/source/reflect`]);
 });

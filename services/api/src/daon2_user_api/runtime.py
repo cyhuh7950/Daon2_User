@@ -555,7 +555,7 @@ def _build_run_cost_sessions(store,settings):
     if not policies:return None
     if store is None:raise ValueError('RUN_COST_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084'}:
         raise ValueError('RUN_COST_PROTECTED_STORAGE_REQUIRED')
     return RunCostSessionFactory(OperationsRunCostRepository(store),policies=policies,evidence=evidence,
         clock=lambda:datetime.now(timezone.utc))
@@ -565,7 +565,7 @@ def _build_host_capacity_collector(store,settings):
     if settings.operations_host_capacity_enabled is not True:return None
     if store is None:raise ValueError('HOST_CAPACITY_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084'}:
         raise ValueError('HOST_CAPACITY_PROTECTED_STORAGE_REQUIRED')
     from .operations_host_capacity import HostCapacityCollector
     from .operations_telemetry_postgres import PostgresHostCapacityRepository
@@ -905,7 +905,7 @@ def _build_document_readiness_runtime(cloud_store, settings):
     if cloud_store is None or not configured.scopes:
         return None
     status = cloud_store.readiness()
-    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083"}:
+    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083","0084"}:
         raise ValueError("DOCUMENT_READINESS_SCHEMA_REQUIRED")
     from .document_readiness_postgres import PostgresDocumentReadinessRepository
     from .workspace_model_defaults import read_document_readiness_policy
@@ -1007,6 +1007,7 @@ class RuntimeDependencies:
     studio_report_repository: Any | None = None
     studio_workspace_service: Any | None = None
     studio_v2_service: Any | None = None
+    memo_source_service: Any | None = None
     knowledge_connector_service: Any | None = None
     tts_engine_service: Any | None = None
     studio_approval_lifecycle_repository: Any | None = None
@@ -1739,7 +1740,7 @@ def _notification_dispatch_tick(
     if cloud is None or getattr(cloud, '_notification_inbox_enabled', False) is not True:
         return after
     ready = cloud.readiness()  # 정확히 지원하는 revision과 모든 기존 보호를 함께 검사한다.
-    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'}:
+    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084'}:
         raise NotificationError('DATABASE_UNAVAILABLE', 503)
     if stop.is_set():
         return after
@@ -2464,7 +2465,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         if cloud is None or not getattr(cloud, '_notification_inbox_enabled', False):
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         ready = cloud.readiness()
-        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083'}:
+        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084'}:
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         try:
             workspaces = dependencies.identity_service.notification_workspace_ids(
@@ -2711,6 +2712,16 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
     studio_v2_service = dependencies.studio_v2_service
     if studio_v2_service is None and dependencies.settings.studio_v2_enabled and dependencies.cloud_store is not None:
         studio_v2_service = StudioV2Service(dependencies.cloud_store, object_storage=dependencies.object_storage)
+    # 메모를 소스로(WO-N1 NB1-F2): 업로드와 같은 저장·문서 처리 경로를 쓰는 텍스트 소스 도우미 위에 둔다.
+    memo_source_service = dependencies.memo_source_service
+    if (memo_source_service is None and studio_v2_service is not None and dependencies.cloud_store is not None
+            and dependencies.document_processing_service is not None
+            and hasattr(dependencies.source_upload_service, "store_object")):
+        from .memo_source import MemoSourceService
+        from .text_source import TextSourceService
+        memo_source_service = MemoSourceService(dependencies.cloud_store, TextSourceService(
+            upload_service=dependencies.source_upload_service, processing_service=dependencies.document_processing_service,
+            cloud_store=dependencies.cloud_store))
     knowledge_connector_service = dependencies.knowledge_connector_service
     if (knowledge_connector_service is None and dependencies.settings.knowledge_connectors_enabled
             and dependencies.cloud_store is not None and provider_cipher is not None):
@@ -4388,6 +4399,20 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "data": {"sources": [_dataclass_json(source if include_failure_reason else replace(source, safe_error_code=None)) for source in sources]},
             "meta": {"trace_id": request.state.trace_id, "workspace_id": id},
         }
+        if memo_source_service is not None and sources:
+            # 메모로 만든 소스에만 memo_origin을 붙인다(그 밖의 소스는 기존 6필드 그대로).
+            # 연결을 읽지 못해도(예: 0084 적용 전 DB) 소스 목록은 기존 그대로 돌려준다.
+            from .cloud_storage import CloudDatabaseError as _MemoLinkReadError
+            try:
+                origins = await asyncio.to_thread(
+                    memo_source_service.memo_origins,
+                    StudioContext(principal.tenant_id, id, principal.user_id, request.state.trace_id,
+                                  dependencies.settings.policy_version, notebook_id))
+            except _MemoLinkReadError:
+                origins = {}
+            for item in content["data"]["sources"]:
+                if item["source_id"] in origins:
+                    item["memo_origin"] = origins[item["source_id"]]
         if website_source_version_id is not None:
             if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}',website_source_version_id) is None:
                 raise WebsiteImportError('WEBSITE_ACCESS_DENIED',403)
@@ -5269,7 +5294,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             studio_v2_service.tts_resolver = tts_engine_service
             register_tts_engine_routes(app, dependencies, tts_engine_service)
         register_studio_v2_routes(app, dependencies, studio_v2_service, _studio_v2_license_check, authoring=authoring_service,
-                                  tts_resolver=tts_engine_service)
+                                  tts_resolver=tts_engine_service, memo_sources=memo_source_service)
         if authoring_service is not None:
             register_authoring_routes(app, dependencies, authoring_service, _studio_v2_license_check)
 

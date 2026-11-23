@@ -116,6 +116,9 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
             "AND u.workspace_id=nb.workspace_id AND u.notebook_id=nb.notebook_id AND u.source_id=nb.record_id AND u.source_version_id=nb.version_id) "
             "AND NOT EXISTS(SELECT 1 FROM deletion_requests d WHERE d.tenant_id=sv.tenant_id AND d.workspace_id=sv.workspace_id "
             "AND d.source_id=sv.source_id AND d.source_active=false) "
+            # 같은 소스에 새 버전(예: 메모 반영)이 붙으면 최신 버전만 기본 생성 범위에 넣는다.
+            "AND NOT EXISTS(SELECT 1 FROM source_versions nv WHERE nv.tenant_id=sv.tenant_id AND nv.workspace_id=sv.workspace_id "
+            "AND nv.source_id=sv.source_id AND nv.version>sv.version) "
             "AND (EXISTS(SELECT 1 FROM understanding_results ur WHERE ur.tenant_id=sv.tenant_id AND ur.workspace_id=sv.workspace_id AND ur.source_version_id=sv.record_id) "
             "OR EXISTS(SELECT 1 FROM evidence_spans es WHERE es.tenant_id=sv.tenant_id AND es.workspace_id=sv.workspace_id AND es.source_version_id=sv.record_id)) "
             "ORDER BY nb.version_id",

@@ -324,6 +324,26 @@ test("Source 목록은 exact DTO를 유지하고 safe retryable을 보존한다"
   );
 });
 
+test("Source 목록은 메모로 만든 소스에만 memo_origin을 받아들인다", async () => {
+  const base = {
+    source_id: "source-1", source_version_id: "source-version-1", filename: "회의 메모.txt",
+    source_state: "ready", processing_state: "completed", job_state: "completed",
+  };
+  const memo = { ...base, memo_origin: { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: false } };
+  const failed = { ...base, source_id: "source-2", source_state: "failed", safe_error_code: "TEXT_UNDERSTANDING_FAILED",
+    memo_origin: { memo_output_id: `sv2-${"b".repeat(32)}`, memo_exists: true } };
+  const fetchImpl = async () => json({ data: { sources: [memo, base, failed] }, meta: META }, { status: 200 });
+  assert.deepEqual(await listWorkspaceSources("workspace-1", { notebookId: "notebook-1", fetchImpl }), [memo, base, failed]);
+  for (const origin of [null, { memo_output_id: "sv2-short", memo_exists: false }, { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: "no" },
+    { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: true, extra: 1 }]) {
+    await assert.rejects(
+      () => listWorkspaceSources("workspace-1", { notebookId: "notebook-1",
+        fetchImpl: async () => json({ data: { sources: [{ ...base, memo_origin: origin }] }, meta: META }, { status: 200 }) }),
+      /SOURCE_LIST_RESPONSE_INVALID/u,
+    );
+  }
+});
+
 test('승인 지식 답변이 저장된 노트북도 다시 열리고 문서명이 유지된다', async () => {
   const external = { citation_id:'extcit-1', source_id:'doc-1', source_version_id:'ver-1', evidence_span_id:'block-1', page:3,
     origin:'mcp_daon_rag', context_item_id:'wp-1', locator:{ kind:'section', value:'block-1' }, document_name:'제안요청서.pdf' };

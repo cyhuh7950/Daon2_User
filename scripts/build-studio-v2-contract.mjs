@@ -16,6 +16,8 @@ export const ERROR_CODES = [
   "STUDIO_CANCELLED", "STUDIO_EXTERNAL_PROVIDER_UNSUPPORTED", "STUDIO_REVISION_TOO_LARGE", "STUDIO_SOURCE_TOO_LARGE",
   "NOTEBOOK_SCOPE_REQUIRED", "NOTEBOOK_SCOPE_MISMATCH", "OBJECT_STORAGE_UNAVAILABLE",
   "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
+  "FORBIDDEN", "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
+  "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
 ];
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const exact = (properties, required = Object.keys(properties)) => ({ type: "object", additionalProperties: false, required, properties });
@@ -57,8 +59,12 @@ const schemas = {
       settings: { type: "object" },
       revision: nullable({ type: "object" }), evidence: { type: "array", items: ref("StudioV2Evidence") },
       assets: { type: "array", items: exact({ kind: { type: "string" }, bytes: { type: "integer" }, revision_no: { type: "integer" } }) },
+      source_link: { description: "Memo outputs only (null when the memo is not used as a source).", oneOf: [ref("StudioV2MemoSourceLink"), { type: "null" }] },
     }, ["settings", "revision", "evidence", "assets"])],
   },
+  StudioV2MemoSourceLink: exact({ source_id: id, reflected_revision_no: { type: "integer", minimum: 1 }, outdated: { type: "boolean" } }),
+  StudioV2MemoSourceReceipt: exact({ source_id: id, source_version_id: id, state: { type: "string" } }),
+  StudioV2MemoSourceReflectReceipt: exact({ source_id: id, source_version_id: id }),
   StudioV2RenameRequest: exact({ title: { type: "string", minLength: 1, maxLength: 160 } }),
   StudioV2RenameReceipt: exact({ output_id: id, title: { type: "string" }, updated_at: time }),
   StudioV2RevisionRequest: exact({ content: { type: "object" }, change_reason: { type: "string", maxLength: 200 } }, ["content"]),
@@ -112,7 +118,7 @@ Object.assign(schemas, {
 
 const envelope = (name) => ({ type: "object", additionalProperties: false, required: ["data", "meta"], properties: { data: ref(name), meta: ref("StudioV2Meta") } });
 for (const name of ["EditTurnReceipt", "EditTurnApplyReceipt", "EditTurnList", "AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
-  "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
+  "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt", "MemoSourceReceipt", "MemoSourceReflectReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
 
 const parameters = {
   WorkspaceId: { name: "id", in: "path", required: true, schema: id },
@@ -139,6 +145,13 @@ const errorResponses = {
   "404": { description: "Resource unavailable", content: { "application/json": { schema: ref("StudioV2Error") } } },
   "409": { description: "Conflict", content: { "application/json": { schema: ref("StudioV2Error") } } },
 };
+// 메모를 소스로(WO-N1 NB1-F2): 보기 권한만 있으면 403, 빈 메모·메모 아님 422, 본문이 TXT 상한(32 KiB)을 넘으면 413.
+const memoErrors = {
+  "403": { description: "Edit permission required", content: { "application/json": { schema: ref("StudioV2Error") } } },
+  "413": { description: "Memo is larger than the text source limit", content: { "application/json": { schema: ref("StudioV2Error") } } },
+  "422": { description: "Not a memo or empty memo", content: { "application/json": { schema: ref("StudioV2Error") } } },
+};
+schemas.StudioV2EmptyRequest = exact({}, []);
 const op = (operationId, parameters, responses, requestBody) => ({
   operationId, parameters, ...(requestBody ? { requestBody } : {}), responses: { ...responses, ...errorResponses },
 });
@@ -189,6 +202,8 @@ const paths = {
   [`${S}/authoring/sessions/{output_id}/outline`]: { put: op("updateStudioV2AuthoringOutline", out, { "202": okJson("StudioV2AuthoringControlReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringOutlineRequest")) },
   [`${S}/authoring/sessions/{output_id}/units/{unit_key}`]: { put: op("editStudioV2AuthoringUnit", [...out, P("UnitKey")], { "202": okJson("StudioV2AuthoringControlReceiptEnvelope", "Accepted") }, json("StudioV2AuthoringUnitEditRequest")) },
   [`${S}/memos`]: { post: op("createStudioV2Memo", [...base, P("IdempotencyKey")], { "201": okJson("StudioV2MemoReceiptEnvelope", "Created") }, json("StudioV2MemoRequest")) },
+  [`${S}/outputs/{output_id}/source`]: { post: op("createStudioV2MemoSource", out, { "201": okJson("StudioV2MemoSourceReceiptEnvelope", "Created"), ...memoErrors }, json("StudioV2EmptyRequest")) },
+  [`${S}/outputs/{output_id}/source/reflect`]: { post: op("reflectStudioV2MemoSource", out, { "200": okJson("StudioV2MemoSourceReflectReceiptEnvelope"), ...memoErrors }, json("StudioV2EmptyRequest")) },
 };
 
 export function buildContract() {
