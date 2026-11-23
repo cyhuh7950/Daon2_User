@@ -591,11 +591,36 @@ class QuestionAnsweringService:
         self._external_cache: dict[tuple[str, ...], tuple[float, tuple[ExternalEvidence, ...]]] = {}
         self._external_lock = threading.Lock()
 
-    def _external_evidence(self, context: QuestionContext, question: str) -> tuple[ExternalEvidence, ...]:
+    def set_question_tools_reader(self, reader) -> None:
+        """노트북·사용자별 질문 도구(NB2-F1, reader(tenant, workspace, notebook, actor) -> 적용 상태). 없으면 지금처럼 모두 쓴다."""
+        self._question_tools_reader = reader
+
+    def _question_tools(self, context: QuestionContext):  # type: ignore[no-untyped-def]
+        """서버 저장값으로 정한 질문 도구 상태. 화면이 보낸 값은 쓰지 않는다. 읽지 못하면 꺼 둔 도구를 모르므로 질문을 멈춘다."""
+        reader = getattr(self, "_question_tools_reader", None)
+        if reader is None or not getattr(context, "notebook_id", None):
+            return None
+        try:
+            return reader(context.tenant_id, context.workspace_id, context.notebook_id, context.actor_id)
+        except Exception:
+            raise QuestionAnsweringError("QUESTION_TOOLS_UNAVAILABLE", status=503, retryable=True) from None
+
+    @staticmethod
+    def _tool_sources(sources: tuple[QuestionInputSource, ...], tools) -> tuple[QuestionInputSource, ...]:  # type: ignore[no-untyped-def]
+        """승인 지식 도구를 껐으면 지식 패키지(daon_knowledge) 입력은 검색·근거에 쓰지 않는다."""
+        if tools is None or tools.approved_knowledge:
+            return sources
+        return tuple(item for item in sources if item.origin != "daon_knowledge")
+
+    def _external_evidence(self, context: QuestionContext, question: str, tools=None) -> tuple[ExternalEvidence, ...]:  # type: ignore[no-untyped-def]
         if self._external_search is None or context.notebook_id is None or is_chat_question(question):
             return ()
+        if tools is not None and not tools.approved_knowledge:
+            return ()  # 승인 지식을 껐으면 지식 연결로 승인 근거를 찾지 않는다(호출 0).
+        disabled = frozenset(tools.disabled_connectors) if tools is not None else frozenset()
         # 인증 확인과 실제 질문이 같은 근거를 쓰도록 짧게 재사용한다. 근거가 달라지면 전송 내용 지문이 어긋난다.
-        key = self._external_key(context, question)
+        # 질문 도구가 바뀌면 다른 근거이므로 다시 찾는다.
+        key = (*self._external_key(context, question), *sorted(disabled))
         now = time.monotonic()
         with self._external_lock:
             self._external_cache = {k: v for k, v in self._external_cache.items() if v[0] > now}
@@ -603,8 +628,9 @@ class QuestionAnsweringService:
         if cached is not None:
             return cached[1]
         try:
-            found = (self._planned_evidence(context, question) if self._external_planner is not None
-                     else tuple(self._external_search(context, question)))
+            options = {"disabled_connectors": disabled} if disabled else {}
+            found = (self._planned_evidence(context, question, options) if self._external_planner is not None
+                     else tuple(self._external_search(context, question, **options)))
         except ExternalEvidenceError as error:
             raise QuestionAnsweringError(error.code, status=error.status, retryable=error.retryable) from None
         with self._external_lock:
@@ -653,8 +679,8 @@ class QuestionAnsweringService:
         payload = append_system_rule(payload, ANSWER_FORMAT_RULE)
         return append_system_rule(payload, PRIORITY_RULE) if mixed else payload
 
-    def _planned_evidence(self, context: QuestionContext, question: str) -> tuple[ExternalEvidence, ...]:
-        target = self._external_planner.prepare(context)
+    def _planned_evidence(self, context: QuestionContext, question: str, options=None) -> tuple[ExternalEvidence, ...]:  # type: ignore[no-untyped-def]
+        target = self._external_planner.prepare(context, **(options or {}))
         if target is None:
             return ()
         requests = self._plan_requests(context, question, target)
@@ -924,17 +950,18 @@ class QuestionAnsweringService:
     @staticmethod
     def _process_scope(
         sources: tuple[QuestionInputSource, ...], external: tuple[ExternalEvidence, ...], trace: Mapping[str, object],
+        tools=None,  # type: ignore[no-untyped-def]
     ) -> dict[str, object]:
         """질문 범위. 소스 수는 실제로 검색한 원문 소스만, 승인 지식은 이름만 남긴다.
 
-        scope.tools는 NB2-F1(질문 도구)이 켜진 도구 라벨 목록으로 채운다. 그 전까지는 None이다.
+        scope.tools는 켜진 질문 도구 라벨 목록(NB2-F1, 조회 응답의 enabled=true와 같다)이다. 질문 도구를 읽지 않은 경로는 None이다.
         """
         titles = cast(Mapping[tuple[str, str], str], trace.get("titles") or {})
         packages = [{"name": titles.get((item.source_id, item.source_version_id))}
                     for item in sources if item.origin == "daon_knowledge"]
         packages += [{"name": item.work_package_name} for item in external]
         return {"source_count": sum(1 for item in sources if item.origin == "raw_source"),
-                "knowledge_packages": packages, "tools": None}
+                "knowledge_packages": packages, "tools": None if tools is None else list(tools.labels)}
 
     @staticmethod
     def _process_evidence(
@@ -1066,8 +1093,9 @@ class QuestionAnsweringService:
         sources = () if general and source_id is None else self._context_sources(
             source_id or "", source_version_id or "", context_sources,
         )
+        tools = self._question_tools(context)
         if not general:
-            sources = self._ready_context_sources(context, sources)
+            sources = self._ready_context_sources(context, self._tool_sources(sources, tools))
             if not sources:
                 general = True
         evidence = ()
@@ -1079,7 +1107,7 @@ class QuestionAnsweringService:
             evidence = self._search_context(context, sources, question, search_trace)
             if not evidence:
                 general = True
-        external = self._external_evidence(context, question)
+        external = self._external_evidence(context, question, tools)
         mixed = bool(evidence) and bool(external)
         evidence = merge_evidence(evidence, external)
         use_general = general and not external
@@ -1108,7 +1136,7 @@ class QuestionAnsweringService:
                 if callable(transformer):
                     wire = transformer(context, wire)
                 draft = {
-                    "scope": self._process_scope(used_sources, external, search_trace),
+                    "scope": self._process_scope(used_sources, external, search_trace, tools),
                     "evidence": None if use_general else self._process_evidence(evidence, used_sources, external, search_trace),
                     "model": self._process_model(selection),
                 }
@@ -1156,8 +1184,9 @@ class QuestionAnsweringService:
             source_id or "", source_version_id or "", context_sources,
         )
         resolved_sources = sources
+        tools = self._question_tools(context)
         if not general:
-            sources = self._ready_context_sources(context, sources)
+            sources = self._ready_context_sources(context, self._tool_sources(sources, tools))
             if not sources:
                 general = True
                 source_id = None
@@ -1165,7 +1194,7 @@ class QuestionAnsweringService:
             else:
                 source_id = sources[0].source_id
                 source_version_id = sources[0].source_version_id
-        external = self._external_evidence(context, question)
+        external = self._external_evidence(context, question, tools)
         model_context = WorkspaceModelContext(
             context.tenant_id, context.workspace_id, context.actor_id,
         )
@@ -1211,7 +1240,7 @@ class QuestionAnsweringService:
                         question=question, run_id=run_id,
                         approved_authorization=approved_authorization,
                         context_mode=context_mode, request_fingerprint=request_fingerprint,
-                        failure_capture=capture, external=external,
+                        failure_capture=capture, external=external, tools=tools,
                     )
                 except QuestionAnsweringError as error:
                     if self._run_cost_sessions is not None and self._run_cost_sessions.applies(
@@ -1234,7 +1263,7 @@ class QuestionAnsweringService:
                                 question=question, run_id=run_id,
                                 approved_authorization=approved_authorization,
                                 context_mode=context_mode, request_fingerprint=request_fingerprint,
-                                failure_capture=capture, external=external,
+                                failure_capture=capture, external=external, tools=tools,
                             )
                     except WorkspaceModelUnavailable:
                         raise error
@@ -1300,6 +1329,7 @@ class QuestionAnsweringService:
         context_mode: str, request_fingerprint: str,
         failure_capture: list[_FinalQuestionFailure] | None = None,
         external: tuple[ExternalEvidence, ...] = (),
+        tools=None,  # type: ignore[no-untyped-def]
     ) -> StoredQuestionAnswer:
         cost_session=None if self._run_cost_sessions is None else self._run_cost_sessions.for_call(
             context,selection,run_kind='question',run_id=run_id,
@@ -1323,7 +1353,7 @@ class QuestionAnsweringService:
         access_options = {'access_source_version_ids': versions} if versions else {}
         model_block = self._process_model(selection)
         # 일반 대화(소스·지식 없이 답함)의 과정: 소스 0개, 근거 찾기 없음.
-        general_draft = {"scope": self._process_scope((), (), {}), "evidence": None, "model": model_block}
+        general_draft = {"scope": self._process_scope((), (), {}, tools), "evidence": None, "model": model_block}
         if general and not external and not is_chat_question(question):
             # 소스가 제공한 지식만으로 답한다. 지식 질문인데 지식이 없으면 모델을 호출하지 않고 안내만 저장한다.
             return self._complete_without_model(
@@ -1409,7 +1439,7 @@ class QuestionAnsweringService:
         if general:  # 소스 없이 선택한 승인 지식만으로 답한다. 실행 기록은 소스 없는 질문으로 남긴다.
             context_mode, sources, source_id, source_version_id = "general_ungrounded", (), None, None
         process_draft = {
-            "scope": self._process_scope(sources, external, search_trace),
+            "scope": self._process_scope(sources, external, search_trace, tools),
             "evidence": self._process_evidence(evidence, sources, external, search_trace),
             "model": model_block,
         }

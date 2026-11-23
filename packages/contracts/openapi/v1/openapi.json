@@ -659,6 +659,36 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/question-tools": {
+      "get": {
+        "operationId": "getNotebookQuestionTools", "tags": ["Workspace"],
+        "summary": "Notebook 질문 도구 내 선택 조회", "x-implementation-owner": "WO-N1-NB2-F1",
+        "description": "승인 지식(approved_knowledge)과 워크스페이스에서 쓸 수 있는 지식 연결(connector:<connector_id>, daon2_rag·daon2·law)만 내놓는다. 웹 도구는 없다(결정 D-02). 저장값이 없으면 사용할 수 있는 도구는 모두 켜짐이다(기존 동작). 사용할 수 없는 도구는 reason과 함께 enabled=false다. 노트북 보기 권한으로 자기 선택만 읽는다.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "responses": {
+          "200": { "description": "My question tools for this Notebook", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuestionToolsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      },
+      "put": {
+        "operationId": "updateNotebookQuestionTools", "tags": ["Workspace"],
+        "summary": "Notebook 질문 도구 내 선택 저장", "x-implementation-owner": "WO-N1-NB2-F1",
+        "description": "보낸 도구만 이전 선택과 합쳐 저장하고 GET과 같은 응답을 돌려준다. 모르는 id는 422 QUESTION_TOOL_UNKNOWN. available=false인 도구를 켜면 저장은 하되 응답의 enabled는 false다. 질문 처리 때 서버가 저장값을 다시 읽어 적용하며, 꺼진 도구는 호출하지 않는다. 감사 notebook.question_tools.update에는 켜진 도구 id만 남긴다.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuestionToolsUpdateRequest" } } } },
+        "responses": {
+          "200": { "description": "My question tools for this Notebook", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QuestionToolsEnvelope" } } } },
+          "422": { "description": "Unknown tool id or non-boolean value", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings": {
       "post": {
         "operationId": "unbindWorkspaceNotebookSource", "tags": ["Workspace"],
@@ -7582,6 +7612,9 @@
         "type": "string",
         "enum": [
           "QUESTION_FAILED",
+          "QUESTION_TOOL_UNKNOWN",
+          "QUESTION_TOOLS_INVALID",
+          "QUESTION_TOOLS_UNAVAILABLE",
           "AUTHENTICATION_REQUIRED",
           "FORBIDDEN",
           "RESOURCE_UNAVAILABLE",
@@ -9366,6 +9399,31 @@
             ]
           }
         }
+      },
+      "QuestionTool": {
+        "description": "질문 도구 하나(WO-N1 N1-2). connector_kind는 kind=connector일 때만, reason은 available=false일 때만 있다.",
+        "type": "object", "additionalProperties": false, "required": ["id", "kind", "label", "available", "enabled"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^(?:approved_knowledge|connector:[A-Za-z0-9][A-Za-z0-9._:-]{0,245})$" },
+          "kind": { "type": "string", "enum": ["approved_knowledge", "connector"] },
+          "connector_kind": { "type": "string", "enum": ["daon2_rag", "daon2", "law"] },
+          "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "available": { "type": "boolean" },
+          "enabled": { "type": "boolean" },
+          "reason": { "type": "string", "enum": ["NO_SCOPE_SELECTED", "CONNECTOR_NOT_READY", "CONNECTOR_DISABLED"] }
+        }
+      },
+      "QuestionTools": {
+        "type": "object", "additionalProperties": false, "required": ["tools"],
+        "properties": { "tools": { "type": "array", "maxItems": 65, "items": { "$ref": "#/components/schemas/QuestionTool" } } }
+      },
+      "QuestionToolsEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/QuestionTools" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
+      },
+      "QuestionToolsUpdateRequest": {
+        "type": "object", "additionalProperties": false, "required": ["enabled"],
+        "properties": { "enabled": { "type": "object", "maxProperties": 64, "propertyNames": { "type": "string", "maxLength": 256 }, "additionalProperties": { "type": "boolean" } } }
       },
       "NotebookContextEnvelope": {
         "type": "object", "additionalProperties": false, "required": ["data", "meta"],

@@ -23,6 +23,7 @@ export const REQUIRED_PATHS = Object.freeze([
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/context",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/question-tools",
   "/api/v1/organizations/{id}/license",
   "/api/v1/session",
   "/api/v1/session/logout",
@@ -1121,6 +1122,7 @@ export function validateOpenApiDocument(document) {
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}", ["get", "patch"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/context", ["get"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings", ["post"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/question-tools", ["get", "put"]],
   ]);
   for (const [apiPath, expectedMethods] of notebookMethods) {
     const actualMethods = Object.keys(document.paths[apiPath]).filter((method) => HTTP_METHODS.has(method)).sort();

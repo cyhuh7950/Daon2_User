@@ -4,6 +4,7 @@ import json
 import unittest
 from dataclasses import replace
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from daon2_user_api.document_index_postgres import IndexedEvidenceChunk
 from daon2_user_api.provider_settings import (
@@ -2313,3 +2314,68 @@ class AnswerProcessServiceTests(unittest.TestCase):
         self.assertEqual(process["scope"]["source_count"], 1)
         self.assertEqual(process["model"], self.model_block())
         self.assertIsNone(process["verification"])
+
+
+class QuestionToolSourceTests(unittest.TestCase):
+    """NB2-F1: 승인 지식 도구를 끄면 지식 패키지(daon_knowledge) 입력을 검색·근거에 쓰지 않는다."""
+
+    context = QuestionContext("tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1", "notebook-cp3")
+    raw = IndexedEvidenceChunk("chunk-raw", "source-raw", "version-raw", 1, "원문 근거", "span-raw", 0.8)
+    knowledge = IndexedEvidenceChunk("chunk-knowledge", "source-knowledge", "version-knowledge", 2, "정제된 승인 지식", "span-knowledge", 1.0)
+    sources = (
+        QuestionInputSource("daon_knowledge", "package-daon3", "source-knowledge", "version-knowledge"),
+        QuestionInputSource("raw_source", "version-raw", "source-raw", "version-raw"),
+    )
+
+    class CountingIndex(FakeIndex):
+        def __init__(self, evidence):  # type: ignore[no-untyped-def]
+            super().__init__(evidence)
+            self.searched: list[str] = []
+
+        def search(self, context, **kwargs):  # type: ignore[no-untyped-def]
+            self.searched.append(kwargs["source_version_id"])
+            return super().search(context, **kwargs)
+
+    class CitingTransport(FakeTransport):
+        def __init__(self, cited):  # type: ignore[no-untyped-def]
+            super().__init__()
+            self.cited = cited
+
+        def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.calls += 1
+            return {"choices": [{"message": {"content": json.dumps({
+                "answer": "원문을 확인했습니다.", "cited_chunk_ids": self.cited, "insufficient": False})}}]}
+
+    def run_mixed(self, state, cited):  # type: ignore[no-untyped-def]
+        self.repository, self.transport = FakeRepository(), self.CitingTransport(cited)
+        self.index = self.CountingIndex({"version-raw": (self.raw,), "version-knowledge": (self.knowledge,)})
+        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, self.index, FakeCredential(), self.transport, FakeEgress())
+        service.set_question_tools_reader(lambda *_args: state)
+        service.ask(self.context, source_id="source-knowledge", source_version_id="version-knowledge",
+                    question="근거를 종합해줘", run_id="run-tools", context_mode="mixed", context_sources=self.sources)
+
+    def test_default_state_keeps_mixed_context(self) -> None:
+        state = SimpleNamespace(approved_knowledge=True, disabled_connectors=frozenset(), labels=("승인 지식",))
+        self.run_mixed(state, ["chunk-knowledge", "chunk-raw"])
+        self.assertEqual(self.repository.persisted["context_sources"], self.sources)
+        self.assertEqual(sorted(self.index.searched), ["version-knowledge", "version-raw"])
+
+    def test_turned_off_approved_knowledge_drops_daon_knowledge_input(self) -> None:
+        state = SimpleNamespace(approved_knowledge=False, disabled_connectors=frozenset(), labels=())
+        self.run_mixed(state, ["chunk-raw"])
+        self.assertEqual(self.repository.persisted["context_sources"], (self.sources[1],))
+        self.assertEqual(self.index.searched, ["version-raw"])
+        self.assertEqual([item.chunk_id for item in self.repository.persisted["evidence"]], ["chunk-raw"])
+        self.assertNotIn("daon_knowledge", {item["origin"] for item in self.repository.persisted["process"]["evidence"]["selected"]})
+        self.assertEqual(self.repository.persisted["process"]["scope"]["tools"], [])
+
+    def test_only_daon_knowledge_input_turned_off_answers_without_model(self) -> None:
+        state = SimpleNamespace(approved_knowledge=False, disabled_connectors=frozenset(), labels=())
+        self.repository, self.transport = FakeRepository(), self.CitingTransport([])
+        self.index = self.CountingIndex({"version-knowledge": (self.knowledge,)})
+        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, self.index, FakeCredential(), self.transport, FakeEgress())
+        service.set_question_tools_reader(lambda *_args: state)
+        service.ask(self.context, source_id="source-knowledge", source_version_id="version-knowledge",
+                    question="근거를 종합해줘", run_id="run-tools-only", context_mode="daon_priority", context_sources=self.sources[:1])
+        self.assertEqual((self.index.searched, self.transport.calls), ([], 0))
+        self.assertEqual(self.repository.persisted["context_sources"], ())

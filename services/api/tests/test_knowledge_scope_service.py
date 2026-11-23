@@ -222,3 +222,36 @@ class PageSizeFromServerTests(unittest.TestCase):
 
     def test_large_maximum_is_capped(self):
         self.assertEqual(self.limits_sent(500), 200)
+
+
+class QuestionToolExclusionTests(unittest.TestCase):
+    """NB2-F1: 질문 도구에서 끈 지식 연결은 질문 경로가 고르지도 호출하지도 않는다."""
+
+    def test_default_picks_the_first_verified_rag_connector(self):
+        connectors = _Connectors([{"scopes": [scope()], "next_cursor": None}])
+        _context, connector_id, approved = KnowledgeScopeService(_Store(), connectors).evidence_target(CTX)
+        self.assertEqual((connector_id, list(approved)), ("kc-rag", [("p1", "w1")]))
+
+    def test_turned_off_rag_connector_means_no_target_and_no_call(self):
+        connectors = _Connectors([])
+        self.assertIsNone(KnowledgeScopeService(_Store(), connectors).evidence_target(CTX, exclude=frozenset({"kc-rag"})))
+        self.assertEqual(connectors.calls, [])
+
+    def test_next_enabled_verified_rag_connector_is_used(self):
+        items = [{"connector_id": "kc-rag", "kind": "daon2_rag", "status": "verified"},
+                 {"connector_id": "kc-rag2", "kind": "daon2_rag", "status": "verified"}]
+        connectors = _Connectors([{"scopes": [scope()], "next_cursor": None}], connectors=items)
+        _context, connector_id, _approved = KnowledgeScopeService(_Store(), connectors).evidence_target(CTX, exclude=frozenset({"kc-rag"}))
+        self.assertEqual(connector_id, "kc-rag2")
+        self.assertEqual({call[1] for call in connectors.calls}, {"kc-rag2"})
+
+    def test_missing_connector_is_still_reported_when_nothing_is_turned_off(self):
+        with self.assertRaises(KnowledgeScopeError) as caught:
+            KnowledgeScopeService(_Store(), _Connectors([], connectors=[])).evidence_target(CTX, exclude=frozenset({"kc-x"}))
+        self.assertEqual(caught.exception.code, "KNOWLEDGE_CONNECTOR_NOT_CONFIGURED")
+
+    def test_turned_off_daon2_connector_is_not_offered(self):
+        items = [{"connector_id": "kc-daon2", "kind": "daon2", "status": "verified"}]
+        service = KnowledgeScopeService(_Store(), _Connectors([], connectors=items))
+        self.assertEqual(service.daon2_target(CTX)[1], "kc-daon2")
+        self.assertIsNone(service.daon2_target(CTX, exclude=frozenset({"kc-daon2"})))
