@@ -46,7 +46,7 @@
 
 | # | 설계서 | 실제 코드 | 이 계획의 처리 |
 | --- | --- | --- | --- |
-| C-1 | 메모 → "복사한 텍스트" 소스 경로 재사용 | 복사한 텍스트는 서버 경로가 없다. 브라우저가 `pasted-text-*.txt` 파일로 만들어 업로드하며(`product-workspace-shell.jsx` `submitPastedText`), 매번 새 소스가 된다 | 서버에 "텍스트로 소스 등록" 도우미를 새로 만들고(NB1-F2), 반영은 같은 `source_id`에 `data_canon.append_source_version`으로 새 버전을 붙인다. NB4-F1도 이 도우미를 쓴다 |
+| C-1 | 메모 → "복사한 텍스트" 소스 경로 재사용 | 복사한 텍스트는 서버 경로가 없다. 브라우저가 `pasted-text-*.txt` 파일로 만들어 업로드하며(`product-workspace-shell.jsx` `submitPastedText`), 매번 새 소스가 된다 | 서버에 "텍스트로 소스 등록" 도우미를 새로 만들고(NB1-F2), 반영은 **메모 내용으로 새 소스를 만들어 연결하고 이전 소스는 노트북에서 뗀다**(2026-11-23 NB1-I2 정정: `notebook_bindings`는 소스당 한 버전만 연결되고 추가 전용이라 같은 소스의 새 버전을 노트북에 연결할 수 없음). NB4-F1도 이 도우미를 쓴다 |
 | C-2 | 답변 응답에 `process` 추가 | 웹은 답변 필드를 정확한 목록으로 검사한다(`apps/web/lib/question-answering-api.js` `hasExactKeys`, `product-workspace-shell.jsx` `projectSafeQuestionAnswer`) | 두 곳의 목록 갱신을 NB1-F1(웹 API 클라이언트)·NB1-U1(화면 투영)에 각각 넣었다 |
 | C-3 | Citation origin `connector:<kind>`, `web` | 실제 origin은 `raw_source`, `daon_knowledge`, `mcp_daon_rag`, `mcp_law`, `notebook_source`. 질문 입력 소스는 `raw_source`·`daon_knowledge`만 허용 | 새 origin을 만들지 않는다. 화면 라벨만 정리한다(NB2-U1) |
 | C-4 | 질문 범위 "9개 이상 체크 시 안내" | 상한은 **8개**(`MAX_QUESTION_SOURCES = 8`, 서버도 1~8) | 묶음 체크도 8개 규칙을 그대로 따른다(NB3) |
@@ -335,7 +335,7 @@ flowchart LR
 - **검증 방법**: `tests/test_memo_source_links_migration.py`, `tests/test_text_source.py`, `tests/test_memo_source.py`(만들기·중복·빈 메모·반영·변경 없음·메모 삭제 후 `memo_exists=false`·권한 없음 403·stale 켜짐), 웹 API 클라이언트 시험(`scripts/tests/studio-v2-api.test.mjs`), 전체 새 실패 0
 - **검수 기준**
   1. 메모 삭제 후 소스와 연결 행이 남고 목록에 `memo_exists=false`가 나온다
-  2. 반영 후 `source_versions`에 같은 `source_id`의 새 버전이 생기고 기존 산출물이 stale이 된다(시험)
+  2. 반영 후 새 소스가 노트북에 연결되고 이전 소스는 떼어지며(notebook_source_unbindings), 이전 소스를 쓴 산출물이 stale이 된다(시험, 2026-11-23 정정 C-1)
   3. 보기 권한만 있는 사용자의 만들기·반영이 403
   4. 마이그레이션 시험·리비전 허용 목록 갱신·새 실패 0
 - **인계 내용**: 경로·오류 코드 표, `register_text_source` 사용법(NB4-F1이 재사용), 마이그레이션 번호, 문서 처리 작업이 메모 소스를 TXT로 처리함을 확인한 시험 이름
