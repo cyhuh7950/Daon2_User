@@ -1367,3 +1367,37 @@ class GroundingFailureReasonLogTests(unittest.TestCase):
         self.assertIn("text_grounding_failure reason=anchors_unsupported", joined)
         self.assertNotIn("ORANGE", joined)
         self.assertNotIn("page 7", joined)
+
+
+class InsufficientAnswerAnchorTests(unittest.TestCase):
+    """NB1-I1 실서버: 근거 없음(insufficient) 답변 설명에 숫자가 섞이면 근거 검증 오류로 질문 전체가 실패했다.
+
+    인용이 없는 근거 없음 답변은 사실을 주장하지 않으므로 표준 안내 문장으로 바꿔 돌려준다.
+    """
+
+    def _generate(self, payload):  # type: ignore[no-untyped-def]
+        class Transport(RecordingTransport):
+            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+                response = super().post_json(**kwargs)
+                response["choices"][0]["message"]["content"] = json.dumps(payload)
+                return response
+
+        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
+        evidence = (IndexedEvidenceChunk("chunk-1", "source-1", "version-1", 1, "청구 기한은 3년이다.", "span-1", 1.0),)
+        return OpenAICompatibleTextGenerationAdapter(transport=Transport(), api_key="server-secret").generate(
+            GroundedQuestionRequest("도난 보상 한도는?", evidence, "trace-insufficient"), selection)
+
+    def test_insufficient_answer_with_unsupported_number_becomes_the_standard_notice(self) -> None:
+        result = self._generate({"answer": "약관에는 청구 기한 3년만 있고 도난 보상 한도 100만 원은 없습니다.",
+                                 "cited_chunk_ids": [], "insufficient": True})
+        self.assertTrue(result.insufficient)
+        self.assertEqual(result.cited_chunk_ids, ())
+        self.assertEqual(result.answer, "선택한 원문 근거에 질문에 답할 정보가 없습니다.")
+
+    def test_insufficient_answer_without_numbers_is_kept(self) -> None:
+        result = self._generate({"answer": "선택한 근거에 도난 보상 내용이 없습니다.", "cited_chunk_ids": [], "insufficient": True})
+        self.assertEqual(result.answer, "선택한 근거에 도난 보상 내용이 없습니다.")
+
+    def test_sufficient_answer_with_unsupported_number_still_fails(self) -> None:
+        with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            self._generate({"answer": "한도는 100만 원입니다.", "cited_chunk_ids": ["chunk-1"], "insufficient": False})

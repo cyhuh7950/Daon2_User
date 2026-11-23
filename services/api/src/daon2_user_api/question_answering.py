@@ -47,6 +47,9 @@ def classify_question_intent(value: str) -> str:
     return "work_support"
 
 
+INSUFFICIENT_ANSWER_NOTICE = "선택한 원문 근거에 질문에 답할 정보가 없습니다."
+
+
 def strip_citation_labels(answer: str, chunk_ids: Iterable[str]) -> str:
     """LLM이 본문에 그대로 쓴 승인 지식 인용 번호를 지운다. 표시 정리일 뿐 숫자·날짜 검사는 그대로이고, 소스 답변 검증도 바꾸지 않는다."""
     labels = sorted((item for item in chunk_ids if item.startswith("ext-")), key=len, reverse=True)
@@ -283,6 +286,11 @@ class OpenAICompatibleTextGenerationAdapter:
         material_anchors_supported = _evidence_anchors(answer).issubset(
             _evidence_anchors(cited_text)
         )
+        if insufficient and not cited and answer and not material_anchors_supported:
+            # 인용 없는 근거 없음 답변은 사실을 주장하지 않는다. 설명에 섞인 숫자 때문에 질문 전체를
+            # 실패시키지 않고, 근거에 없는 값을 버린 표준 안내로 바꾼다(NB1-I1).
+            answer = INSUFFICIENT_ANSWER_NOTICE
+            material_anchors_supported = True
         reason = (
             "answer_empty" if not answer else "answer_too_long" if len(answer) > 8_000
             else "citation_duplicated" if len(cited) != len(set(cited))
