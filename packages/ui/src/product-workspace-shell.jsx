@@ -244,6 +244,12 @@ const PANE_ICONS = Object.freeze({
   "product-pane-sources": "source", "product-pane-conversation": "conversation", "product-pane-studio": "studio",
 });
 
+// 메모로 만든 소스는 처리 실행 번호가 없어 업로드처럼 처리 상태를 따라갈 수 없다. 처리가 끝날 때까지
+// 소스 목록을 다시 읽는다(NB1-I2 N1-B02). 최대 2분.
+export const MEMO_SOURCE_POLL_MS = 3000;
+const MEMO_SOURCE_POLL_LIMIT_MS = 120000;
+const MEMO_SOURCE_PENDING_STATES = new Set(["registered", "security_check", "processing", "indexing"]);
+
 const SOURCE_STATE_LABELS = Object.freeze({
   registered: "등록됨",
   security_check: "보안 확인 중",
@@ -791,7 +797,7 @@ function SheetOriginalTable({ content }) {
   </>;
 }
 
-function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state = createProductWorkspaceState(), adapter = null, processingPollOptions = null, desktopOfflineStudio = null, providerSettings = null, onLogout = null,
+function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state = createProductWorkspaceState(), adapter = null, processingPollOptions = null, memoSourcePollMs = MEMO_SOURCE_POLL_MS, desktopOfflineStudio = null, providerSettings = null, onLogout = null,
   initialSourceVersionId = null, initialStudioOutput = null }) {
   const [viewState, setViewState] = useState(() => normalizeProductWorkspaceState(state));
   // 좁은 화면(≤820px)에서는 3면 중 하나만 보이고 하단 탭으로 전환한다(S6-03). 넓은 화면에서는 탭이 숨겨진다.
@@ -839,10 +845,24 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [memoSourceFocusId, setMemoSourceFocusId] = useState(null);
   const memoSourceRowRef = useRef(null);
   const [studioOpenRequest, setStudioOpenRequest] = useState(null);
+  const [memoSourceWatch, setMemoSourceWatch] = useState(null);
   const handleMemoSourceChanged = ({ kind, sourceId }) => {
-    if (kind === "created" && typeof sourceId === "string") setMemoSourceFocusId(sourceId);
+    if (kind === "created" && typeof sourceId === "string") {
+      setMemoSourceFocusId(sourceId);
+      setMemoSourceWatch({ sourceId, until: Date.now() + MEMO_SOURCE_POLL_LIMIT_MS });
+    }
     setLoadRevision((current) => current + 1);
   };
+  useEffect(() => {
+    if (!memoSourceWatch) return undefined;
+    const source = viewState.sources.find((item) => item.sourceId === memoSourceWatch.sourceId);
+    if ((source && !MEMO_SOURCE_PENDING_STATES.has(source.sourceState)) || Date.now() > memoSourceWatch.until) {
+      setMemoSourceWatch(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setLoadRevision((current) => current + 1), memoSourcePollMs);
+    return () => clearTimeout(timer);
+  }, [memoSourceWatch, viewState.sources, memoSourcePollMs]);
   const openMemoFromSource = (outputId) => {
     setStudioOpenRequest((current) => ({ outputId, nonce: (current?.nonce ?? 0) + 1 }));
     setNarrowTab("studio");
