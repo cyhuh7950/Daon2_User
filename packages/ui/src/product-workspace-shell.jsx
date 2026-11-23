@@ -847,7 +847,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [studioOpenRequest, setStudioOpenRequest] = useState(null);
   const [memoSourceWatch, setMemoSourceWatch] = useState(null);
   const handleMemoSourceChanged = ({ kind, sourceId }) => {
-    if (kind === "created" && typeof sourceId === "string") {
+    if ((kind === "created" || kind === "reflected") && typeof sourceId === "string") {
+      // 반영도 새 소스를 만든다(NB1-I2 C-1 정정). 두 경우 모두 처리가 끝날 때까지 목록을 다시 읽는다.
       setMemoSourceFocusId(sourceId);
       setMemoSourceWatch({ sourceId, until: Date.now() + MEMO_SOURCE_POLL_LIMIT_MS });
     }
