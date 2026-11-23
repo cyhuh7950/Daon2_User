@@ -1,0 +1,35 @@
+/* 노트북 개요·추천 질문(NB2-U2). 색은 --daon-color-* / --daon-status-* 토큰만, 글씨는 12px 이상. 상태는 색과 글자를 함께 쓴다. */
+.notebook-overview { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface); color: var(--daon-color-text-primary); }
+.notebook-overview__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notebook-overview__title { margin: 0; font-size: 14px; font-weight: 700; }
+.notebook-overview__collapse, .notebook-overview__action { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.notebook-overview__collapse { border-color: transparent; color: var(--daon-color-text-secondary); }
+.notebook-overview__collapse:hover, .notebook-overview__action:hover:not(:disabled) { background: var(--daon-color-muted-surface); }
+.notebook-overview__action:disabled { opacity: 0.6; cursor: not-allowed; }
+.notebook-overview button:focus-visible { outline: 2px solid var(--daon-color-accent); outline-offset: 2px; }
+.notebook-overview__body { display: grid; gap: 10px; }
+.notebook-overview__summary { margin: 0; font-size: 14px; line-height: 1.6; }
+.notebook-overview__cite { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 20px; margin: 0 2px; padding: 0 6px; border: 1px solid var(--daon-color-border); border-radius: 999px; background: var(--daon-color-muted-surface); color: var(--daon-color-accent); font: inherit; font-size: 12px; font-weight: 700; line-height: 1; vertical-align: 1px; }
+button.notebook-overview__cite { cursor: pointer; }
+button.notebook-overview__cite:hover { border-color: var(--daon-color-accent); }
+.notebook-overview__label { font-size: 12px; color: var(--daon-color-text-secondary); }
+.notebook-overview__questions { display: grid; gap: 6px; }
+.notebook-overview__chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.notebook-overview__question { min-height: 32px; padding: 6px 12px; border: 1px solid var(--daon-color-border); border-radius: 999px; background: var(--daon-color-muted-surface); color: var(--daon-color-text-primary); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.notebook-overview__question:hover:not(:disabled) { border-color: var(--daon-color-accent); }
+.notebook-overview__question:disabled { cursor: default; }
+.notebook-overview__hint { color: var(--daon-color-text-secondary); font-size: 12px; }
+.notebook-overview__status { margin: 0; font-size: 12px; }
+.notebook-overview__stale, .notebook-overview__failed { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.notebook-overview__stale { padding: 8px 10px; border: 1px solid var(--daon-status-warn-fg); border-radius: 8px; background: var(--daon-status-warn-bg); color: var(--daon-status-warn-fg); font-size: 12px; }
+.notebook-overview__alert { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 6px 10px; border: 1px solid currentColor; border-radius: 8px; background: var(--daon-status-danger-bg); color: var(--daon-status-danger-fg); font-size: 12px; }
+.notebook-overview__notice { margin: 0; color: var(--daon-color-text-secondary); font-size: 12px; }
+.notebook-overview__footer { display: flex; justify-content: flex-end; }
+.notebook-overview__starts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.notebook-overview__start { padding: 6px 12px; border: 1px solid var(--daon-color-border); border-radius: 999px; background: var(--daon-color-muted-surface); font-size: 12px; }
+.notebook-overview__skeleton { display: grid; gap: 6px; }
+.notebook-overview__skeleton span { display: block; height: 12px; border-radius: 6px; background: var(--daon-color-muted-surface); animation: notebook-overview-pulse 1.4s ease-in-out infinite; }
+.notebook-overview__skeleton span:nth-child(2) { width: 86%; }
+.notebook-overview__skeleton span:nth-child(3) { width: 62%; }
+@keyframes notebook-overview-pulse { 50% { opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { .notebook-overview__skeleton span { animation: none; } }

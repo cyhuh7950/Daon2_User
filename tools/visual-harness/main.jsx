@@ -14,6 +14,7 @@ import { AnswerProcess } from "../../packages/ui/src/answer-process.jsx";
 import { ProductWorkspaceShell } from "../../packages/ui/src/product-workspace-shell.jsx";
 import { QuestionToolsMenu } from "../../packages/ui/src/question-tools-menu.jsx";
 import { ModelSelectionBar } from "../../packages/ui/src/model-selection-bar.jsx";
+import { NotebookOverview } from "../../packages/ui/src/notebook-overview.jsx";
 import "../../packages/ui/src/answer-process.css";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
@@ -177,6 +178,37 @@ function QuestionToolsHarness({ state }) {
       h("button", { className: "composer-submit", type: "submit", "aria-label": "질문 실행", disabled: true }, "↑")));
 }
 
+// 노트북 개요(NB2-U2) 6상태: 대화 영역 위쪽. 추천 질문 칩을 누르면 아래 입력창에 채워지기만 한다(전송 버튼은 잠겨 있다).
+const OV_EMPTY = { summary: null, questions: [], citations: [], stale: false, generated_at: null, error_code: null };
+const OV_READY = {
+  state: "ready", stale: false, generated_at: "2026-11-24T01:00:00Z", error_code: null,
+  summary: "이 노트북은 보험금 지급 기준과 청구 절차를 다룹니다.[1] 면책 기간은 계약일부터 90일이며 이 기간의 질병 사고는 보장하지 않습니다.[2] 청구할 때는 진단서와 영수증 원본이 필요합니다.[1]",
+  questions: ["보험금 지급 기준은 무엇인가요?", "면책 기간에 생긴 사고는 어떻게 되나요?", "청구에 필요한 서류를 정리해 줘"],
+  citations: [{ label: "1", source_title: "보험약관.pdf", page: 3 }, { label: "2", source_title: "청구 안내.docx", page: null }],
+};
+const OV_STATES = {
+  "overview-none": { label: "개요: 없음(소스 없음)", data: { state: "none", ...OV_EMPTY } },
+  "overview-generating": { label: "개요: 만드는 중", data: { state: "working", ...OV_EMPTY } },
+  "overview-ready": { label: "개요: 완료", data: OV_READY },
+  "overview-stale": { label: "개요: 낡음", data: { ...OV_READY, stale: true } },
+  "overview-failed": { label: "개요: 실패", data: { state: "failed", ...OV_EMPTY, error_code: "OVERVIEW_UNGROUNDED" } },
+  "overview-blocked": { label: "개요: 차단", data: { state: "blocked", ...OV_EMPTY, error_code: "OVERVIEW_BLOCKED" } },
+};
+function OverviewHarness({ state }) {
+  const view = OV_STATES[state];
+  const studio = useMemo(() => ({ getNotebookOverview: async () => view.data, regenerateNotebookOverview: async () => ({ state: "queued", ...OV_EMPTY }) }), [view]);
+  const [question, setQuestion] = useState("");
+  const [opened, setOpened] = useState(null);
+  return h("div", { "data-harness-state": state, className: "adaptive-workspace", style: { maxWidth: 720, minHeight: 0, overflow: "visible" } },
+    h("div", { className: "conversation-transcript" },
+      h(NotebookOverview, { studio, notebookId: `harness-${state}`, storage: null, pollIntervalMs: 600000, onAskQuestion: setQuestion, onOpenSource: (citation) => setOpened(citation) }),
+      opened ? h("div", { className: "context-selection-status", role: "status" }, `소스 보기: ${opened.source_title}`) : null,
+      h("div", { className: "conversation-empty" }, h("h3", null, state === "overview-none" ? "Source를 추가한 뒤 질문하세요." : "Source에 대해 무엇이든 물어보세요."), h("p", null, "선택한 Source의 근거와 Citation을 사용해 답합니다."))),
+    h("form", { className: "conversation-composer", onSubmit: (event) => event.preventDefault() },
+      h("label", null, h("span", { className: "sr-only" }, "질문"), h("textarea", { rows: 1, value: question, onChange: (event) => setQuestion(event.currentTarget.value), placeholder: "작업 내용이나 궁금한 점을 질문하세요" })),
+      h("button", { className: "composer-submit", type: "submit", "aria-label": "질문 실행", disabled: true }, "↑")));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -189,7 +221,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -232,6 +264,7 @@ function App() {
     PROCESS_STATES[view] ? h(ProcessHarness, { key: view, state: view }) : null,
     MEMO_STATES[view] ? h(MemoSourceHarness, { key: view, state: view }) : null,
     QT_STATES[view] ? h(QuestionToolsHarness, { key: view, state: view }) : null,
+    OV_STATES[view] ? h(OverviewHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 

@@ -10,6 +10,7 @@ import { StudioFallbackGate } from "./studio-panel.jsx";
 import { NotebookTools } from "./notebook-menu.jsx";
 import { ModelSelectionBar } from "./model-selection-bar.jsx";
 import { QuestionToolsMenu } from "./question-tools-menu.jsx";
+import { NotebookOverview } from "./notebook-overview.jsx";
 import { DaonKnowledgeScopeSection } from "./daon-knowledge-scope-section.jsx";
 import { StudioIcon } from "./studio-icon.js";
 import "./studio-icon.css";
@@ -839,6 +840,14 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     setQuestionScopeNotice(ids.length ? `이번 질문은 "${String(label ?? "").slice(0, 60)}"의 근거 소스 ${ids.length}개로만 답합니다. 소스 선택은 바뀌지 않습니다.` : null);
     globalThis.queueMicrotask?.(() => questionInputRef.current?.focus());
   };
+  // 노트북 개요(NB2-U2): 추천 질문 칩은 입력창에 채우기만 한다(전송하지 않음). 이번 질문의 임시 범위(마인드맵)는 풀어 둔다.
+  const fillQuestionFromOverview = (text) => {
+    setQuestion(String(text ?? "").slice(0, 2000));
+    temporaryScopeRef.current = null;
+    setQuestionScopeNotice(null);
+    setNarrowTab("conversation");
+    globalThis.queueMicrotask?.(() => questionInputRef.current?.focus?.());
+  };
   const [studioRefresh, setStudioRefresh] = useState(0);
   const [questionAuthPending, setQuestionAuthPending] = useState(false);
   const [questionAuthError, setQuestionAuthError] = useState(null);
@@ -880,6 +889,21 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     memoSourceRowRef.current?.scrollIntoView?.({ block: "nearest" });
     setMemoSourceFocusId(null);
   }, [memoSourceFocusId, viewState.sources]);
+  // 노트북 개요 인용 칩(NB2-U2): 개요 인용에는 소스 이름(source_title)만 있으므로 같은 이름의 소스를 목록에서 찾아
+  // 소스 보기(소스 선택 + 목록 줄로 이동)를 연다. 답변을 기다리는 중에는 질문을 끊지 않도록 선택은 바꾸지 않고 줄로만 이동한다.
+  const openOverviewSource = (citation) => {
+    const sources = Array.isArray(viewState.sources) ? viewState.sources : [];
+    const named = sources.filter((item) => (item.lawSnapshot?.title ?? item.websiteSnapshot?.title ?? item.filename) === citation?.source_title);
+    const source = named.find((item) => item.ready) ?? named[0];
+    if (!source) return;
+    setNarrowTab("sources");
+    setMemoSourceFocusId(source.sourceId);
+    const selected = viewState.selectedSource?.sourceId === source.sourceId && viewState.selectedSource?.sourceVersionId === source.sourceVersionId;
+    if (source.ready && !selected && !questionPending) selectSource(source);
+  };
+  // 준비된 소스가 새로 생기거나 바뀌면 개요를 다시 읽는다(첫 ready 소스면 서버가 자동 생성을 시작한다, D-06).
+  const overviewRefreshKey = (Array.isArray(viewState.sources) ? viewState.sources : [])
+    .filter((item) => item.ready).map((item) => item.sourceVersionId).sort().join("|");
   const saveAnswerToMemo = async (target) => {
     const answerNow = target ?? viewState.answer;
     if (!adapter?.studioV2 || !answerNow || answerNow.insufficient || memoSave.pending) return;
@@ -2266,6 +2290,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           {desktopEditor ? desktopEditor : <div className="conversation-workspace"><div className="conversation-transcript" aria-live="polite">
           <div className="context-selection-status" role="status">질문 컨텍스트 · {selectedKnowledgeId ? "Daon 승인 지식" : ""}{selectedKnowledgeId && viewState.selectedSource ? " + " : ""}{viewState.selectedSource ? "Raw Source" : !selectedKnowledgeId ? "일반 상담" : ""}</div>
           {questionScopeNotice ? <div className="context-selection-status" role="status">{questionScopeNotice}</div> : null}
+          <NotebookOverview studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} refreshKey={overviewRefreshKey}
+            onAskQuestion={fillQuestionFromOverview} onOpenSource={openOverviewSource} />
           {questionPending && !viewState.turns?.length ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
           {(() => {
             const turns = viewState.turns?.length ? viewState.turns
