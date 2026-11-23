@@ -1,0 +1,36 @@
+/* 질문 도구 켜고 끄기(NB2-U1). 색은 --daon-color-* / --daon-status-* 토큰만, 글씨는 12px 이상. 상태는 색과 글자를 함께 쓴다. */
+.question-tools { position: relative; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.question-tools__button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.question-tools__button:hover:not(:disabled), .question-tools__button[aria-expanded="true"] { border-color: var(--daon-color-border); background: var(--daon-color-muted-surface); }
+.question-tools__button:focus-visible { outline: 2px solid var(--daon-color-accent); outline-offset: 2px; }
+.question-tools__button:disabled { opacity: 0.6; cursor: not-allowed; }
+.question-tools__count { display: inline-flex; min-width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0 6px; border-radius: 999px; background: var(--daon-color-accent); color: var(--daon-color-on-accent); font-size: 12px; font-weight: 700; }
+.question-tools__status { color: var(--daon-color-text-secondary); font-size: 12px; white-space: nowrap; }
+.question-tools__alert { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 4px 8px; border: 1px solid currentColor; border-radius: 8px; color: var(--daon-status-danger-fg); background: var(--daon-status-danger-bg); font-size: 12px; }
+.question-tools__retry { min-height: 24px; padding: 0 8px; border: 1px solid currentColor; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+
+/* 목록 팝오버: 입력창 위로 연다(입력창이 화면 아래쪽에 있으므로). */
+.question-tools__popover { position: absolute; z-index: 30; bottom: calc(100% + 6px); left: 0; display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface); color: var(--daon-color-text-primary); box-shadow: 0 8px 24px rgb(0 0 0 / 14%); }
+.question-tools__title { font-size: 12px; }
+.question-tools__list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.question-tools__item { display: grid; gap: 2px; padding: 6px 8px; border-radius: 8px; }
+.question-tools__item:hover { background: var(--daon-color-muted-surface); }
+.question-tools__item[data-available="false"] .question-tools__name { color: var(--daon-color-text-secondary); }
+.question-tools__item[data-available="false"]:hover { background: transparent; }
+.question-tools__label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 28px; font-size: 12px; cursor: pointer; }
+.question-tools__item[data-available="false"] .question-tools__label { cursor: not-allowed; }
+.question-tools__name { min-width: 0; overflow-wrap: anywhere; }
+.question-tools__reason { color: var(--daon-color-text-secondary); font-size: 12px; }
+.question-tools__hint { margin: 0; color: var(--daon-color-text-secondary); font-size: 12px; }
+
+/* 스위치: 체크박스를 그대로 쓰고 모양만 바꾼다(키보드 Space로 켜고 끈다). */
+.question-tools__switch { appearance: none; position: relative; flex: none; width: 36px; height: 20px; margin: 0; border: 1px solid var(--daon-color-border); border-radius: 999px; background: var(--daon-color-muted-surface); cursor: inherit; transition: background-color 0.15s; }
+.question-tools__switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--daon-color-text-secondary); transition: transform 0.15s; }
+.question-tools__switch:checked { border-color: var(--daon-color-accent); background: var(--daon-color-accent); }
+.question-tools__switch:checked::after { background: var(--daon-color-on-accent); transform: translateX(16px); }
+.question-tools__switch:disabled { opacity: 0.5; }
+.question-tools__switch:focus-visible { outline: 2px solid var(--daon-color-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .question-tools__switch, .question-tools__switch::after { transition: none; } }
+
+/* 입력창 아래줄: 모델 선택 옆(질문 입력은 위, 도구·모델 선택·전송은 아래). */
+.conversation-composer .question-tools { order: 2; flex: 0 1 auto; }

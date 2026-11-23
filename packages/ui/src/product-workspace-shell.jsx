@@ -9,12 +9,13 @@ import { ProductStudioPane } from "./product-studio-pane.jsx";
 import { StudioFallbackGate } from "./studio-panel.jsx";
 import { NotebookTools } from "./notebook-menu.jsx";
 import { ModelSelectionBar } from "./model-selection-bar.jsx";
+import { QuestionToolsMenu } from "./question-tools-menu.jsx";
 import { DaonKnowledgeScopeSection } from "./daon-knowledge-scope-section.jsx";
 import { StudioIcon } from "./studio-icon.js";
 import "./studio-icon.css";
 import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
-import { approvedKnowledgeCitationLabel, citationKeys, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
+import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citationKeys, citationOriginLabel, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import { ManualMarkdown } from "./manual-markdown.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
@@ -389,6 +390,12 @@ const DEFAULT_PROCESSING_POLL_OPTIONS = Object.freeze({
   intervalMs: 1_000,
   statusRequestTimeoutMs: 10_000
 });
+
+// Citation 출처 라벨에 쓰는 소스 이름(소스 목록과 같은 순서: 법령 제목 → 웹 제목 → 파일 이름). 목록에 없으면 undefined.
+function citationSourceName(sources, citation) {
+  const source = Array.isArray(sources) ? sources.find((item) => item.sourceId === citation.source_id) : undefined;
+  return source?.lawSnapshot?.title ?? source?.websiteSnapshot?.title ?? source?.filename ?? undefined;
+}
 
 function isSafeDtoId(value) {
   return typeof value === "string" && SAFE_DTO_ID.test(value);
@@ -2368,7 +2375,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             </div>;
             const renderCitations = (answerValue) => (
           <div className="citation-row">{answerValue?.citations?.map((citation) => (
-            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => openCitation(event, citation)}>{citation.origin === "mcp_daon_rag" ? approvedKnowledgeCitationLabel(citation) : <>Citation · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
+            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => openCitation(event, citation)}>{citation.origin === "mcp_daon_rag" ? `${citationOriginLabel(citation)} · ${approvedKnowledgeCitationDetail(citation)}` : <>{citationOriginLabel(citation, citationSourceName(viewState.sources, citation))} · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
           ))}</div>
             );
             return turns.map((turn, index) => {
@@ -2419,6 +2426,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               {imageCitationLoaded ? <span className="citation-image-region" aria-label="근거 영역" style={{ left: `${imageCitation.region.x / imageCitation.region.imageWidth * 100}%`, top: `${imageCitation.region.y / imageCitation.region.imageHeight * 100}%`, width: `${imageCitation.region.width / imageCitation.region.imageWidth * 100}%`, height: `${imageCitation.region.height / imageCitation.region.imageHeight * 100}%` }} /> : null}
             </div>}
           </section> : null}</div><form className="conversation-composer" onSubmit={askQuestion}>
+            <QuestionToolsMenu studio={adapter?.studioV2} disabled={questionPending} />
             <ModelSelectionBar studio={adapter?.studioV2} disabled={questionPending} />
             <label><span className="sr-only">질문</span><textarea rows="1" ref={questionInputRef} disabled={questionPending} placeholder={viewState.selectedSource || selectedKnowledgeId ? "선택한 지식과 작업에 대해 질문하세요" : "작업 내용이나 궁금한 점을 질문하세요"} value={question} onChange={(event) => setQuestion(event.currentTarget.value)} onKeyDown={(event) => { if (!shouldSubmitOnEnter(event)) return; refocusQuestionRef.current = true; void askQuestion(event); }} /></label>
             <button className="composer-submit" type="submit" aria-label="질문 실행" disabled={questionPending || !question.trim()}>↑</button>

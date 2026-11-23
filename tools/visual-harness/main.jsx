@@ -12,6 +12,8 @@ import OrganizationAdminConsole from "../../apps/web/components/organization-adm
 import { AuthPane } from "../../apps/web/lib/auth-pane.jsx";
 import { AnswerProcess } from "../../packages/ui/src/answer-process.jsx";
 import { ProductWorkspaceShell } from "../../packages/ui/src/product-workspace-shell.jsx";
+import { QuestionToolsMenu } from "../../packages/ui/src/question-tools-menu.jsx";
+import { ModelSelectionBar } from "../../packages/ui/src/model-selection-bar.jsx";
 import "../../packages/ui/src/answer-process.css";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
@@ -144,6 +146,37 @@ function MemoSourceHarness({ state }) {
     h(StudioPanel, { studio, sourceStats: { sourceCount: 1, checkedCount: 1, readySourceCount: 1, processingCount: 0 }, openOutputRequest: { outputId: MEMO_ID, nonce: 1 } }));
 }
 
+// 질문 도구(NB2-U1) 상태: 입력창 아래 모델 선택 옆 "도구" 버튼. 목록은 버튼을 눌러 연다. 저장 실패는 스위치를 눌러 만든다(503으로 답한다).
+const QT_KNOWLEDGE = { id: "approved_knowledge", kind: "approved_knowledge", label: "승인 지식", available: true, enabled: true };
+const QT_RAG = { id: "connector:kc-rag", kind: "connector", connector_kind: "daon2_rag", label: "Daon2-RAG 문서", available: true, enabled: true };
+const QT_LAW = { id: "connector:kc-law", kind: "connector", connector_kind: "law", label: "법령 검색", available: true, enabled: true };
+const QT_STATES = {
+  "tools-loading": { label: "질문 도구: 불러오는 중", load: () => new Promise(() => {}) },
+  "tools-ready": { label: "질문 도구: 정상 3개", tools: [QT_KNOWLEDGE, QT_RAG, QT_LAW] },
+  "tools-unavailable": { label: "질문 도구: 사용 불가 포함", tools: [{ ...QT_KNOWLEDGE, available: false, enabled: false, reason: "NO_SCOPE_SELECTED" }, { ...QT_RAG, available: false, enabled: false, reason: "CONNECTOR_NOT_READY" }, QT_LAW, { id: "connector:kc-off", kind: "connector", connector_kind: "daon2", label: "Daon2 지식", available: false, enabled: false, reason: "CONNECTOR_DISABLED" }] },
+  "tools-off": { label: "질문 도구: 모두 꺼짐", tools: [{ ...QT_KNOWLEDGE, enabled: false }, { ...QT_RAG, enabled: false }, { ...QT_LAW, enabled: false }] },
+  "tools-save-failed": { label: "질문 도구: 저장 실패(스위치 누르기)", tools: [QT_KNOWLEDGE, QT_RAG, QT_LAW], save: async () => { throw Object.assign(new Error("QUESTION_TOOLS_UNAVAILABLE"), { code: "QUESTION_TOOLS_UNAVAILABLE", status: 503 }); } },
+};
+function makeToolsStudio(view) {
+  let tools = (view.tools ?? []).map((tool) => ({ ...tool }));
+  return {
+    getQuestionTools: view.load ?? (async () => ({ tools })),
+    saveQuestionTools: view.save ?? (async (enabled) => { tools = tools.map((tool) => (tool.id in enabled ? { ...tool, enabled: tool.available && enabled[tool.id] } : tool)); return { tools }; }),
+    getModelSelection: async () => ({ available: [{ connection_id: "conn-1", display_name: "사내 모델", model_id: "gpt-4.1", reasoning_levels: [], reasoning_checked: true }], selection: null, levels: ["low", "medium", "high"], default: { connection_id: "conn-1", model_id: "gpt-4.1" } }),
+    saveModelSelection: async () => ({}),
+  };
+}
+function QuestionToolsHarness({ state }) {
+  const view = QT_STATES[state];
+  const studio = useMemo(() => makeToolsStudio(view), [view]);
+  return h("div", { "data-harness-state": state, className: "adaptive-workspace", style: { maxWidth: 720, minHeight: 0, paddingTop: 300, overflow: "visible" } },
+    h("form", { className: "conversation-composer", onSubmit: (event) => event.preventDefault() },
+      h(QuestionToolsMenu, { studio }),
+      h(ModelSelectionBar, { studio }),
+      h("label", null, h("span", { className: "sr-only" }, "질문"), h("textarea", { rows: 1, placeholder: "작업 내용이나 궁금한 점을 질문하세요" })),
+      h("button", { className: "composer-submit", type: "submit", "aria-label": "질문 실행", disabled: true }, "↑")));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -156,7 +189,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -198,6 +231,7 @@ function App() {
     view === "login" ? h(AuthPane, {}) : null,
     PROCESS_STATES[view] ? h(ProcessHarness, { key: view, state: view }) : null,
     MEMO_STATES[view] ? h(MemoSourceHarness, { key: view, state: view }) : null,
+    QT_STATES[view] ? h(QuestionToolsHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 

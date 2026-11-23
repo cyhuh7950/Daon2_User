@@ -4,7 +4,7 @@ import {
   cancelStudioOutput, createStudioMemo, createMemoSource, reflectMemoSource, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
-  copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, issueExportStepUp,
+  copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, issueExportStepUp,
   listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
 import { localMemoTitle } from "./memo-title.js";
@@ -52,6 +52,8 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     listChatTurns: (options) => listChatTurns(workspaceId, scope(options)),
     getModelSelection: (options) => getModelSelection(workspaceId, scope(options)),
     saveModelSelection: (options) => saveModelSelection(workspaceId, scope(options)),
+    getQuestionTools: (options) => getQuestionTools(workspaceId, scope(options)),
+    saveQuestionTools: (enabled, options) => saveQuestionTools(workspaceId, scope({ ...options, enabled })),
     getCustomization: (options) => getStudioCustomization(workspaceId, scope(options)),
     saveCustomization: (instruction, options) => saveStudioCustomization(workspaceId, instruction, scope(options)),
     authoring: Object.freeze({
