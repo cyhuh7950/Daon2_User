@@ -1,4 +1,6 @@
 // 답변 표시 규칙. 문서명은 승인 지식 인용에만 온다.
+import { msg } from "./studio-messages.ko.js";
+
 export const CITATION_KEYS = Object.freeze(["citation_id", "source_id", "source_version_id", "evidence_span_id", "page", "origin", "context_item_id", "locator"]);
 const APPROVED_KNOWLEDGE_ORIGIN = "mcp_daon_rag";
 
@@ -17,6 +19,22 @@ const NAMED_KNOWLEDGE = /^(온톨로지|규칙|규칙 판정|GraphRAG|승인 자
 export function approvedKnowledgeCitationLabel(citation) {
   if (NAMED_KNOWLEDGE.test(citation.document_name ?? "")) return citation.document_name;
   return `문서 · ${citation.document_name ?? "승인 지식"} ${citation.page}쪽`;
+}
+
+// NB2-U1 Citation 출처 라벨: daon_knowledge→승인 지식, mcp_daon_rag→문서 근거, mcp_law→법령, raw_source→소스 이름(모르면 "소스").
+const ORIGIN_LABELS = new Set(["daon_knowledge", "mcp_daon_rag", "mcp_law"]);
+
+export function citationOriginLabel(citation, sourceName) {
+  if (ORIGIN_LABELS.has(citation?.origin)) return msg(`notebook.question_tools.origin.${citation.origin}`);
+  const name = typeof sourceName === "string" ? sourceName.trim() : "";
+  return name || msg("notebook.question_tools.origin.raw_source");
+}
+
+// 문서 근거 Citation의 출처 라벨 뒤에 붙는 부분: 지식 종류가 붙은 이름은 그대로, 문서는 "이름 N쪽".
+export function approvedKnowledgeCitationDetail(citation) {
+  if (NAMED_KNOWLEDGE.test(citation.document_name ?? "")) return citation.document_name;
+  const page = msg("notebook.question_tools.origin.page", { page: citation.page });
+  return citation.document_name ? `${citation.document_name} ${page}` : page;
 }
 
 export function usesApprovedKnowledge(answer) {

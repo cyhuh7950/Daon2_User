@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  approvedKnowledgeCitationDetail,
   approvedKnowledgeCitationLabel,
+  citationOriginLabel,
   parseAnswerBlocks,
   shouldSubmitOnEnter,
   usesApprovedKnowledge,
@@ -46,6 +48,22 @@ test("승인 지식 인용은 문서명과 쪽수로 표시하고 문서명이 �
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "GraphRAG · 제출 서류", page: 1 }), "GraphRAG · 제출 서류");
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "승인 자산 · 지급 안내", page: 1 }), "승인 자산 · 지급 안내");
   assert.equal(approvedKnowledgeCitationLabel({ document_name: "규칙 판정 · 입찰무효", page: 1 }), "규칙 판정 · 입찰무효");
+});
+
+// NB2-U1: Citation 출처 라벨 4종. 소스는 소스 이름, 이름을 모르면 "소스".
+test("Citation 출처 라벨은 승인 지식·문서 근거·법령·소스 이름이다", () => {
+  assert.equal(citationOriginLabel({ origin: "daon_knowledge" }), "승인 지식");
+  assert.equal(citationOriginLabel({ origin: "mcp_daon_rag", document_name: "제안요청서.pdf" }), "문서 근거");
+  assert.equal(citationOriginLabel({ origin: "mcp_law" }), "법령");
+  assert.equal(citationOriginLabel({ origin: "raw_source" }, "보험약관.pdf"), "보험약관.pdf");
+  assert.equal(citationOriginLabel({ origin: "raw_source" }), "소스");
+  assert.equal(citationOriginLabel({ origin: "raw_source" }, "   "), "소스");
+});
+
+test("문서 근거 Citation의 뒷부분은 문서명과 쪽수, 지식 종류가 붙은 이름은 그대로다", () => {
+  assert.equal(approvedKnowledgeCitationDetail({ document_name: "제안요청서.pdf", page: 12 }), "제안요청서.pdf 12쪽");
+  assert.equal(approvedKnowledgeCitationDetail({ page: 3 }), "3쪽");
+  assert.equal(approvedKnowledgeCitationDetail({ document_name: "온톨로지 · 보험금 지급", page: 1 }), "온톨로지 · 보험금 지급");
 });
 
 test("승인 지식 인용이 있는 답변만 승인 지식 사용으로 본다", () => {

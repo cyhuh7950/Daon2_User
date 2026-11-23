@@ -4,6 +4,8 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { MinimalEvent, findElements, installMinimalDom } from "./product-studio-dom.mjs";
+// 답변 아래 Citation 칩(NB2-U1부터 앞머리가 "Citation" 대신 출처 라벨·소스 이름이라 글자 대신 자리로 찾는다).
+const isCitationChip = (node) => node.parentNode?.getAttribute?.("class") === "citation-row";
 
 import {
   assertProductWorkspaceAdapter,
@@ -721,9 +723,10 @@ test("sheet_cell 실제 React 원문 표는 재진입·강조·safe text·늦은
     globalThis.fetch = async (url, init) => { calls.push({ url, init }); if (scenario.startsWith('late-')) await pending.promise; return Response.json(content); };
     try {
       workspace = await mountSourceRetryWorkspace({ ...adapter, async listSources() { return [{ ...sourceRetryPayload, filename: 'qa.xlsx' }, { ...sourceRetryPayload, source_id: 'source-other', source_version_id: 'version-other', filename: 'other.xlsx' }]; }, async listStudioOutputs() { return []; }, citationUrl(value) { return citationContentUrl('workspace-1', value, { notebookId: 'notebook-1' }); }, async loadNotebookConversation() { return { run_id: 'run-cell', run_result_id: 'result-cell', answer: '저장된 셀 근거 답변', insufficient: false, citations: [{ ...citation, content_url: citationContentUrl('workspace-1', citation, { notebookId: 'notebook-1' }) }] }; } }, `xlsx-${scenario}`);
-      const link = findElements(workspace.container, node => node.tagName === 'A' && node.textContent.includes('Citation'))[0];
+      const link = findElements(workspace.container, node => node.tagName === 'A' && isCitationChip(node))[0];
       assert.ok(link, '저장된 셀 citation이 실제 DOM에 복원되어야 한다');
       assert.ok(link.textContent.includes(`${sheetName} · A1`));
+      assert.ok(link.textContent.startsWith('qa.xlsx · '), 'raw_source Citation 앞머리는 소스 이름이다(NB2-U1)');
       await workspace.act(async () => link.dispatchEvent(new MinimalEvent('click')));
       assert.equal(calls.length, 1);
       assert.equal(calls[0].url, '/bff/api/workspaces/workspace-1/citations/citation-cell/content?notebook_id=notebook-1');
@@ -775,7 +778,7 @@ test("PPTX 실제 React 원문은 emoji codepoint 강조·표 위치·safe text�
     globalThis.fetch=async(url,init)=>{calls.push({url,init});if(scenario.startsWith('late'))await pending.promise;return Response.json(content);};
     try{
       workspace=await mountSourceRetryWorkspace({...adapter,listSources:async()=>[{...sourceRetryPayload,filename:'qa.pptx'},{...sourceRetryPayload,source_id:'other-source',source_version_id:'other-version',filename:'other.pptx'}],listStudioOutputs:async()=>[],citationUrl:value=>citationContentUrl('workspace-1',value,{notebookId:'notebook-1'}),loadNotebookConversation:async()=>({run_id:'run-pptx',run_result_id:'result-pptx',answer:'저장된 PPTX 답변',insufficient:false,citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})},`pptx-${scenario}`);
-      const link=findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0];
+      const link=findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0];
       assert.ok(link);assert.match(link.textContent,/슬라이드 2 · 객체 3 · 표 행 1 · 열 2/);assert.doesNotMatch(link.getAttribute('href'),/#page/);
       await workspace.act(async()=>link.dispatchEvent(new MinimalEvent('click')));
       assert.equal(calls.length,1);assert.equal(calls[0].init.credentials,'same-origin');
@@ -814,7 +817,7 @@ test('audio React transcript keeps time, Unicode, lazy binary and stale-response
         listStudioOutputs:async()=>[],citationUrl:value=>citationContentUrl('workspace-1',value,{notebookId:'notebook-1'}),
         loadNotebookConversation:async()=>({run_id:'run-audio',run_result_id:'result-audio',answer:'저장된 음성 답변',insufficient:false,
           citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})},`audio-${scenario}`);
-      const link=findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0];
+      const link=findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0];
       assert.ok(link);assert.match(link.textContent,/음성 00:00.000–00:01.000/u);assert.equal(calls.length,0);
       await workspace.act(async()=>link.dispatchEvent(new MinimalEvent('click')));
       assert.equal(calls.length,1);assert.doesNotMatch(calls[0].url,/representation=audio/);
@@ -851,7 +854,7 @@ test('audio React binary verifies SHA, seeks only after metadata, ends at bound 
       citationUrl:value=>citationContentUrl('workspace-1',value,{notebookId:'notebook-1'}),
       loadNotebookConversation:async()=>({run_id:'run-audio',run_result_id:'result-audio',answer:'fixture',insufficient:false,
         citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})},'audio-binary');
-    const link=findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0];
+    const link=findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0];
     await workspace.act(async()=>link.dispatchEvent(new MinimalEvent('click')));
     const prepare=findElements(workspace.container,node=>node.tagName==='BUTTON'&&node.textContent==='원본 불러오기')[0];
     assert.ok(prepare);assert.equal(calls.length,1);
@@ -910,7 +913,7 @@ test('S20 HTTP audio without SubtleCrypto creates AUDIO only after verifying exa
       loadNotebookConversation:async()=>({run_id:'run-audio',run_result_id:'result-audio',answer:'저장된 음성 답변',insufficient:false,
         citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})
     },'s20-http-audio');
-    const link=findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0];
+    const link=findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0];
     await workspace.act(async()=>link.dispatchEvent(new MinimalEvent('click')));
     assert.equal(calls.length,1,'전사 표시만으로 바이너리를 가져오지 않는다');
     const mark=findElements(workspace.container,node=>node.tagName==='MARK')[0];
@@ -971,7 +974,7 @@ test('S20 audio wrong SHA creates no AUDIO or Blob URL in HTTP and secure capabi
         loadNotebookConversation:async()=>({run_id:'run-audio',run_result_id:'result-audio',answer:'저장된 음성 답변',insufficient:false,
           citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})
       },'s20-wrong-sha');
-      await workspace.act(async()=>findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0].dispatchEvent(new MinimalEvent('click')));
+      await workspace.act(async()=>findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0].dispatchEvent(new MinimalEvent('click')));
       assert.equal(calls.length,1);
       await workspace.act(async()=>{findElements(workspace.container,node=>node.tagName==='BUTTON'&&node.textContent==='원본 불러오기')[0].dispatchEvent(new MinimalEvent('click'));await new Promise(resolve=>setTimeout(resolve,20));});
       assert.equal(calls.length,2);
@@ -998,7 +1001,7 @@ test("DOCX 실제 React 원문은 emoji codepoint 강조·표 위치·safe text�
     globalThis.fetch=async(url,init)=>{calls.push({url,init});if(scenario.startsWith('late'))await pending.promise;return Response.json(content);};
     try{
       workspace=await mountSourceRetryWorkspace({...adapter,listSources:async()=>[{...sourceRetryPayload,filename:'qa.docx'},{...sourceRetryPayload,source_id:'other-source',source_version_id:'other-version',filename:'other.docx'}],listStudioOutputs:async()=>[],citationUrl:value=>citationContentUrl('workspace-1',value,{notebookId:'notebook-1'}),loadNotebookConversation:async()=>({run_id:'run-docx',run_result_id:'result-docx',answer:'저장된 DOCX 답변',insufficient:false,citations:[{...citation,content_url:citationContentUrl('workspace-1',citation,{notebookId:'notebook-1'})}]})},`docx-${scenario}`);
-      const link=findElements(workspace.container,node=>node.tagName==='A'&&node.textContent.includes('Citation'))[0];
+      const link=findElements(workspace.container,node=>node.tagName==='A'&&isCitationChip(node))[0];
       assert.ok(link);assert.match(link.textContent,/t:3:r:1:c:2:p:1/);assert.doesNotMatch(link.getAttribute('href'),/#page/);
       await workspace.act(async()=>link.dispatchEvent(new MinimalEvent('click')));
       assert.equal(calls.length,1);assert.equal(calls[0].init.credentials,'same-origin');
@@ -1027,7 +1030,7 @@ test("Image Citation은 같은 출처 원문과 EXIF 표시 기준 Region을 화
     async loadNotebookConversation() { return { run_id: "run-image", run_result_id: "result-image", answer: "이미지의 근거 답변", insufficient: false, citations: [{ ...citation, content_url: citationContentUrl("workspace-1", citation, { notebookId: "notebook-1" }) }] }; },
   }, "image-region");
   try {
-    const link = findElements(workspace.container, (node) => node.tagName === "A" && node.textContent.includes("Citation"))[0];
+    const link = findElements(workspace.container, (node) => node.tagName === "A" && isCitationChip(node))[0];
     assert.ok(link);
     await workspace.act(async () => link.dispatchEvent(new MinimalEvent("click")));
     const image = findElements(workspace.container, (node) => node.tagName === "IMG")[0];
@@ -1057,7 +1060,7 @@ test("Image Citation 닫기는 원문 표시만 제거한다", async () => {
     async loadNotebookConversation() { return { run_id: "run-image", run_result_id: "result-image", answer: "원문 근거 답변", insufficient: false, citations: [citation] }; },
   }, "image-close");
   try {
-    const link = findElements(workspace.container, (node) => node.tagName === "A" && node.textContent.includes("Citation"))[0];
+    const link = findElements(workspace.container, (node) => node.tagName === "A" && isCitationChip(node))[0];
     await workspace.act(async () => link.dispatchEvent(new MinimalEvent("click")));
     const close = findElements(workspace.container, (node) => node.tagName === "BUTTON" && node.textContent === "원문 닫기")[0];
     await workspace.act(async () => close.dispatchEvent(new MinimalEvent("click")));
@@ -2387,7 +2390,8 @@ test("승인 지식 답변은 근거 사용으로 표시되고 본문 형식과 
     assert.deepEqual(findElements(message, (node) => node.tagName === "STRONG").map((node) => node.textContent), ["자격"]);
     assert.deepEqual(findElements(message, (node) => node.tagName === "LI").map((node) => node.textContent), ["자격: 등록 업체", "서류 제출"]);
     const link = findElements(container, (node) => node.tagName === "A" && /제안요청서/u.test(node.textContent))[0];
-    assert.equal(link.textContent, "문서 · 제안요청서.pdf 3쪽");
+    // NB2-U1: 문서 근거(mcp_daon_rag) Citation은 "문서 근거 · 문서명 N쪽"으로 보인다(이전 "문서 · 문서명 N쪽").
+    assert.equal(link.textContent, "문서 근거 · 제안요청서.pdf 3쪽");
     assert.equal(link.getAttribute("target"), "_blank");
   } finally {
     if (reactRoot) await import("react").then(({ act }) => act(async () => reactRoot.unmount()));
