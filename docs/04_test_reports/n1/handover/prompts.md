@@ -1,6 +1,6 @@
 # WO-N1 인계 확인 질문 (계획서 §9)
 
-매 인계 확인(NB1-H~NB4-H, NB5-H)에서 아래 질문을 **글자 그대로** 쓴다. 대화 요약이나 추가 설명을 주지 않는다. 결과는 `docs/04_test_reports/n1/handover/<단계>-<확인>.md`에 저장하고 `NOTEBOOK_WORK_CHECK.md`의 "인계 확인 기록"에 판정을 적는다.
+매 인계 확인(NB1-H~NB4-H, NB5-H)에서 아래 질문을 **글자 그대로** 쓴다. 대화 요약이나 추가 설명을 주지 않는다. 결과는 `docs/04_test_reports/n1/handover/<단계>-<확인>.md`(예: `stage1-H-A.md`, `stage1-H-B.md`, `stage1-H-C.md`)에 저장하고 `NOTEBOOK_WORK_CHECK.md`의 "인계 확인 기록"에 판정을 적는다.
 
 ## 공통 질문 Q1 (H-A, H-B)
 
