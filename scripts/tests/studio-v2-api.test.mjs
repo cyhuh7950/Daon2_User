@@ -186,3 +186,14 @@ test("노트북 어댑터는 메모를 소스로 함수를 노트북 범위로 �
   assert.equal((await adapter.reflectMemoSource(OID)).source_version_id, "sv-memo-2");
   assert.deepEqual(calls.map((c) => c.url), [`${BASE}/outputs/${OID}/source`, `${BASE}/outputs/${OID}/source/reflect`]);
 });
+
+test("노트북 어댑터는 질문 도구 조회·저장을 노트북 범위로 묶는다(NB2-U1)", async () => {
+  const { createStudioV2Adapter } = await import("../../apps/web/lib/studio-v2-adapter.js");
+  const tools = { tools: [{ id: "approved_knowledge", kind: "approved_knowledge", label: "승인 지식", available: true, enabled: true }] };
+  const { calls, fetchImpl } = recorder(() => reply(tools));
+  const adapter = createStudioV2Adapter("ws-1", "nb-1", { fetchImpl });
+  assert.equal((await adapter.getQuestionTools()).tools[0].id, "approved_knowledge");
+  assert.equal((await adapter.saveQuestionTools({ approved_knowledge: false })).tools.length, 1);
+  assert.ok(calls.every((c) => c.url.endsWith("/notebooks/nb-1/question-tools")));
+  assert.deepEqual(calls.map((c) => c.init?.method ?? c.method), ["GET", "PUT"]);
+});
