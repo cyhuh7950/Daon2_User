@@ -80,6 +80,24 @@ def _item(row: Sequence[object]) -> dict[str, object]:
             "created_at": _iso(row[8]), "updated_at": _iso(row[9]), "stale": bool(row[10])}
 
 
+# 노트북의 준비된 소스 버전: 연결된 버전이 최신이고 떼어지지 않았으며 삭제되지 않았고 이해 결과나 근거 구간이 있다.
+# 노트북 개요(notebook_overview.py)도 같은 판정을 쓴다.
+READY_SOURCE_VERSIONS_SQL = (
+    "SELECT nb.version_id FROM notebook_bindings nb JOIN source_versions sv "
+    "ON sv.tenant_id=nb.tenant_id AND sv.workspace_id=nb.workspace_id AND sv.record_id=nb.version_id "
+    "WHERE nb.tenant_id=%s AND nb.workspace_id=%s AND nb.notebook_id=%s AND nb.binding_kind='source' "
+    "AND NOT EXISTS(SELECT 1 FROM notebook_source_unbindings u WHERE u.tenant_id=nb.tenant_id "
+    "AND u.workspace_id=nb.workspace_id AND u.notebook_id=nb.notebook_id AND u.source_id=nb.record_id AND u.source_version_id=nb.version_id) "
+    "AND NOT EXISTS(SELECT 1 FROM deletion_requests d WHERE d.tenant_id=sv.tenant_id AND d.workspace_id=sv.workspace_id "
+    "AND d.source_id=sv.source_id AND d.source_active=false) "
+    # 같은 소스에 새 버전(예: 메모 반영)이 붙으면 최신 버전만 기본 생성 범위에 넣는다.
+    "AND NOT EXISTS(SELECT 1 FROM source_versions nv WHERE nv.tenant_id=sv.tenant_id AND nv.workspace_id=sv.workspace_id "
+    "AND nv.source_id=sv.source_id AND nv.version>sv.version) "
+    "AND (EXISTS(SELECT 1 FROM understanding_results ur WHERE ur.tenant_id=sv.tenant_id AND ur.workspace_id=sv.workspace_id AND ur.source_version_id=sv.record_id) "
+    "OR EXISTS(SELECT 1 FROM evidence_spans es WHERE es.tenant_id=sv.tenant_id AND es.workspace_id=sv.workspace_id AND es.source_version_id=sv.record_id)) "
+    "ORDER BY nb.version_id")
+
+
 class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
     def __init__(self, cloud_store, *, clock=None) -> None:  # type: ignore[no-untyped-def]
         self._cloud_store = cloud_store
@@ -108,21 +126,8 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         self._scope._require_generation_scope(connection, context, versions)
 
     def ready_source_versions(self, connection, context: StudioContext) -> list[str]:
-        rows = connection.execute(
-            "SELECT nb.version_id FROM notebook_bindings nb JOIN source_versions sv "
-            "ON sv.tenant_id=nb.tenant_id AND sv.workspace_id=nb.workspace_id AND sv.record_id=nb.version_id "
-            "WHERE nb.tenant_id=%s AND nb.workspace_id=%s AND nb.notebook_id=%s AND nb.binding_kind='source' "
-            "AND NOT EXISTS(SELECT 1 FROM notebook_source_unbindings u WHERE u.tenant_id=nb.tenant_id "
-            "AND u.workspace_id=nb.workspace_id AND u.notebook_id=nb.notebook_id AND u.source_id=nb.record_id AND u.source_version_id=nb.version_id) "
-            "AND NOT EXISTS(SELECT 1 FROM deletion_requests d WHERE d.tenant_id=sv.tenant_id AND d.workspace_id=sv.workspace_id "
-            "AND d.source_id=sv.source_id AND d.source_active=false) "
-            # 같은 소스에 새 버전(예: 메모 반영)이 붙으면 최신 버전만 기본 생성 범위에 넣는다.
-            "AND NOT EXISTS(SELECT 1 FROM source_versions nv WHERE nv.tenant_id=sv.tenant_id AND nv.workspace_id=sv.workspace_id "
-            "AND nv.source_id=sv.source_id AND nv.version>sv.version) "
-            "AND (EXISTS(SELECT 1 FROM understanding_results ur WHERE ur.tenant_id=sv.tenant_id AND ur.workspace_id=sv.workspace_id AND ur.source_version_id=sv.record_id) "
-            "OR EXISTS(SELECT 1 FROM evidence_spans es WHERE es.tenant_id=sv.tenant_id AND es.workspace_id=sv.workspace_id AND es.source_version_id=sv.record_id)) "
-            "ORDER BY nb.version_id",
-            (context.tenant_id, context.workspace_id, context.notebook_id)).fetchall()
+        rows = connection.execute(READY_SOURCE_VERSIONS_SQL,
+                                  (context.tenant_id, context.workspace_id, context.notebook_id)).fetchall()
         return [str(row[0]) for row in rows]
 
     def _owned_output(self, connection, context: StudioContext, output_id: str, *, lock: bool = False):

@@ -48,8 +48,9 @@ class StudioV2WorkerSettings:
 
 class StudioV2Worker:
     def __init__(self, queue: PostgresStudioV2Queue, repository: PostgresStudioV2Repository, registry: GeneratorRegistry,
-                 cloud_store, *, worker_id: str, lease_seconds: int = 900, clock=time.monotonic) -> None:  # type: ignore[no-untyped-def]
+                 cloud_store, *, worker_id: str, lease_seconds: int = 900, clock=time.monotonic, overview=None) -> None:  # type: ignore[no-untyped-def]
         self._queue = queue
+        self._overview = overview  # 노트북 개요 작업 처리(NB2-F2). 같은 프로세스·같은 루프에서 한 건씩 처리한다
         self._repository = repository
         self._registry = registry
         self._cloud_store = cloud_store
@@ -72,15 +73,25 @@ class StudioV2Worker:
     def run_once(self) -> bool:
         self._sweep_if_due()
         job = self._queue.claim(self._worker_id, lease_seconds=self._lease_seconds)
-        if job is None:
+        worked = job is not None
+        if job is not None:
+            try:
+                self._process(job)
+            except StudioV2QueueError as error:
+                if error.code != "STUDIO_JOB_LEASE_LOST":
+                    raise
+                _LOGGER.warning("STUDIO_V2_LEASE_LOST")
+        return self._overview_once() or worked
+
+    def _overview_once(self) -> bool:
+        """노트북 개요 queued 행을 한 건 처리한다. 실패해도 스튜디오 작업 루프를 멈추지 않는다."""
+        if self._overview is None:
             return False
         try:
-            self._process(job)
-        except StudioV2QueueError as error:
-            if error.code != "STUDIO_JOB_LEASE_LOST":
-                raise
-            _LOGGER.warning("STUDIO_V2_LEASE_LOST")
-        return True
+            return bool(self._overview.run_once())
+        except Exception:
+            _LOGGER.warning("NOTEBOOK_OVERVIEW_POLL_FAILED")
+            return False
 
     def _sweep_if_due(self) -> None:
         now = self._clock()
@@ -245,6 +256,8 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
         registry.attach_knowledge(studio_knowledge)
     from .studio_chat_edit_runner import ChatEditRunner
     registry.attach_chat_editor(ChatEditRunner(llm, repository, reader=reader, knowledge=studio_knowledge))
+    from .notebook_overview import NotebookOverviewGenerator
+    registry.attach_overview(NotebookOverviewGenerator(reader, llm, context_chars=context_chars))
     registry.register(AuthoringGenerator(AuthoringPipeline(TemplateRegistry(org_provider=OrgTemplateProvider(OrgTemplateStore(cloud_store))), reader, llm, connectors, repository.latest_content,
                                                            context_chars=context_chars, evidence=knowledge_evidence, checkpoint=repository.authoring_merge)))
     return registry
@@ -258,8 +271,14 @@ def main() -> None:
     queue = PostgresStudioV2Queue(cloud_store, user_concurrency=settings.user_concurrency,
                                   global_concurrency=settings.global_concurrency)
     repository = PostgresStudioV2Repository(cloud_store)
-    worker = StudioV2Worker(queue, repository, _registry(cloud_store), cloud_store,
-                            worker_id=settings.worker_id, lease_seconds=settings.lease_seconds)
+    registry = _registry(cloud_store)
+    overview = None
+    if registry.overview() is not None:
+        from .notebook_overview import NotebookOverviewWorker
+        overview = NotebookOverviewWorker(cloud_store, registry.overview(), worker_id=settings.worker_id,
+                                          lease_seconds=settings.lease_seconds)
+    worker = StudioV2Worker(queue, repository, registry, cloud_store,
+                            worker_id=settings.worker_id, lease_seconds=settings.lease_seconds, overview=overview)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_a: stop.set())
     signal.signal(signal.SIGINT, lambda *_a: stop.set())

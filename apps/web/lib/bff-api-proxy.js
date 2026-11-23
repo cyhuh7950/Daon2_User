@@ -575,6 +575,18 @@ function routeFor(method, segments) {
       : { methodRejected: true };
   }
   if (
+    (segments.length === 5 || (segments.length === 6 && segments[5] === "regenerate")) && segments[0] === "workspaces"
+    && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "overview"
+  ) {
+    // 노트북 개요(WO-N1 NB2-F2): 조회 GET, 다시 만들기 POST .../overview/regenerate(본문 없음).
+    const regenerate = segments.length === 6;
+    return method === (regenerate ? "POST" : "GET")
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/overview${regenerate ? "/regenerate" : ""}`,
+          query: new Set(), strictQuery: true, csrfProvenanceRequired: regenerate, maxRequestBytes: 1024 }
+      : { methodRejected: true };
+  }
+  if (
     segments.length === 5 && segments[0] === "workspaces"
     && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
     && SAFE_SEGMENT.test(segments[3]) && (segments[4] === "copies" || segments[4] === "chat-history")
