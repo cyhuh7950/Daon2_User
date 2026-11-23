@@ -310,3 +310,38 @@ class S42QuestionQueryEntryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owner_authorization.json()["error"]["code"], "QUESTION_FAILED")
         self.assertEqual(self.port_calls, {"replay": 1, "prepare": 2, "egress": 1, "step_up": 0})
         self.assertEqual((self.service.calls, self.consumption_count()), (1, 0))
+
+
+class AnswerProcessPolicyBlockTests(unittest.IsolatedAsyncioTestCase):
+    """NB1-F1: 질문 경로의 정책 차단(EGRESS_POLICY_DENIED)도 기존 오류를 유지하고 details.process를 싣는다."""
+
+    asyncSetUp = S18QuestionAuthorizationTests.asyncSetUp
+    asyncTearDown = S18QuestionAuthorizationTests.asyncTearDown
+    login = S18QuestionAuthorizationTests.login
+    post = S18QuestionAuthorizationTests.post
+
+    async def test_runtime_policy_block_adds_blocked_process(self):
+        draft = {
+            "scope": {"source_count": 0, "knowledge_packages": [], "tools": None},
+            "evidence": None,
+            "model": {"connection": "Fixture 연결", "model": "fixture-model", "reasoning": None},
+        }
+        prepare = self.service.prepare_authorization
+
+        def prepare_with_draft(context, **kwargs):
+            prepared = prepare(context, **kwargs)
+            prepared.process_draft = draft
+            return prepared
+        self.service.prepare_authorization = prepare_with_draft
+        self.effective.mode = "deny_external"
+        self.effective.fingerprint = "sha256:" + "cd" * 32
+        denied = await self.post(key="question-s18-process-0001")
+        self.assertEqual(denied.status_code, 403, denied.text)
+        error = denied.json()["error"]
+        self.assertEqual(error["code"], "EGRESS_POLICY_DENIED")
+        self.assertEqual(error["details"], {"process": {
+            "version": 1, **draft,
+            "egress": {"decision": "blocked", "masked": False, "redacted": False, "policy_ref": "cdcdcdcdcdcd"},
+            "verification": None,
+        }})
+        self.assertEqual(self.service.calls, 0)

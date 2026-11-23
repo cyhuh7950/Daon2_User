@@ -124,6 +124,7 @@ from .notebook_deletion import NotebookDeletionStore, NotebookDeletionWorker, Po
 from .egress_policy import EgressPolicyService
 from .egress_policy import EgressPolicyContext, EgressPolicyError, EgressPolicyPayload
 from .egress_policy_postgres import PostgresEgressPolicyRepository
+from .answer_process import blocked_answer_process, safe_answer_process
 from .question_egress import PostgresQuestionEgressAuthorizer, external_question_policy_matches
 from .studio_report import (
     StudioReportContext, StudioReportCreateRequest, StudioReportError, StudioReportService,
@@ -3253,9 +3254,10 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "EGRESS_POLICY_UNAVAILABLE", "EGRESS_POLICY_STALE", "EGRESS_POLICY_DENIED",
             "VERSION_CONFLICT", "IDEMPOTENCY_KEY_REUSED", "EGRESS_POLICY_PAYLOAD_INVALID",
         }
+        process = safe_answer_process(getattr(error, "process", None))
         return _error_response(
             error.status, error.code if error.code in public_codes else "INVALID_REQUEST",
-            request.state.trace_id,
+            request.state.trace_id, details={"process": process} if process is not None else None,
         )
 
     @app.exception_handler(QuestionAnsweringError)
@@ -3279,9 +3281,11 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "question_error code=%s status=%s retryable=%s trace_id=%s",
             error.code, error.status, error.retryable, request.state.trace_id,
         )
+        process = safe_answer_process(getattr(error, "process", None))
         return _error_response(
             error.status, error.code if error.code in public_codes else "QUESTION_FAILED",
             request.state.trace_id, retryable=error.retryable,
+            details={"process": process} if process is not None else None,
         )
 
     @app.exception_handler(QuestionRepositoryError)
@@ -4932,6 +4936,8 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
                 "answer": stored.answer, "insufficient": stored.insufficient,
                 "citations": [_dataclass_json(item) for item in stored.citations],
                 **metadata,
+                # 답변 과정(N1-1). 과거 답변이나 형식이 틀린 값은 null.
+                "process": safe_answer_process(getattr(stored, "process", None)),
             },
             "meta": {"trace_id": request.state.trace_id, "workspace_id": workspace_id},
         })
@@ -5125,12 +5131,18 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
                 destination = (
                     urlsplit(cast(Any, prepared).selection.base_url).hostname or ""
                 ).casefold()
-                _require_external_question_policy(
-                    effective, provider_kind="external_api", destination=destination,
-                    payload_bytes=len(cast(Any, prepared).provider_payload),
-                    classification="internal", masking_required=True,
-                    redaction_required=True,
-                )
+                try:
+                    _require_external_question_policy(
+                        effective, provider_kind="external_api", destination=destination,
+                        payload_bytes=len(cast(Any, prepared).provider_payload),
+                        classification="internal", masking_required=True,
+                        redaction_required=True,
+                    )
+                except EgressPolicyError as error:
+                    # 기존 오류는 그대로 두고 답변 과정(blocked)만 싣는다. 이 경로는 실행(Run)을 만들지 않는다.
+                    error.process = blocked_answer_process(  # type: ignore[attr-defined]
+                        getattr(prepared, "process_draft", None), policy_fingerprint=effective.fingerprint)
+                    raise
                 request_fingerprint = _question_authorization_fingerprint(
                     principal=principal, workspace_id=id, run_id=run_id, body=body,
                     context_mode=context_mode, context_sources=context_sources,

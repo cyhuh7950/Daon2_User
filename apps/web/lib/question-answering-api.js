@@ -5,6 +5,7 @@ import { parseSheetCell } from "./sheet-cell-locator.js";
 import { parseDocxBlock } from "./docx-block-locator.js";
 import { parsePptxBlock } from "./pptx-block-locator.js";
 import { parseAudioSegment } from "./audio-segment-locator.js";
+import { safeAnswerProcess, withAnswerProcess } from "./answer-process.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 
@@ -163,18 +164,23 @@ async function responseData(response, signal) {
   signal?.throwIfAborted();
   if (!response.ok) {
     const code = payload?.error?.code;
-    throw new Error(typeof code === "string" ? code : "QUESTION_FAILED");
+    const error = new Error(typeof code === "string" ? code : "QUESTION_FAILED");
+    // 외부 전송 차단 오류의 답변 과정(N1-1). 검사에 실패하면 null.
+    error.process = safeAnswerProcess(payload?.error?.details?.process);
+    throw error;
   }
+  // 선택 필드 process는 떼어 따로 검사하고(틀리면 null), 열거되지 않는 속성으로 다시 붙인다.
+  const data = withAnswerProcess(payload?.data);
   if (
     !hasExactKeys(payload, ["data", "meta"])
-    || !isGroundedAnswer(payload.data)
+    || !isGroundedAnswer(data)
     || !isRecord(payload.meta)
     || !isSafeId(payload.meta.trace_id)
     || !isSafeId(payload.meta.workspace_id)
   ) {
     throw new Error("QUESTION_RESPONSE_INVALID");
   }
-  return payload.data;
+  return data;
 }
 
 export async function askGroundedQuestion(

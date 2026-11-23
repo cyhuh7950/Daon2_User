@@ -753,3 +753,90 @@ class QuestionRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+ANSWER_PROCESS = {
+    "version": 1,
+    "scope": {"source_count": 1, "knowledge_packages": [], "tools": None},
+    "evidence": {"searched": 3, "selected": [{
+        "title": "report.pdf", "page": 2, "origin": "raw_source",
+        "source_id": "source-cp3", "source_version_id": "source-version-cp3",
+    }]},
+    "egress": {"decision": "allowed", "masked": True, "redacted": True, "policy_ref": "3f2a9c1b0d4e"},
+    "model": {"connection": "Upstage 기본", "model": "solar-pro4", "reasoning": None},
+    "verification": {"citations": 1, "valid": True, "insufficient": False, "retried": False},
+}
+
+
+class AnswerProcessHttpTests(unittest.IsolatedAsyncioTestCase):
+    """NB1-F1: 질문 응답의 process(없으면 null)와 외부 전송 차단 오류의 details.process."""
+
+    asyncSetUp = QuestionRuntimeHttpTests.asyncSetUp
+    asyncTearDown = QuestionRuntimeHttpTests.asyncTearDown
+    _authenticated = QuestionRuntimeHttpTests._authenticated
+
+    async def ask(self, key: str, *, source: bool = True):  # type: ignore[no-untyped-def]
+        body = {"notebook_id": "notebook-cp3", "question": "검증 문구는?"}
+        if source:
+            body.update(source_id="source-cp3", source_version_id="source-version-cp3")
+        with self._authenticated():
+            return await self.client.post(
+                "/api/v1/workspaces/workspace-001/questions", cookies={WEB_SESSION_COOKIE: "opaque-session"},
+                headers={"Idempotency-Key": key}, json=body)
+
+    async def test_grounded_answer_response_carries_stored_process(self) -> None:
+        original = self.service.ask
+
+        def ask(context, **kwargs):  # type: ignore[no-untyped-def]
+            return replace(original(context, **kwargs), process=ANSWER_PROCESS)
+        self.service.ask = ask
+        response = await self.ask("question-process-grounded-0001")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"]["process"], ANSWER_PROCESS)
+
+    async def test_answer_without_process_returns_null(self) -> None:
+        response = await self.ask("question-process-legacy-0001")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn("process", response.json()["data"])
+        self.assertIsNone(response.json()["data"]["process"])
+
+    async def test_egress_block_keeps_error_and_adds_details_process(self) -> None:
+        from daon2_user_api.question_answering_service import QuestionAnsweringError
+        blocked = {**ANSWER_PROCESS, "verification": None,
+                   "egress": {"decision": "blocked", "masked": False, "redacted": False, "policy_ref": None}}
+
+        def ask(context, **kwargs):  # type: ignore[no-untyped-def]
+            error = QuestionAnsweringError("EGRESS_POLICY_DENIED", status=403)
+            error.process = blocked
+            raise error
+        self.service.ask = ask
+        response = await self.ask("question-process-blocked-0001")
+        self.assertEqual(response.status_code, 403, response.text)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "EGRESS_POLICY_DENIED")
+        self.assertEqual(error["details"], {"process": blocked})
+
+    async def test_unsafe_process_on_error_is_not_exposed(self) -> None:
+        from daon2_user_api.question_answering_service import QuestionAnsweringError
+
+        def ask(context, **kwargs):  # type: ignore[no-untyped-def]
+            error = QuestionAnsweringError("EGRESS_POLICY_DENIED", status=403)
+            error.process = {**ANSWER_PROCESS, "model": {"connection": "http://10.0.0.1", "model": "m", "reasoning": None}}
+            raise error
+        self.service.ask = ask
+        response = await self.ask("question-process-unsafe-0001")
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.json()["error"]["details"], {})
+        self.assertNotIn("10.0.0.1", response.text)
+
+    async def test_general_answer_process_passes_through(self) -> None:
+        general = {**ANSWER_PROCESS, "scope": {"source_count": 0, "knowledge_packages": [], "tools": None}, "evidence": None,
+                   "verification": {"citations": 0, "valid": True, "insufficient": False, "retried": False}}
+        original = self.service.ask
+
+        def ask(context, **kwargs):  # type: ignore[no-untyped-def]
+            return replace(original(context, **kwargs), process=general)
+        self.service.ask = ask
+        response = await self.ask("question-process-general-0001", source=False)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"]["process"], general)

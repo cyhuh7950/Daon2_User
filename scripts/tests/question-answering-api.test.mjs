@@ -279,3 +279,79 @@ test("문서명은 승인 지식 인용에만 허용된다", async () => {
   await assert.rejects(answer({ document_name: "가".repeat(1025) }));
   await assert.rejects(answer({ origin: "raw_source", document_name: "제안요청서.pdf" }));
 });
+
+// ---- NB1-F1 답변 과정(process) ---------------------------------------------------------------
+const answerProcess = Object.freeze({
+  version: 1,
+  scope: { source_count: 2, knowledge_packages: [{ name: "제안서 작업" }], tools: null },
+  evidence: { searched: 24, selected: [{ title: "약관.txt", page: 3, origin: "raw_source", source_id: "source-1", source_version_id: "version-1" }] },
+  egress: { decision: "allowed", masked: false, redacted: false, policy_ref: "3f2a9c1b0d4e" },
+  model: { connection: "Media Bridge", model: "uss/solar-pro4", reasoning: null },
+  verification: { citations: 3, valid: true, insufficient: false, retried: false },
+});
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
+test("NB1-F1 질문 응답의 process를 허용 목록 검사 후 결과의 process로 돌려준다(화면 정확 키 검사는 그대로)", async () => {
+  const result = await request(envelope({ ...enrichedAnswerData, process: clone(answerProcess) }));
+  assert.deepEqual(result.process, answerProcess);
+  assert.deepEqual(Object.keys(result).sort(), Object.keys(enrichedAnswerData).sort(), "process는 열거되지 않아 기존 화면 투영의 정확 키 검사를 깨지 않는다");
+  assert.deepEqual(result, enrichedAnswerData);
+});
+
+test("NB1-F1 process가 없거나 null인 과거 답변은 process=null", async () => {
+  assert.equal((await request(envelope(enrichedAnswerData))).process, null);
+  assert.equal((await request(envelope({ ...enrichedAnswerData, process: null }))).process, null);
+});
+
+test("NB1-F1 잘못된 process는 답변 전체를 거부하지 않고 process=null로 낮춘다", async () => {
+  const cases = [
+    { ...clone(answerProcess), prompt: "원문" },
+    { ...clone(answerProcess), model: { connection: "http://10.0.0.1", model: "m", reasoning: null } },
+    { ...clone(answerProcess), evidence: { searched: 1, selected: [{ ...answerProcess.evidence.selected[0], title: "sk-proj-abcdef123456" }] } },
+    { ...clone(answerProcess), egress: { ...answerProcess.egress, decision: "denied" } },
+    "process",
+  ];
+  for (const process of cases) {
+    const result = await request(envelope({ ...enrichedAnswerData, process }));
+    assert.equal(result.process, null);
+    assert.equal(result.answer, enrichedAnswerData.answer);
+  }
+});
+
+test("NB1-F1 외부 전송 차단 오류는 기존 코드로 실패하고 오류의 process에 blocked 블록을 싣는다", async () => {
+  const blocked = { ...clone(answerProcess), verification: null, egress: { decision: "blocked", masked: false, redacted: false, policy_ref: null } };
+  const failing = (details) => askGroundedQuestion(
+    "workspace-1", { notebookId: "notebook-1", sourceId: "source-1", sourceVersionId: "version-1", question: "근거는?" },
+    { idempotencyKey: "question-1", fetchImpl: async () => Response.json({ error: { code: "EGRESS_POLICY_DENIED", details } }, { status: 403 }) });
+  await assert.rejects(failing({ process: blocked }), (error) => error.message === "EGRESS_POLICY_DENIED" && JSON.stringify(error.process) === JSON.stringify(blocked));
+  await assert.rejects(failing({}), (error) => error.message === "EGRESS_POLICY_DENIED" && error.process === null);
+  await assert.rejects(failing({ process: { ...blocked, extra: 1 } }), (error) => error.process === null);
+});
+
+test("NB1-F1 validateAnswerProcess는 서버와 같은 허용 목록·금지 문자열·최대 개수를 검사한다", async () => {
+  const { validateAnswerProcess } = await import("../../apps/web/lib/answer-process.js");
+  assert.deepEqual(validateAnswerProcess(clone(answerProcess)), answerProcess);
+  const general = { ...clone(answerProcess), scope: { source_count: 0, knowledge_packages: [], tools: null }, evidence: null, model: null };
+  assert.deepEqual(validateAnswerProcess(clone(general)), general);
+  for (const text of ["http://10.0.0.1/v1", "10.0.0.1", "sk-proj-abcdef123456", "admin@example.com", "provider.internal", "fe80::1", "A".repeat(48)]) {
+    assert.throws(() => validateAnswerProcess({ ...clone(answerProcess), model: { connection: text, model: "m", reasoning: null } }), /ANSWER_PROCESS_INVALID/u, text);
+  }
+  const many = { ...clone(answerProcess), evidence: { searched: 30, selected: Array.from({ length: 21 }, () => clone(answerProcess.evidence.selected[0])) } };
+  assert.throws(() => validateAnswerProcess(many), /ANSWER_PROCESS_INVALID/u);
+  assert.throws(() => validateAnswerProcess({ ...clone(answerProcess), version: 2 }), /ANSWER_PROCESS_INVALID/u);
+});
+
+test("NB1-F1 listChatTurns도 답변의 process를 같은 규칙으로 검사해 붙인다", async () => {
+  const { listChatTurns } = await import("../../apps/web/lib/studio-v2-api.js");
+  const turn = (process) => ({ run_id: "run-1", created_at: "2026-11-23T00:00:00+00:00", state: "completed", question: "근거는?",
+    context_mode: "raw_only", unavailable: false, answer: { ...enrichedAnswerData, ...(process === undefined ? {} : { process }) } });
+  const fetchImpl = async () => Response.json({ data: { turns: [turn(clone(answerProcess)), turn(undefined), turn({ ...clone(answerProcess), extra: 1 }),
+    { run_id: "run-2", created_at: "2026-11-23T00:00:01+00:00", state: "failed", question: "q", context_mode: "raw_only", unavailable: false, answer: null }] },
+    meta: { trace_id: "trace-1" } });
+  const turns = await listChatTurns("workspace-1", { notebookId: "notebook-1", fetchImpl });
+  assert.deepEqual(turns[0].answer.process, answerProcess);
+  assert.deepEqual(Object.keys(turns[0].answer).sort(), Object.keys(enrichedAnswerData).sort());
+  assert.equal(turns[1].answer.process, null);
+  assert.equal(turns[2].answer.process, null);
+  assert.equal(turns[3].answer, null);
+});

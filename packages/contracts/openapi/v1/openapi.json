@@ -7315,8 +7315,102 @@
           "citations": {
             "type": "array", "maxItems": 10,
             "items": { "$ref": "#/components/schemas/GroundedCitation" }
+          },
+          "process": {
+            "description": "답변 과정(answer_process.v1, WO-N1 N1-1). 과정 기록이 없는 과거 답변은 null",
+            "oneOf": [{ "$ref": "#/components/schemas/AnswerProcess" }, { "type": "null" }]
           }
         }
+      },
+      "AnswerProcess": {
+        "type": "object",
+        "description": "시스템이 한 일만 담는 답변 과정. 모델 내부 추론·프롬프트·질문 원문·근거 본문·비밀값·내부 주소·DB ID(소스 ID 제외)는 담지 않는다",
+        "additionalProperties": false,
+        "required": ["version", "scope", "evidence", "egress", "model", "verification"],
+        "properties": {
+          "version": { "type": "integer", "const": 1 },
+          "scope": {
+            "type": "object", "additionalProperties": false,
+            "required": ["source_count", "knowledge_packages", "tools"],
+            "properties": {
+              "source_count": { "type": "integer", "minimum": 0, "maximum": 1000 },
+              "knowledge_packages": {
+                "type": "array", "maxItems": 20,
+                "items": {
+                  "type": "object", "additionalProperties": false, "required": ["name"],
+                  "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 200 } }
+                }
+              },
+              "tools": {
+                "description": "켠 질문 도구 라벨(NB2-F1 전까지 null)",
+                "oneOf": [{ "type": "array", "maxItems": 20, "items": { "type": "string", "minLength": 1, "maxLength": 120 } }, { "type": "null" }]
+              }
+            }
+          },
+          "evidence": {
+            "description": "근거 찾기. 일반 대화는 null",
+            "oneOf": [{
+              "type": "object", "additionalProperties": false, "required": ["searched", "selected"],
+              "properties": {
+                "searched": { "type": "integer", "minimum": 0 },
+                "selected": {
+                  "type": "array", "maxItems": 20,
+                  "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["title", "page", "origin", "source_id", "source_version_id"],
+                    "properties": {
+                      "title": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+                      "page": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+                      "origin": { "type": "string", "enum": ["raw_source", "daon_knowledge", "mcp_daon_rag", "mcp_law", "notebook_source"] },
+                      "source_id": { "oneOf": [{ "$ref": "#/components/schemas/OpaqueId" }, { "type": "null" }] },
+                      "source_version_id": { "oneOf": [{ "$ref": "#/components/schemas/OpaqueId" }, { "type": "null" }] }
+                    }
+                  }
+                }
+              }
+            }, { "type": "null" }]
+          },
+          "egress": {
+            "type": "object", "additionalProperties": false,
+            "required": ["decision", "masked", "redacted", "policy_ref"],
+            "properties": {
+              "decision": { "type": "string", "enum": ["allowed", "blocked", "not_needed"] },
+              "masked": { "type": "boolean" },
+              "redacted": { "type": "boolean" },
+              "policy_ref": { "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{12}$" }, { "type": "null" }] }
+            }
+          },
+          "model": {
+            "description": "모델을 부르지 않은 답변(근거 없음 안내)은 null",
+            "oneOf": [{
+              "type": "object", "additionalProperties": false, "required": ["connection", "model", "reasoning"],
+              "properties": {
+                "connection": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+                "model": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+                "reasoning": { "oneOf": [{ "type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$" }, { "type": "null" }] }
+              }
+            }, { "type": "null" }]
+          },
+          "verification": {
+            "description": "외부 전송 차단으로 생성하지 않았으면 null",
+            "oneOf": [{
+              "type": "object", "additionalProperties": false, "required": ["citations", "valid", "insufficient", "retried"],
+              "properties": {
+                "citations": { "type": "integer", "minimum": 0 },
+                "valid": { "type": "boolean" },
+                "insufficient": { "type": "boolean" },
+                "retried": { "type": "boolean" }
+              }
+            }, { "type": "null" }]
+          }
+        }
+      },
+      "AnswerProcessDetails": {
+        "type": "object",
+        "description": "외부 전송 차단(EGRESS_POLICY_DENIED 등) 질문 오류의 답변 과정(egress.decision=blocked)",
+        "additionalProperties": false,
+        "required": ["process"],
+        "properties": { "process": { "$ref": "#/components/schemas/AnswerProcess" } }
       },
       "GroundedAnswerEnvelope": {
         "type": "object",
@@ -7465,6 +7559,9 @@
               },
               {
                 "$ref": "#/components/schemas/NoAvailableDeploymentDetails"
+              },
+              {
+                "$ref": "#/components/schemas/AnswerProcessDetails"
               },
               {
                 "$ref": "#/components/schemas/GenericSafeDetails"

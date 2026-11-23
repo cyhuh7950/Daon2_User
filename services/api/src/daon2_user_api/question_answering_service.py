@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass, replace
 from typing import ContextManager, Mapping, Protocol, cast
 
+from .answer_process import blocked_answer_process, build_answer_process, policy_ref
 from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
 from .question_answering import strip_citation_labels
@@ -336,6 +337,8 @@ class QuestionAnsweringError(RuntimeError):
         self.code = code
         self.status = status
         self.retryable = retryable
+        # 외부 전송 차단 오류에만 싣는 답변 과정 블록(N1-1). 응답의 error.details.process로 나간다.
+        self.process: Mapping[str, object] | None = None
         super().__init__(code)
 
 
@@ -344,6 +347,8 @@ class PreparedQuestionAuthorization:
     selection: object
     provider_payload: bytes
     evidence_count: int
+    # 답변 과정의 scope·evidence·model 초안. 질문 경로의 정책 차단 오류에 blocked 블록으로 싣는다.
+    process_draft: Mapping[str, object] | None = None
 
 
 class _QaMediaBridgeDiagnosticAdapter(OpenAICompatibleTextGenerationAdapter):
@@ -627,7 +632,7 @@ class QuestionAnsweringService:
             session.post_json(url=url, api_key=_RECORDED_PLAN_CALL, payload=payload, timeout_seconds=1)
             session.finish(outcome="succeeded")
 
-    def _generate_answer(self, context, prepared, cost_session, uses_knowledge: bool):  # type: ignore[no-untyped-def]
+    def _generate_answer(self, context, prepared, cost_session, uses_knowledge: bool, trace=None):  # type: ignore[no-untyped-def]
         """승인 지식 답변이 검증에 걸리면 같은 근거로 1회만 다시 요청한다. 검증 기준은 바꾸지 않는다."""
         try:
             return self._generate_with_run_cost(prepared, general=False, session=cost_session)
@@ -639,6 +644,8 @@ class QuestionAnsweringService:
             authorize = getattr(self._egress, "authorize_plan", None)
             if not callable(authorize) or not authorize(context, prepared.selection, canonical_json_bytes(retry.provider_payload)):
                 raise
+            if trace is not None:
+                trace["retried"] = True
             return self._generate_with_run_cost(retry, general=False, session=None)
 
     @staticmethod
@@ -913,16 +920,96 @@ class QuestionAnsweringService:
             ),
         )
 
+    # ------------------------------------------------------------ 답변 과정(N1-1)
+    @staticmethod
+    def _process_scope(
+        sources: tuple[QuestionInputSource, ...], external: tuple[ExternalEvidence, ...], trace: Mapping[str, object],
+    ) -> dict[str, object]:
+        """질문 범위. 소스 수는 실제로 검색한 원문 소스만, 승인 지식은 이름만 남긴다.
+
+        scope.tools는 NB2-F1(질문 도구)이 켜진 도구 라벨 목록으로 채운다. 그 전까지는 None이다.
+        """
+        titles = cast(Mapping[tuple[str, str], str], trace.get("titles") or {})
+        packages = [{"name": titles.get((item.source_id, item.source_version_id))}
+                    for item in sources if item.origin == "daon_knowledge"]
+        packages += [{"name": item.work_package_name} for item in external]
+        return {"source_count": sum(1 for item in sources if item.origin == "raw_source"),
+                "knowledge_packages": packages, "tools": None}
+
+    @staticmethod
+    def _process_evidence(
+        evidence: tuple[IndexedEvidenceChunk, ...], sources: tuple[QuestionInputSource, ...],
+        external: tuple[ExternalEvidence, ...], trace: Mapping[str, object],
+    ) -> dict[str, object]:
+        """근거 찾기. searched는 검색이 돌려준 구간 수, selected는 모델에 넘긴 구간(이름·쪽·출처)이다."""
+        titles = cast(Mapping[tuple[str, str], str], trace.get("titles") or {})
+        origins = {(item.source_id, item.source_version_id): item.origin for item in sources}
+        external_by_id = {item.chunk.chunk_id: item for item in external}
+        selected = []
+        for chunk in evidence:
+            found = external_by_id.get(chunk.chunk_id)
+            if found is not None:
+                selected.append({"title": found.document_name or found.work_package_name, "page": found.page,
+                                 "origin": "mcp_daon_rag", "source_id": None, "source_version_id": None})
+                continue
+            key = (chunk.source_id, chunk.source_version_id)
+            selected.append({"title": titles.get(key), "page": chunk.page if chunk.locator_kind == "page" else None,
+                             "origin": origins.get(key, "raw_source"), "source_id": chunk.source_id,
+                             "source_version_id": chunk.source_version_id})
+        return {"searched": int(cast(int, trace.get("searched", 0))) + len(external), "selected": selected}
+
+    @staticmethod
+    def _process_model(selection: object) -> dict[str, object]:
+        return {"connection": getattr(selection, "connection_name", None),
+                "model": getattr(selection, "model_id", None),
+                "reasoning": getattr(selection, "reasoning_level", None)}
+
+    @staticmethod
+    def _process_egress(selection: object, authorization: Mapping[str, object], *, no_external_payload: bool = False) -> dict[str, object]:
+        external = getattr(selection, "provider_kind", None) == "external_api" and not no_external_payload
+        frozen = authorization.get("frozen_routing_context")
+        frozen = frozen if isinstance(frozen, Mapping) else {}
+        return {"decision": "allowed" if external else "not_needed",
+                "masked": external and frozen.get("masking_required") is True,
+                "redacted": external and frozen.get("redaction_required") is True,
+                "policy_ref": policy_ref(authorization.get("policy_fingerprint"))}
+
+    @staticmethod
+    def _answer_process(draft: Mapping[str, object], egress: Mapping[str, object],
+                        verification: Mapping[str, object] | None, *, model_called: bool = True):  # type: ignore[no-untyped-def]
+        """블록을 만들지 못해도 답변은 막지 않는다(과정 기록 없음 = None)."""
+        try:
+            return build_answer_process(
+                scope=cast(Mapping[str, object], draft["scope"]), evidence=cast("Mapping[str, object] | None", draft.get("evidence")),
+                egress=egress, model=cast(Mapping[str, object], draft.get("model")) if model_called else None,
+                verification=verification)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return None
+
+    @staticmethod
+    def _blocking(draft: Mapping[str, object], call):  # type: ignore[no-untyped-def]
+        """외부 전송 판정·변환이 막으면 기존 오류는 그대로 두고 blocked 과정 블록만 붙인다."""
+        try:
+            return call()
+        except QuestionAnsweringError as error:
+            if error.status == 403 and error.code.startswith("EGRESS_"):
+                error.process = blocked_answer_process(draft)
+            raise
+
     def _search_context(
         self, context: QuestionContext, sources: tuple[QuestionInputSource, ...], question: str,
+        trace: dict[str, object] | None = None,
     ) -> tuple[IndexedEvidenceChunk, ...]:
         processing_context = DocumentProcessingContext(
             context.tenant_id, context.workspace_id, context.actor_id,
             context.trace_id, context.policy_version,
         )
         chunks: dict[str, IndexedEvidenceChunk] = {}
+        titles: dict[tuple[str, str], str] = {}
         for item in sources:
-            self._repository.load_ready_source(context, item.source_id, item.source_version_id)
+            ready = self._repository.load_ready_source(context, item.source_id, item.source_version_id)
+            if isinstance(getattr(ready, "filename", None), str):
+                titles[(item.source_id, item.source_version_id)] = ready.filename
             try:
                 evidence = self._document_index.search(
                     processing_context, source_id=item.source_id,
@@ -934,6 +1021,9 @@ class QuestionAnsweringService:
                 raise
             for chunk in evidence:
                 chunks.setdefault(chunk.chunk_id, chunk)
+        if trace is not None:
+            trace["searched"] = len(chunks)
+            trace["titles"] = titles
         return tuple(sorted(
             chunks.values(),
             key=lambda item: (-float(item.score), int(item.page), str(item.chunk_id)),
@@ -981,17 +1071,19 @@ class QuestionAnsweringService:
             if not sources:
                 general = True
         evidence = ()
+        search_trace: dict[str, object] = {}
         if not general:
             # Freeze authorization against the same evidence that `ask` will
             # use.  Otherwise the later grounded payload changes its digest
             # and the egress authorizer rejects an otherwise valid approval.
-            evidence = self._search_context(context, sources, question)
+            evidence = self._search_context(context, sources, question, search_trace)
             if not evidence:
                 general = True
         external = self._external_evidence(context, question)
         mixed = bool(evidence) and bool(external)
         evidence = merge_evidence(evidence, external)
         use_general = general and not external
+        used_sources = () if general else sources
         model_context = WorkspaceModelContext(
             context.tenant_id, context.workspace_id, context.actor_id,
         )
@@ -1015,7 +1107,12 @@ class QuestionAnsweringService:
                 transformer = getattr(self._egress, "prepare_payload", None)
                 if callable(transformer):
                     wire = transformer(context, wire)
-                return PreparedQuestionAuthorization(selection, wire, len(evidence))
+                draft = {
+                    "scope": self._process_scope(used_sources, external, search_trace),
+                    "evidence": None if use_general else self._process_evidence(evidence, used_sources, external, search_trace),
+                    "model": self._process_model(selection),
+                }
+                return PreparedQuestionAuthorization(selection, wire, len(evidence), draft)
         except WorkspaceModelUnavailable as error:
             raise QuestionAnsweringError(error.code, status=503, retryable=error.retryable) from None
 
@@ -1173,6 +1270,7 @@ class QuestionAnsweringService:
         self, context: QuestionContext, *, selection: ResolvedModel, run_id: str, question: str,
         answer: str, request_fingerprint: str, approved_authorization: Mapping[str, str] | None,
         access_options: Mapping[str, object], recheck, insufficient: bool = True,
+        process_draft: Mapping[str, object] | None = None,
     ) -> StoredQuestionAnswer:
         recheck()
         egress_authorization = self._egress.authorize(
@@ -1188,6 +1286,9 @@ class QuestionAnsweringService:
             provider_called=False, egress_authorization=egress_authorization,
             context_mode="general_ungrounded", context_sources=(),
             request_fingerprint=request_fingerprint, **access_options,
+            **({} if process_draft is None else {"process": self._answer_process(
+                process_draft, self._process_egress(selection, egress_authorization, no_external_payload=True),
+                {"citations": 0, "valid": True, "insufficient": insufficient, "retried": False}, model_called=False)}),
         )
 
     def _ask_resolved(
@@ -1220,13 +1321,16 @@ class QuestionAnsweringService:
         # General fallback deliberately stores no evidence, but the selected
         # sources still need an access lock in its result-commit transaction.
         access_options = {'access_source_version_ids': versions} if versions else {}
+        model_block = self._process_model(selection)
+        # 일반 대화(소스·지식 없이 답함)의 과정: 소스 0개, 근거 찾기 없음.
+        general_draft = {"scope": self._process_scope((), (), {}), "evidence": None, "model": model_block}
         if general and not external and not is_chat_question(question):
             # 소스가 제공한 지식만으로 답한다. 지식 질문인데 지식이 없으면 모델을 호출하지 않고 안내만 저장한다.
             return self._complete_without_model(
                 context, selection=selection, run_id=run_id, question=question,
                 answer=self.NO_KNOWLEDGE_ANSWER, request_fingerprint=request_fingerprint,
                 approved_authorization=approved_authorization, access_options=access_options,
-                recheck=recheck,
+                recheck=recheck, process_draft=general_draft,
             )
         if general and not external:  # 지식 질문이 아닌 일반 대화만 모델이 답한다(소스 없이)
             try:
@@ -1250,15 +1354,15 @@ class QuestionAnsweringService:
             frozen_bytes = canonical_json_bytes(prepared.provider_payload)
             transformer = getattr(self._egress, "prepare_payload", None)
             if callable(transformer):
-                frozen_bytes = transformer(context, frozen_bytes)
+                frozen_bytes = self._blocking(general_draft, lambda: transformer(context, frozen_bytes))
                 prepared = replace(prepared, provider_payload=json.loads(frozen_bytes))
-            egress_authorization = self._egress.authorize(
+            egress_authorization = self._blocking(general_draft, lambda: self._egress.authorize(
                 context, run_id=run_id, source_id=None, source_version_id=None,
                 selection=selection, provider_payload=frozen_bytes,
                 approved_authorization=approved_authorization,
                 question=question, context_mode="general_ungrounded",
                 request_fingerprint=request_fingerprint,
-            )
+            ))
             if egress_authorization.get("provider_owner") is False:
                 return self._wait_for_provider_owner(
                     context, run_id, request_fingerprint,
@@ -1295,17 +1399,26 @@ class QuestionAnsweringService:
                 context_mode="general_ungrounded", context_sources=(),
                 request_fingerprint=request_fingerprint,
                 **access_options,
+                process=self._answer_process(general_draft, self._process_egress(selection, egress_authorization), {
+                    "citations": len(generated.cited_chunk_ids), "valid": not generated.cited_chunk_ids,
+                    "insufficient": bool(generated.insufficient), "retried": False}),
             )
-        local_evidence = () if general else self._search_context(context, sources, question)
+        search_trace: dict[str, object] = {}
+        local_evidence = () if general else self._search_context(context, sources, question, search_trace)
         evidence = merge_evidence(local_evidence, external)
         if general:  # 소스 없이 선택한 승인 지식만으로 답한다. 실행 기록은 소스 없는 질문으로 남긴다.
             context_mode, sources, source_id, source_version_id = "general_ungrounded", (), None, None
+        process_draft = {
+            "scope": self._process_scope(sources, external, search_trace),
+            "evidence": self._process_evidence(evidence, sources, external, search_trace),
+            "model": model_block,
+        }
         if not evidence:
             return self._complete_without_model(
                 context, selection=selection, run_id=run_id, question=question,
                 answer=self.NO_EVIDENCE_ANSWER, request_fingerprint=request_fingerprint,
                 approved_authorization=approved_authorization, access_options=access_options,
-                recheck=recheck,
+                recheck=recheck, process_draft=process_draft,
             )
         try:
             prepared = self._adapter_registry.prepare(
@@ -1331,16 +1444,16 @@ class QuestionAnsweringService:
         frozen_bytes = canonical_json_bytes(prepared.provider_payload)
         transformer = getattr(self._egress, "prepare_payload", None)
         if callable(transformer):
-            frozen_bytes = transformer(context, frozen_bytes)
+            frozen_bytes = self._blocking(process_draft, lambda: transformer(context, frozen_bytes))
             prepared = replace(prepared, provider_payload=json.loads(frozen_bytes))
-        egress_authorization = self._egress.authorize(
+        egress_authorization = self._blocking(process_draft, lambda: self._egress.authorize(
             context, run_id=run_id, source_id=source_id,
             source_version_id=source_version_id, selection=selection,
             provider_payload=frozen_bytes,
             approved_authorization=approved_authorization,
             question=question, context_mode=context_mode,
             request_fingerprint=request_fingerprint,
-        )
+        ))
         if egress_authorization.get("provider_owner") is False:
             return self._wait_for_provider_owner(
                 context, run_id, request_fingerprint,
@@ -1373,7 +1486,8 @@ class QuestionAnsweringService:
         recheck()
         try:
             self._charge_plan_call(context, selection, run_id, question)
-            generated = self._generate_answer(context, prepared, cost_session, bool(external))
+            generate_trace: dict[str, object] = {}
+            generated = self._generate_answer(context, prepared, cost_session, bool(external), generate_trace)
         except (ValueError, DocumentUnderstandingError) as error:
             raw_code = error.code if isinstance(error, DocumentUnderstandingError) else str(error)
             code = (
@@ -1406,6 +1520,12 @@ class QuestionAnsweringService:
                 status=503 if retryable else 502, retryable=retryable,
             ) from None
         recheck()
+        evidence_ids = {item.chunk_id for item in evidence}
+        process = self._answer_process(process_draft, self._process_egress(selection, egress_authorization), {
+            "citations": len(generated.cited_chunk_ids),
+            "valid": all(chunk_id in evidence_ids for chunk_id in generated.cited_chunk_ids),
+            "insufficient": bool(generated.insufficient), "retried": bool(generate_trace.get("retried")),
+        })
         external_storage: dict[str, object] = {}
         if external:
             local_ids = {item.chunk_id for item in local_evidence}
@@ -1422,6 +1542,7 @@ class QuestionAnsweringService:
             egress_authorization=egress_authorization,
             context_mode=context_mode, context_sources=sources,
             request_fingerprint=request_fingerprint,
+            process=process,
         )
 
     def replay(

@@ -15,6 +15,7 @@ from typing import Any, Mapping
 
 from psycopg.types.json import Jsonb
 
+from .answer_process import safe_answer_process
 from .cloud_storage import CloudAccessContext, CloudDatabaseError, PostgresCloudStore
 from .notebook import NotebookContext, NotebookError
 
@@ -128,6 +129,8 @@ class NotebookCopyService:
                 turn["answer"] = {
                     "run_id": str(run_id), "run_result_id": str(result_id), "answer": str(payload.get("answer") or ""),
                     "insufficient": bool(payload.get("insufficient")), "citations": citations.get(str(result_id), []),
+                    # 답변 과정(N1-1). 과거 답변이나 형식이 틀린 값은 null(과정 기록 없음).
+                    "process": safe_answer_process(payload.get("process")),
                 }
             turns.append(turn)
         return turns

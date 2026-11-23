@@ -2204,3 +2204,112 @@ class OmniRouteResponseShapeTests(unittest.TestCase):
             adapter, selection = self._adapter(output)
             self.assertEqual(adapter.generate_general(request, selection).answer, expected)
             selection.release()
+
+
+class AnswerProcessServiceTests(unittest.TestCase):
+    """NB1-F1: 시스템이 실제로 한 일만 담은 process 블록을 저장 인자·차단 오류에 싣는다."""
+
+    context = QuestionContext("tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1", "notebook-cp3")
+    chunk = IndexedEvidenceChunk("chunk-page-2", "source-cp3", "source-version-cp3", 2, "ORANGE-COMPASS-42", "span-page-2", 1.0)
+
+    class Resolver(FakeProviderSettings):
+        @contextmanager
+        def resolve(self, context, capability):  # type: ignore[no-untyped-def]
+            with super().resolve(context, capability) as selected:
+                selected.connection_name = "Upstage 기본"
+                selected.reasoning_level = "high"
+                yield selected
+
+    class PolicyEgress(FakeEgress):
+        def authorize(self, context, **kwargs):  # type: ignore[no-untyped-def]
+            return {**super().authorize(context, **kwargs), "policy_fingerprint": "sha256:3f2a9c1b0d4e" + "0" * 52,
+                    "frozen_routing_context": {"masking_required": True, "redaction_required": True}}
+
+    class BlockingEgress(FakeEgress):
+        def authorize(self, context, **kwargs):  # type: ignore[no-untyped-def]
+            raise QuestionAnsweringError("EGRESS_POLICY_DENIED", status=403)
+
+    def model_block(self) -> dict:
+        return {"connection": "Upstage 기본", "model": "solar-pro4", "reasoning": "high"}
+
+    def test_grounded_answer_records_scope_evidence_egress_model_and_verification(self) -> None:
+        repository = FakeRepository()
+        service = QuestionAnsweringService(self.Resolver(), repository, FakeIndex((self.chunk,)), FakeCredential(),
+                                           FakeTransport(), self.PolicyEgress())
+        service.ask(self.context, source_id="source-cp3", source_version_id="source-version-cp3",
+                    question="검증 문구는?", run_id="run-process-grounded")
+        self.assertEqual(repository.persisted["process"], {
+            "version": 1,
+            "scope": {"source_count": 1, "knowledge_packages": [], "tools": None},
+            "evidence": {"searched": 1, "selected": [{
+                "title": "report.pdf", "page": 2, "origin": "raw_source",
+                "source_id": "source-cp3", "source_version_id": "source-version-cp3",
+            }]},
+            "egress": {"decision": "allowed", "masked": True, "redacted": True, "policy_ref": "3f2a9c1b0d4e"},
+            "model": self.model_block(),
+            "verification": {"citations": 1, "valid": True, "insufficient": False, "retried": False},
+        })
+
+    def test_insufficient_evidence_records_empty_search_without_model(self) -> None:
+        repository, transport = FakeRepository(), FakeTransport()
+        service = QuestionAnsweringService(self.Resolver(), repository, FakeIndex(()), FakeCredential(),
+                                           transport, FakeEgress())
+        service.ask(self.context, source_id="source-cp3", source_version_id="source-version-cp3",
+                    question="없는 내용은?", run_id="run-process-insufficient")
+        self.assertEqual(transport.calls, 0)
+        self.assertEqual(repository.persisted["process"], {
+            "version": 1,
+            "scope": {"source_count": 1, "knowledge_packages": [], "tools": None},
+            "evidence": {"searched": 0, "selected": []},
+            "egress": {"decision": "not_needed", "masked": False, "redacted": False, "policy_ref": None},
+            "model": None,
+            "verification": {"citations": 0, "valid": True, "insufficient": True, "retried": False},
+        })
+
+    def test_blocked_egress_attaches_process_to_existing_error_and_stores_nothing(self) -> None:
+        repository, transport = FakeRepository(), FakeTransport()
+        service = QuestionAnsweringService(self.Resolver(), repository, FakeIndex((self.chunk,)), FakeCredential(),
+                                           transport, self.BlockingEgress())
+        with self.assertRaises(QuestionAnsweringError) as raised:
+            service.ask(self.context, source_id="source-cp3", source_version_id="source-version-cp3",
+                        question="검증 문구는?", run_id="run-process-blocked")
+        self.assertEqual((raised.exception.code, raised.exception.status), ("EGRESS_POLICY_DENIED", 403))
+        self.assertEqual((transport.calls, repository.persisted), (0, None))
+        self.assertEqual(raised.exception.process, {
+            "version": 1,
+            "scope": {"source_count": 1, "knowledge_packages": [], "tools": None},
+            "evidence": {"searched": 1, "selected": [{
+                "title": "report.pdf", "page": 2, "origin": "raw_source",
+                "source_id": "source-cp3", "source_version_id": "source-version-cp3",
+            }]},
+            "egress": {"decision": "blocked", "masked": False, "redacted": False, "policy_ref": None},
+            "model": self.model_block(),
+            "verification": None,
+        })
+
+    def test_general_conversation_has_no_sources_and_no_evidence(self) -> None:
+        repository = FakeRepository()
+        service = QuestionAnsweringService(self.Resolver(), repository, FakeIndex(()), FakeCredential(),
+                                           GeneralAnswerTransport(), self.PolicyEgress())
+        service.ask(self.context, source_id=None, source_version_id=None, question="안녕하세요", run_id="run-process-general")
+        self.assertEqual(repository.persisted["process"], {
+            "version": 1,
+            "scope": {"source_count": 0, "knowledge_packages": [], "tools": None},
+            "evidence": None,
+            "egress": {"decision": "allowed", "masked": True, "redacted": True, "policy_ref": "3f2a9c1b0d4e"},
+            "model": self.model_block(),
+            "verification": {"citations": 0, "valid": True, "insufficient": False, "retried": False},
+        })
+
+    def test_prepare_authorization_keeps_draft_for_runtime_policy_block(self) -> None:
+        service = QuestionAnsweringService(self.Resolver(), FakeRepository(), FakeIndex((self.chunk,)), FakeCredential(),
+                                           FakeTransport(), FakeEgress())
+        prepared = service.prepare_authorization(self.context, source_id="source-cp3", source_version_id="source-version-cp3",
+                                                 question="검증 문구는?")
+        from daon2_user_api.answer_process import blocked_answer_process
+        process = blocked_answer_process(prepared.process_draft, policy_fingerprint="sha256:" + "ab" * 32)
+        self.assertEqual(process["egress"], {"decision": "blocked", "masked": False, "redacted": False, "policy_ref": "abababababab"})
+        self.assertEqual(process["evidence"]["searched"], 1)
+        self.assertEqual(process["scope"]["source_count"], 1)
+        self.assertEqual(process["model"], self.model_block())
+        self.assertIsNone(process["verification"])
