@@ -76,6 +76,50 @@ test("S33 지식 원칙 일곱 줄과 근거 용어 여섯 정의는 부록 B �
   });
 });
 
+// WO-N1 단계 1(NB1-M): 답변 과정 보기·메모를 소스로 쓰기 절이 원본과 공개 사본에 모두 있어야 한다.
+test("N1 단계 1 두 절(2-13 답변 과정 보기, 2-14 메모를 소스로 쓰기)은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const section = (heading) => {
+      const start = markdown.indexOf(`\n${heading}\n`);
+      assert.ok(start >= 0, `${file}: ${heading}`);
+      const rest = markdown.slice(start + 1);
+      const next = rest.slice(1).search(/\n#{2,3} /u);
+      return rest.slice(0, next < 0 ? undefined : next + 1);
+    };
+    const process = section("### 2-13 답변 과정 보기");
+    for (const required of [
+      /\*\*답변 과정\*\*/u,
+      /\*\*질문 범위\*\*.*\*\*근거 찾기\*\*.*\*\*외부 전송\*\*.*\*\*모델\*\*.*\*\*검증\*\*/su,
+      /근거 이름.*누르면.*소스.*열립니다/su,
+      /\*\*검증\*\* 단계에 \*\*확인 필요\*\*/u,
+      /오류 카드 안에.*\*\*외부 전송\*\* 단계에 \*\*확인 필요\*\*/su,
+      /\*\*과정 기록 없음\*\*/u,
+      /다시 열어도.*그대로/su,
+      /모델의 내부 생각.*프롬프트 원문.*비밀값.*보이지 않습니다/su,
+      /images\/2-13-answer-process\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(process, required, `2-13 ${required}`);
+    const memo = section("### 2-14 메모를 소스로 쓰기");
+    for (const required of [
+      /\*\*소스로 사용\*\*/u,
+      /\*\*메모\*\* 표시가 붙은 소스/u,
+      /\*\*소스에 반영\*\*.*새 버전/su,
+      /\*\*소스와 같음\*\*/u,
+      /\*\*소스가 변경됨\*\*/u,
+      /메모를 지워도 소스는.*\*\*원본 메모 없음\*\*/su,
+      /32 KiB/u,
+      /첫 버전을 아직 처리/u,
+      /보기 권한만 있으면.*보이지 않습니다/su,
+      /images\/2-14-memo-source\.png/u,
+      /images\/2-14-memo-source-list\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(memo, required, `2-14 ${required}`);
+    assert.match(markdown, /\| 답변이 어떤 자료·판정·모델을 거쳤는지 보기 \| 2-13 \|/u, "부록 C 2-13");
+    assert.match(markdown, /\| 메모를 소스로 쓰기, 고친 메모를 소스에 반영 \| 2-14 \|/u, "부록 C 2-14");
+  });
+});
+
 test("한국어 Manual 정본은 1부 첫 업무 흐름과 공개 범위를 명시하고 내부 정보를 쓰지 않는다", async () => {
   for (const [id, title] of docs) {
     const markdown = await readFile(new URL(`docs/manual/${id}/index.md`, root), "utf8");
