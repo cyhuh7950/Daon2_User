@@ -338,20 +338,27 @@ class NotebookKnowledgeEvidence:
         self._scopes = scopes
         self._connectors = connectors
 
-    def prepare(self, context: Any) -> EvidenceTarget | None:
-        """지금 쓸 수 있는 업무 패키지를 확정한다. 승인 조건에서 벗어난 것은 LLM에게도 보이지 않는다."""
+    def prepare(self, context: Any, disabled_connectors: frozenset[str] = frozenset()) -> EvidenceTarget | None:
+        """지금 쓸 수 있는 업무 패키지를 확정한다. 승인 조건에서 벗어난 것은 LLM에게도 보이지 않는다.
+
+        disabled_connectors는 질문 도구에서 끈 지식 연결(NB2-F1, 서버 저장값)이다. 끈 연결은 고르지도 호출하지도 않는다.
+        """
         if context.notebook_id is None:
             return None
         scope_context = KnowledgeScopeContext(context.tenant_id, context.workspace_id, context.actor_id, context.trace_id, context.policy_version)
+        excluded = {"exclude": frozenset(disabled_connectors)} if disabled_connectors else {}
         with _knowledge_errors():
             selected = self._scopes.selection(scope_context, context.notebook_id)["items"]
             if not selected:
                 return None
-            connector_context, connector_id, approved = self._scopes.evidence_target(scope_context)
+            found = self._scopes.evidence_target(scope_context, **excluded)
+            if found is None:
+                return None
+            connector_context, connector_id, approved = found
         usable = [item for item in selected if (item["project_id"], item["work_package_id"]) in approved]
         if not usable:
             return None
-        daon2 = getattr(self._scopes, "daon2_target", lambda _context: None)(scope_context)
+        daon2 = getattr(self._scopes, "daon2_target", lambda _context, **_options: None)(scope_context, **excluded)
         packages = tuple({**item, "alias": f"P{index + 1}", **self._source_tenant(approved[(item["project_id"], item["work_package_id"])])} for index, item in enumerate(usable))
         return EvidenceTarget(connector_context, connector_id, packages, *(daon2 or (None, None)))
 
@@ -636,8 +643,8 @@ class NotebookKnowledgeEvidence:
         return ExternalEvidence(chunk, connector_id, package["project_id"], package["project_name"], package["work_package_id"], package["work_package_name"],
                                 document_id, version_id, version_id, document_id, 1, name[:1024], text)
 
-    def search(self, context: Any, question: str) -> tuple[ExternalEvidence, ...]:
-        target = self.prepare(context)
+    def search(self, context: Any, question: str, disabled_connectors: frozenset[str] = frozenset()) -> tuple[ExternalEvidence, ...]:
+        target = self.prepare(context, disabled_connectors) if disabled_connectors else self.prepare(context)
         return () if target is None else self.run(target, default_requests(target, question))
 
     @staticmethod

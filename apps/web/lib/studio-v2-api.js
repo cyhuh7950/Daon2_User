@@ -351,6 +351,39 @@ export async function saveModelSelection(workspaceId, { notebookId, connectionId
   return data;
 }
 
+// 질문 도구(WO-N1 NB2-F1, 결정 D-02: 웹 도구 없음). 응답 항목은 정확한 키만 받는다.
+const TOOL_REASONS = new Set(["NO_SCOPE_SELECTED", "CONNECTOR_NOT_READY", "CONNECTOR_DISABLED"]);
+const CONNECTOR_KINDS = new Set(["daon2_rag", "daon2", "law"]);
+const TOOL_ID = /^(?:approved_knowledge|connector:[A-Za-z0-9][A-Za-z0-9._:-]{0,245})$/u;
+
+function validTool(item) {
+  if (!isObject(item) || typeof item.id !== "string" || !TOOL_ID.test(item.id)) return false;
+  const connector = item.kind === "connector";
+  if (!connector && !(item.kind === "approved_knowledge" && item.id === "approved_knowledge")) return false;
+  if (connector && (!item.id.startsWith("connector:") || !CONNECTOR_KINDS.has(item.connector_kind))) return false;
+  const keys = ["id", "kind", ...(connector ? ["connector_kind"] : []), "label", "available", "enabled", ...(item.available === false ? ["reason"] : [])];
+  return exact(item, keys) && typeof item.label === "string" && item.label.length >= 1 && item.label.length <= 120
+    && typeof item.available === "boolean" && typeof item.enabled === "boolean"
+    && (item.available || (TOOL_REASONS.has(item.reason) && item.enabled === false));
+}
+
+const validQuestionTools = (d) => exact(d, ["tools"]) && Array.isArray(d.tools) && d.tools.length <= 65 && d.tools.every(validTool);
+
+/** 이 노트북에서 내가 켜고 끈 질문 도구. 사용할 수 없는 도구(available=false)는 reason과 함께 꺼짐으로 온다. */
+export async function getQuestionTools(workspaceId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("GET", `${notebookBase(workspaceId, notebookId)}/question-tools`, { signal, fetchImpl }), validQuestionTools);
+  return data;
+}
+
+/** enabled: {"<도구 id>": true|false}. 바꾼 도구만 보내면 서버가 이전 선택과 합친다. 모르는 id는 422 QUESTION_TOOL_UNKNOWN. */
+export async function saveQuestionTools(workspaceId, { notebookId, enabled, signal, fetchImpl } = {}) {
+  if (!isObject(enabled) || Object.entries(enabled).some(([key, value]) => !TOOL_ID.test(key) || typeof value !== "boolean")) {
+    throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  }
+  const { data } = await json(await request("PUT", `${notebookBase(workspaceId, notebookId)}/question-tools`, { body: { enabled }, signal, fetchImpl }), validQuestionTools);
+  return data;
+}
+
 /** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다.
  * 각 답변의 process(답변 과정)는 질문 응답과 같은 규칙으로 검사해 열거되지 않는 `answer.process`로 붙인다(틀리면 null). */
 export async function listChatTurns(workspaceId, { notebookId, signal, fetchImpl } = {}) {

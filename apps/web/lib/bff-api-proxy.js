@@ -566,6 +566,17 @@ function routeFor(method, segments) {
   if (
     segments.length === 5 && segments[0] === "workspaces"
     && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "question-tools"
+  ) {
+    // 질문 도구 켜고 끄기(WO-N1 NB2-F1): 내 선택 조회·저장. 서버가 저장값으로 다시 판단한다.
+    return method === "GET" || method === "PUT"
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/question-tools`,
+          query: new Set(), strictQuery: true, csrfProvenanceRequired: method === "PUT", maxRequestBytes: 8 * 1024 }
+      : { methodRejected: true };
+  }
+  if (
+    segments.length === 5 && segments[0] === "workspaces"
+    && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
     && SAFE_SEGMENT.test(segments[3]) && (segments[4] === "copies" || segments[4] === "chat-history")
   ) {
     const wanted = segments[4] === "copies" ? "POST" : "DELETE";

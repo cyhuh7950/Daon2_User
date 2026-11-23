@@ -89,28 +89,37 @@ class KnowledgeScopeService:
     def _scope(context: KnowledgeScopeContext, capability: str) -> CloudAccessContext:
         return CloudAccessContext(context.tenant_id, context.workspace_id, context.actor_id, capability)
 
-    def evidence_target(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, str, dict[tuple[str, str], Mapping[str, Any]]]:
-        """질문 경로가 쓴다: 호출 문맥, 실제 Daon2-RAG Connector, 지금 승인된 업무 패키지."""
-        connector_context, connector = self._rag_connector(context)
+    def evidence_target(self, context: KnowledgeScopeContext, exclude: frozenset[str] = frozenset()
+                        ) -> tuple[ConnectorContext, str, dict[tuple[str, str], Mapping[str, Any]]] | None:
+        """질문 경로가 쓴다: 호출 문맥, 실제 Daon2-RAG Connector, 지금 승인된 업무 패키지.
+
+        exclude는 질문 도구에서 끈 연결(NB2-F1)이다. 쓸 수 있는 Daon2-RAG 연결을 모두 껐으면 None이고 아무 연결도 호출하지 않는다.
+        """
+        connector_context, connector = self._rag_connector(context, exclude)
+        if connector is None:
+            return None
         return connector_context, connector["connector_id"], self._read_approved(connector_context, connector)
 
     def _approved_scopes(self, context: KnowledgeScopeContext) -> dict[tuple[str, str], Mapping[str, Any]]:
-        return self._read_approved(*self._rag_connector(context))
+        connector_context, connector = self._rag_connector(context)
+        return self._read_approved(connector_context, connector)  # type: ignore[arg-type]
 
-    def _rag_connector(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, Mapping[str, Any]]:
+    def _rag_connector(self, context: KnowledgeScopeContext, exclude: frozenset[str] = frozenset()) -> tuple[ConnectorContext, Mapping[str, Any] | None]:
+        """첫 번째 확인된 Daon2-RAG 연결. 연결이 하나도 없으면 오류, 있는데 exclude로 모두 껐으면 연결 자리가 None이다."""
         connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version, self._shared_connector_tenant)
         # 가상(시험용) 서버의 값은 승인 지식이 아니므로 쓰지 않는다.
-        connector = next((item for item in self._connectors.list(connector_context)
-                          if item["kind"] == "daon2_rag" and item["status"] == "verified" and not item.get("virtual")), None)
-        if connector is None:
+        candidates = [item for item in self._connectors.list(connector_context)
+                      if item["kind"] == "daon2_rag" and item["status"] == "verified" and not item.get("virtual")]
+        if not candidates:
             raise KnowledgeScopeError("KNOWLEDGE_CONNECTOR_NOT_CONFIGURED", 409)
-        return connector_context, connector
+        return connector_context, next((item for item in candidates if item["connector_id"] not in exclude), None)
 
-    def daon2_target(self, context: KnowledgeScopeContext) -> tuple[ConnectorContext, str] | None:
-        """온톨로지·규칙을 읽는 실제 Daon2 연결. 없으면 그 지식 종류를 LLM에게 보이지 않는다."""
+    def daon2_target(self, context: KnowledgeScopeContext, exclude: frozenset[str] = frozenset()) -> tuple[ConnectorContext, str] | None:
+        """온톨로지·규칙을 읽는 실제 Daon2 연결. 없거나 질문 도구에서 껐으면(exclude) 그 지식 종류를 LLM에게 보이지 않는다."""
         connector_context = ConnectorContext(context.tenant_id, context.actor_id, context.trace_id, context.workspace_id, context.policy_version, self._shared_connector_tenant)
         connector = next((item for item in self._connectors.list(connector_context)
-                          if item["kind"] == "daon2" and item["status"] == "verified" and not item.get("virtual")), None)
+                          if item["kind"] == "daon2" and item["status"] == "verified" and not item.get("virtual")
+                          and item["connector_id"] not in exclude), None)
         return None if connector is None else (connector_context, connector["connector_id"])
 
     def _page_size(self, connector_context: ConnectorContext, connector_id: str) -> int:

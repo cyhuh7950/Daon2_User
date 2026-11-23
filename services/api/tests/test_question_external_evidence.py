@@ -782,3 +782,125 @@ class RepositoryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------- NB2-F1 질문 도구
+class _ToolScopes(_Scopes):
+    """끈 연결을 받아 고르지 않는 지식 범위(KnowledgeScopeService와 같은 규칙)."""
+
+    def __init__(self, items, rag=("kc-rag",), daon2=("kc-daon2",)):
+        super().__init__(items)
+        self.rag, self.daon2, self.excludes = rag, daon2, []
+
+    def evidence_target(self, context, exclude=frozenset()):
+        self.excludes.append(exclude)
+        chosen = next((item for item in self.rag if item not in exclude), None)
+        return None if chosen is None else (SimpleNamespace(tenant_id="tenant-a"), chosen, self.approved)
+
+    def daon2_target(self, context, exclude=frozenset()):
+        chosen = next((item for item in self.daon2 if item not in exclude), None)
+        return None if chosen is None else (SimpleNamespace(tenant_id="tenant-a"), chosen)
+
+
+class NotebookToolExclusionTests(unittest.TestCase):
+    def test_turned_off_rag_connector_is_never_called(self):
+        connectors = _Connectors({"w1": {"result": [hit()]}})
+        finder = NotebookKnowledgeEvidence(_ToolScopes([selected("w1")]), connectors)
+        self.assertIsNone(finder.prepare(CTX, disabled_connectors=frozenset({"kc-rag"})))
+        self.assertEqual(finder.search(CTX, "보장 범위는?", disabled_connectors=frozenset({"kc-rag"})), ())
+        self.assertEqual(connectors.calls, [])
+
+    def test_turned_off_daon2_connector_hides_its_knowledge_kinds(self):
+        finder = NotebookKnowledgeEvidence(_ToolScopes([{**selected("w1"), "tenant_id": "t"}]), _Connectors({}))
+        self.assertEqual(finder.prepare(CTX).daon2_connector_id, "kc-daon2")
+        target = finder.prepare(CTX, disabled_connectors=frozenset({"kc-daon2"}))
+        self.assertIsNone(target.daon2_connector_id)
+        self.assertEqual(target.kinds, ("rag",))
+
+    def test_no_disabled_connector_keeps_the_old_call(self):
+        scopes = _ToolScopes([selected("w1")])
+        NotebookKnowledgeEvidence(scopes, _Connectors({})).prepare(CTX)
+        self.assertEqual(scopes.excludes, [frozenset()])
+
+
+def _state(approved=True, disabled=(), labels=("승인 지식", "Daon2-RAG")):
+    return SimpleNamespace(approved_knowledge=approved, disabled_connectors=frozenset(disabled), labels=tuple(labels))
+
+
+class _RecordingPlanner(_Planner):
+    def __init__(self):
+        super().__init__()
+        self.prepared = []
+
+    def prepare(self, context, **options):
+        self.prepared.append(options)
+        return target("제안서 작업")
+
+
+class QuestionToolServiceTests(unittest.TestCase):
+    def service(self, state, plan=PLAN):
+        self.repository, self.transport, self.egress, self.planner = _Repository(), _PlanTransport(plan, ["ext-b1"]), _PlanEgress(), _RecordingPlanner()
+        service = QuestionAnsweringService(FakeProviderSettings(), self.repository, FakeIndex(()), FakeCredential(), self.transport, self.egress)
+        service.set_external_evidence(self.planner.run, planner=self.planner)
+        self.reads = []
+
+        def reader(tenant_id, workspace_id, notebook_id, actor_id):
+            self.reads.append((tenant_id, workspace_id, notebook_id, actor_id))
+            if isinstance(self.state, Exception):
+                raise self.state
+            return self.state
+
+        self.state = state
+        service.set_question_tools_reader(reader)
+        return service
+
+    def ask(self, service, question=QUESTION, run_id="run-a"):
+        return service.ask(CTX, source_id=None, source_version_id=None, question=question, run_id=run_id, context_mode="general_ungrounded")
+
+    def test_default_state_calls_exactly_like_before(self):
+        self.ask(self.service(_state()))
+        self.assertEqual(self.planner.prepared, [{}])
+        self.assertEqual(self.planner.runs, [(("P1", "평가 기준과 배점"),)])
+        self.assertEqual(self.transport.calls, 2)
+        self.assertEqual(self.reads, [("tenant-a", "ws-a", "nb-a", "actor-a")])
+
+    def test_turned_off_approved_knowledge_skips_every_knowledge_call(self):
+        self.ask(self.service(_state(approved=False, labels=("Daon2-RAG",))))
+        self.assertEqual((self.planner.prepared, self.planner.runs, self.transport.calls, self.egress.plan_checks), ([], [], 0, []))
+        self.assertEqual(self.repository.persisted["external_citations"] if "external_citations" in self.repository.persisted else (), ())
+
+    def test_turned_off_connectors_reach_the_planner(self):
+        self.ask(self.service(_state(disabled=("kc-daon2",))))
+        self.assertEqual(self.planner.prepared, [{"disabled_connectors": frozenset({"kc-daon2"})}])
+
+    def test_process_records_enabled_tool_labels(self):
+        self.ask(self.service(_state(labels=("승인 지식", "Daon2-RAG"))))
+        self.assertEqual(self.repository.persisted["process"]["scope"]["tools"], ["승인 지식", "Daon2-RAG"])
+
+    def test_process_records_empty_list_when_every_tool_is_off(self):
+        self.ask(self.service(_state(approved=False, labels=())))
+        self.assertEqual(self.repository.persisted["process"]["scope"]["tools"], [])
+
+    def test_authorization_draft_carries_tool_labels(self):
+        prepared = self.service(_state()).prepare_authorization(CTX, source_id=None, source_version_id=None, question=QUESTION, context_mode="general_ungrounded")
+        self.assertEqual(prepared.process_draft["scope"]["tools"], ["승인 지식", "Daon2-RAG"])
+
+    def test_changed_tools_do_not_reuse_the_earlier_search(self):
+        service = self.service(_state())
+        self.assertEqual(len(service._external_evidence(CTX, QUESTION, _state())), 1)  # noqa: SLF001
+        self.assertEqual(service._external_evidence(CTX, QUESTION, _state(approved=False)), ())  # noqa: SLF001
+        self.assertEqual(len(service._external_evidence(CTX, QUESTION, _state(disabled=("kc-daon2",)))), 1)  # noqa: SLF001
+        self.assertEqual(len(self.planner.prepared), 2)
+
+    def test_unreadable_tools_stop_the_question_before_any_call(self):
+        service = self.service(RuntimeError("db down"))
+        with self.assertRaises(QuestionAnsweringError) as caught:
+            self.ask(service)
+        self.assertEqual((caught.exception.code, caught.exception.status, caught.exception.retryable), ("QUESTION_TOOLS_UNAVAILABLE", 503, True))
+        self.assertEqual((self.planner.prepared, self.transport.calls), ([], 0))
+
+    def test_question_without_notebook_does_not_read_tools(self):
+        service = self.service(_state())
+        context = QuestionContext("tenant-a", "ws-a", "actor-a", "trace-a", "policy-a")
+        self.assertIsNone(service._question_tools(context))  # noqa: SLF001
+        self.assertEqual(self.reads, [])
