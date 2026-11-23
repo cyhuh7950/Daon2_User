@@ -997,5 +997,104 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                 self.cloud.connection.source_binding_active = True
 
 
+def _process(decision: str = "allowed") -> dict:
+    return {
+        "version": 1,
+        "scope": {"source_count": 1, "knowledge_packages": [], "tools": None},
+        "evidence": {"searched": 1, "selected": [{
+            "title": "report.pdf", "page": 2, "origin": "raw_source",
+            "source_id": "source-cp3", "source_version_id": "source-version-cp3",
+        }]},
+        "egress": {"decision": decision, "masked": True, "redacted": True, "policy_ref": "3f2a9c1b0d4e"},
+        "model": {"connection": "Upstage 기본", "model": "solar-pro4", "reasoning": None},
+        "verification": {"citations": 1, "valid": True, "insufficient": False, "retried": False},
+    }
+
+
+class _CapturingConnection(FakeConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.run_result_payloads: list[dict] = []
+
+    def execute(self, sql, params=()):  # type: ignore[no-untyped-def]
+        if sql.startswith("INSERT INTO run_results"):
+            self.run_result_payloads.append(json.loads(params[7]))
+        return super().execute(sql, params)
+
+
+class AnswerProcessPersistenceTests(unittest.TestCase):
+    """NB1-F1: process 블록은 run_results 정규화 JSON에 함께 저장되고 같은 값으로 다시 읽힌다."""
+
+    def setUp(self) -> None:
+        self.cloud = FakeCloudStore()
+        self.cloud.connection = _CapturingConnection()
+        self.repository = PostgresQuestionAnsweringRepository(self.cloud, FakeObjectStorage())  # type: ignore[arg-type]
+        self.context = QuestionContext("tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1")
+        self.selection = TextModelSelection("UPSTAGE", "https://api.upstage.ai/v1", "profile-upstage", "deployment-text", "solar-pro4", 5)
+        self.evidence = (IndexedEvidenceChunk("chunk-page-2", "source-cp3", "source-version-cp3", 2, "ORANGE-COMPASS-42", "span-page-2", 1.0),)
+
+    def persist(self, **extra):  # type: ignore[no-untyped-def]
+        return self.repository.persist_completed(
+            self.context, run_id="run-process", source_id="source-cp3", source_version_id="source-version-cp3",
+            question="검증 문구는?", selection=self.selection, evidence=self.evidence,
+            result=GroundedTextResult("ORANGE-COMPASS-42", ("chunk-page-2",), False, {"total_tokens": 8}), **extra)
+
+    def test_grounded_process_is_stored_in_run_result_canon_and_returned(self) -> None:
+        stored = self.persist(process=_process())
+        self.assertEqual(self.cloud.connection.run_result_payloads[0]["process"], _process())
+        self.assertEqual(stored.process, _process())
+
+    def test_general_conversation_process_is_stored(self) -> None:
+        process = {**_process(), "scope": {"source_count": 0, "knowledge_packages": [], "tools": None}, "evidence": None,
+                   "verification": {"citations": 0, "valid": True, "insufficient": False, "retried": False}}
+        stored = self.repository.persist_completed(
+            self.context, run_id="run-process-general", source_id=None, source_version_id=None, question="안녕하세요",
+            selection=self.selection, evidence=(), result=GroundedTextResult("안녕하세요.", (), False, {}),
+            context_mode="general_ungrounded", context_sources=(), process=process)
+        self.assertEqual(self.cloud.connection.run_result_payloads[0]["process"], process)
+        self.assertEqual(stored.process, process)
+
+    def test_without_process_the_canon_keeps_the_previous_shape(self) -> None:
+        stored = self.persist()
+        self.assertEqual(set(self.cloud.connection.run_result_payloads[0]), {"run_id", "answer", "insufficient", "citation_ids"})
+        self.assertIsNone(stored.process)
+
+    def test_invalid_process_is_not_stored(self) -> None:
+        tampered = _process()
+        tampered["model"]["connection"] = "http://10.0.0.1"
+        stored = self.persist(process=tampered)
+        self.assertNotIn("process", self.cloud.connection.run_result_payloads[0])
+        self.assertIsNone(stored.process)
+
+    def completed(self, result_payload):  # type: ignore[no-untyped-def]
+        self.cloud.connection.completed_rows = [(
+            "result-cp3", result_payload, "citation-cp3",
+            {"source_id": "source-cp3", "source_version_id": "source-version-cp3", "evidence_span_id": "span-page-2", "page": 2},
+            "local_runtime", None,
+        )]
+        return self.repository.load_completed(self.context, "run-process")
+
+    def test_replay_returns_the_same_process_as_the_first_response(self) -> None:
+        first = self.persist(process=_process())
+        replay = self.completed(self.cloud.connection.run_result_payloads[0])
+        self.assertEqual(replay.process, first.process)
+
+    def test_chat_history_returns_the_same_process_as_the_first_response(self) -> None:
+        from daon2_user_api.notebook import NotebookContext
+        from daon2_user_api.notebook_copy import NotebookCopyService
+        from test_answer_process import _HistoryStore
+        first = self.persist(process=_process())
+        history = NotebookCopyService(_HistoryStore(self.cloud.connection.run_result_payloads[0]))  # type: ignore[arg-type]
+        turns = history.list_chat_turns(NotebookContext("tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1"), "notebook-cp3")
+        self.assertEqual(turns[0]["answer"]["process"], first.process)
+        self.assertEqual(turns[0]["answer"]["process"], _process())
+
+    def test_past_answer_without_process_and_tampered_process_load_as_null(self) -> None:
+        self.assertIsNone(self.completed({"answer": "ORANGE-COMPASS-42", "insufficient": False}).process)
+        tampered = _process()
+        tampered["extra"] = "x"
+        self.assertIsNone(self.completed({"answer": "ORANGE-COMPASS-42", "insufficient": False, "process": tampered}).process)
+
+
 if __name__ == "__main__":
     unittest.main()
