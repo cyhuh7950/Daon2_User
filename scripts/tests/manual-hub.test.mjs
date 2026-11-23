@@ -8,7 +8,7 @@ const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8
 const manifest = {
   schema_version: 1,
   release_version: "2.0.0",
-  released_at: "2026-11-23",
+  released_at: "2026-11-24",
   language: "ko-KR",
   documents: [
     {
