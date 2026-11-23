@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { msg } from "./studio-messages.ko.js";
+import { MemoSourceAction } from "./memo-source.jsx";
 
 const LEVEL_COLORS = ["#3b6fd8", "#3fa37a", "#8e5bd1", "#b57b00", "#2a8ea3", "#c0453f"];
 
@@ -265,7 +266,8 @@ export function SlidesViewer({ content, evidence, onOpenEvidence }) {
 }
 
 // 메모: 마크다운 텍스트 + 미리보기. 1.5초 디바운스로 자동 저장(새 리비전).
-export function MemoViewer({ content, onSave }) {
+// memoSource({ link, onCreate, onReflect })가 있으면 "메모를 소스로" 버튼을 보인다(NB1-U2). 저장 대기 중에는 버튼을 잠근다.
+export function MemoViewer({ content, onSave, memoSource = null }) {
   const initial = String(content.body?.markdown ?? "");
   const [text, setText] = useState(initial);
   const [state, setState] = useState("saved");
@@ -292,6 +294,7 @@ export function MemoViewer({ content, onSave }) {
     <textarea id="studio-memo-text" value={text} onChange={(event) => change(event.target.value)} />
     <small role="status">{state === "saved" ? msg("viewer.memo.saved") : state === "pending" ? msg("viewer.memo.pending") : msg("viewer.memo.failed")}</small>
     <pre aria-label={msg("viewer.memo.preview")}>{text}</pre>
+    {memoSource ? <MemoSourceAction link={memoSource.link} saving={state === "pending"} onCreate={memoSource.onCreate} onReflect={memoSource.onReflect} /> : null}
   </div>;
 }
 
@@ -454,7 +457,7 @@ export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, on
   </div>;
 }
 
-export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
+export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, memoSource = null, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
   const content = output.revision?.content;
   if (!content) return <p>{msg("studio.card.generating")}</p>;
   const common = { content, evidence: output.evidence ?? [], onOpenEvidence };
@@ -468,7 +471,7 @@ export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAb
     case "infographic": return <InfographicViewer {...common} onLoadImage={onLoadImage} />;
     case "audio_overview": return <AudioViewer {...common} onLoadAudio={onLoadAudio} />;
     case "video_overview": return <VideoViewer {...common} onLoadVideo={onLoadVideo} onLoadCaptions={onLoadCaptions} />;
-    case "memo": return <MemoViewer content={content} onSave={onSaveMemo} />;
+    case "memo": return <MemoViewer content={content} onSave={onSaveMemo} memoSource={memoSource} />;
     default: return <p>{msg("viewer.unsupported")}</p>;
   }
 }

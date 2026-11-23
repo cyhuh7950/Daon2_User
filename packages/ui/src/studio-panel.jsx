@@ -78,7 +78,10 @@ function Card({ output, now, waiting = false, menuOpen, renaming, onOpen, onTogg
   </li>;
 }
 
-function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onError }) {
+// 메모를 소스로(NB1-U2): 이 오류 뒤에는 서버의 연결 상태가 화면과 다를 수 있어 메모를 다시 읽는다.
+const MEMO_SOURCE_RELOAD_CODES = new Set(["MEMO_SOURCE_EXISTS", "MEMO_SOURCE_UNCHANGED", "MEMO_SOURCE_NOT_LINKED"]);
+
+function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAskAboutNode, onError, onMemoSourceChanged }) {
   const [output, setOutput] = useState(null);
   const [error, setError] = useState(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -121,6 +124,20 @@ function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onEr
     }
   };
   const exportFormats = output ? (studio.exportFormats?.(output.type_id) ?? []) : [];
+  // 편집 권한이 있고 어댑터·서버가 메모-소스 계약을 줄 때만 버튼을 보인다(서버도 보기 권한이면 403).
+  const memoSourceAvailable = canEdit && output?.type_id === "memo" && output.source_link !== undefined
+    && typeof studio.createMemoSource === "function" && typeof studio.reflectMemoSource === "function";
+  const runMemoSource = async (kind) => {
+    try {
+      const result = kind === "created" ? await studio.createMemoSource(outputId) : await studio.reflectMemoSource(outputId);
+      setOutput(await studio.getOutput(outputId));
+      onMemoSourceChanged?.({ kind, sourceId: result.source_id, outputId });
+    } catch (error) {
+      if (MEMO_SOURCE_RELOAD_CODES.has(error?.code)) { try { setOutput(await studio.getOutput(outputId)); } catch { /* 이전 상태를 유지한다 */ } }
+      throw error;
+    }
+  };
+  const memoSource = memoSourceAvailable ? { link: output.source_link, onCreate: () => runMemoSource("created"), onReflect: () => runMemoSource("reflected") } : null;
   return <div className="studio-detail">
     <div className="studio-detail__bar">
       <button type="button" className="studio-icon-button" aria-label={msg("studio.back")} onClick={onBack}><StudioIcon name="chevron_right" size={20} className="studio-flip" style={{ transform: "rotate(180deg)" }} /></button>
@@ -145,7 +162,13 @@ function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onEr
       {output && !editing && <StudioViewer output={output} onConfirmOutline={async (confirmed_outline) => { await studio.regenerateOutput(outputId, { settings: { confirm_outline: "no", confirmed_outline } }); setOutput(await studio.getOutput(outputId)); }} onOpenEvidence={(ref) => onOpenEvidence(output, ref)} onAskAboutNode={onAskAboutNode}
         onLoadImage={loadImage} onLoadAudio={loadAudio} onLoadVideo={loadVideo} onLoadCaptions={loadCaptions}
         onAttempt={(kind, payload) => studio.recordLearningAttempt?.(outputId, { revisionNo: output.current_revision, kind, payload }).catch(() => {})}
-        onSaveMemo={async (content) => { const saved = await studio.createRevision(outputId, { content }); setOutput((o) => ({ ...o, current_revision: saved.revision_no })); }} />}
+        memoSource={memoSource}
+        onSaveMemo={async (content) => {
+          const saved = await studio.createRevision(outputId, { content });
+          // 새 리비전이 반영 리비전과 다르면 "소스에 반영"으로 바뀐다(D-10: 반영 버튼으로만 새 소스 버전).
+          setOutput((o) => ({ ...o, current_revision: saved.revision_no,
+            ...(o.source_link ? { source_link: { ...o.source_link, outdated: saved.revision_no !== o.source_link.reflected_revision_no } } : {}) }));
+        }} />}
       {output && !editing && output.status === "completed" && CHAT_EDIT_TYPES.includes(output.type_id) && typeof studio.listEditTurns === "function"
         && <StudioChatEdit studio={studio} outputId={outputId} onApplied={async () => setOutput(await studio.getOutput(outputId))} />}
     </div>
@@ -156,7 +179,8 @@ function Detail({ studio, outputId, onBack, onOpenEvidence, onAskAboutNode, onEr
  * Studio v2 패널. `studio`는 어댑터의 studioV2(노트북 범위가 이미 주입된 함수 묶음)이다.
  * sourceStats: { sourceCount, checkedCount, readySourceCount, processingCount }.
  */
-export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSourceVersionIds = [], onToggleCollapse, onAskAboutNode, refreshToken = 0, now = () => Date.now() }) {
+export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSourceVersionIds = [], onToggleCollapse, onAskAboutNode, refreshToken = 0, now = () => Date.now(),
+  canEdit = true, onMemoSourceChanged, openOutputRequest = null }) {
   const [state, dispatch] = useReducer(reduce, undefined, createStudioPanelState);
   const [menuFor, setMenuFor] = useState(null);
   const [renaming, setRenaming] = useState(null);
@@ -182,6 +206,13 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
   useEffect(() => {
     if (refreshToken) reload().catch(() => {});
   }, [refreshToken, reload]);
+
+  // 패널 밖(소스 줄의 "메모" 표시 등)에서 산출물 보기를 열어 달라는 요청. nonce가 바뀔 때마다 한 번 연다.
+  useEffect(() => {
+    if (!openOutputRequest?.outputId) return;
+    setAuthoringOpen(null);
+    dispatch({ type: "SELECT", outputId: openOutputRequest.outputId });
+  }, [openOutputRequest?.outputId, openOutputRequest?.nonce]);
 
   // 활성 작업이 있을 때만 폴링한다(1.5초, 숨김 탭은 10초).
   useEffect(() => {
@@ -259,7 +290,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     </header>
     {state.error && <p className="studio-alert" role="alert">{studioErrorMessage(state.error)} <button type="button" className="studio-btn" onClick={() => dispatch({ type: "ERROR_CLEARED" })}>{msg("studio.dialog.close")}</button></p>}
     {authoringOpen ? <AuthoringWizard studio={studio} sources={sources} outputId={authoringOpen.outputId} onChanged={() => reload().catch(() => {})}
-      onClose={() => { setAuthoringOpen(null); reload().catch(() => {}); }} /> : selected ? <Detail studio={studio} outputId={selected} onBack={() => { dispatch({ type: "SELECT", outputId: null }); reload().catch(() => {}); }}
+      onClose={() => { setAuthoringOpen(null); reload().catch(() => {}); }} /> : selected ? <Detail key={selected} studio={studio} outputId={selected} canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} onBack={() => { dispatch({ type: "SELECT", outputId: null }); reload().catch(() => {}); }}
       onOpenEvidence={openEvidence} onAskAboutNode={onAskAboutNode} onError={(code) => dispatch({ type: "ERROR", code })} /> : <>
       <div className="studio-v2-tiles" role="group" aria-label={msg("studio.create_group")}>
         {TILE_ORDER.map((typeId) => {
@@ -331,13 +362,15 @@ export function StudioPanelGate({ studio, fallback = null, ...props }) {
 }
 
 /** 셸용 진입점: 어댑터에 studioV2가 없으면 기존 Studio(fallback)를 그대로 보여준다. */
-export function StudioFallbackGate({ adapter, sources = [], unchecked = new Set(), fallback = null, onAskAboutNode, refreshToken = 0, knowledgeCount = 0 }) {
+export function StudioFallbackGate({ adapter, sources = [], unchecked = new Set(), fallback = null, onAskAboutNode, refreshToken = 0, knowledgeCount = 0,
+  canEdit = true, onMemoSourceChanged, openOutputRequest = null }) {
   const studio = adapter?.studioV2;
   if (!studio) return fallback;
   const ready = sources.filter((source) => source.ready);
   const checked = ready.filter((source) => !unchecked.has(source.sourceVersionId)).map((source) => source.sourceVersionId);
   const processing = sources.filter((source) => !source.ready && ["processing", "queued", "pending", "uploaded"].includes(source.sourceState)).length;
   return <StudioPanelGate studio={studio} fallback={fallback} onAskAboutNode={onAskAboutNode} refreshToken={refreshToken} sources={sources}
+    canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} openOutputRequest={openOutputRequest}
     checkedSourceVersionIds={checked} sourceStats={{ sourceCount: sources.length, checkedCount: checked.length, readySourceCount: ready.length, processingCount: processing, knowledgeCount }} />;
 }
 

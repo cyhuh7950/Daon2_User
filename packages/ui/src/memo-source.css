@@ -1,0 +1,21 @@
+/* 메모를 소스로(NB1-U2). 색은 --daon-color-* / --daon-status-* 토큰만, 글씨는 12px 이상. 상태는 색과 글자를 함께 쓴다. */
+.memo-source { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--daon-color-border); border-radius: 12px; background: var(--daon-color-surface); }
+.memo-source__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memo-source__row .studio-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.memo-source__hint { color: var(--daon-color-text-secondary); font-size: 12px; }
+.memo-source__notice, .memo-source__error { margin: 0; padding: 6px 10px; border: 1px solid currentColor; border-radius: 8px; font-size: 12px; }
+.memo-source__notice { color: var(--daon-status-ok-fg); background: var(--daon-status-ok-bg); }
+.memo-source__error { color: var(--daon-status-danger-fg); background: var(--daon-status-danger-bg); }
+.memo-source__spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: memo-source-spin 0.8s linear infinite; }
+@keyframes memo-source-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .memo-source__spinner { animation: none; } }
+
+.memo-origin { display: inline-flex; flex: none; align-items: center; }
+.memo-origin__open, .memo-origin--missing { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; border-radius: 999px; font: inherit; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.memo-origin__open { border: 1px solid var(--daon-color-accent); background: color-mix(in srgb, var(--daon-color-accent) 12%, var(--daon-color-surface)); color: var(--daon-color-accent); cursor: pointer; }
+.memo-origin__open:hover { background: color-mix(in srgb, var(--daon-color-accent) 20%, var(--daon-color-surface)); }
+.memo-origin__open:focus-visible { outline: 2px solid var(--daon-color-focus, var(--daon-color-accent)); outline-offset: 2px; }
+.memo-origin--missing { border: 1px dashed var(--daon-color-border); background: var(--daon-status-neutral-bg); color: var(--daon-status-neutral-fg); cursor: default; }
+/* 소스 줄에서는 이름 아래 둘째 줄에 둔다(좁은 소스 열에서 작업 버튼을 밀어내지 않도록). */
+.source-list-row > .memo-origin { flex: 0 0 100%; padding: 0 10px 6px 46px; }
+.source-list-row:has(> .source-use-check) > .memo-origin { padding-left: 78px; }

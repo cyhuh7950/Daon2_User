@@ -11,6 +11,7 @@ import { OrganizationJoinForm } from "../../apps/web/components/organization-joi
 import OrganizationAdminConsole from "../../apps/web/components/organization-admin-console.jsx";
 import { AuthPane } from "../../apps/web/lib/auth-pane.jsx";
 import { AnswerProcess } from "../../packages/ui/src/answer-process.jsx";
+import { ProductWorkspaceShell } from "../../packages/ui/src/product-workspace-shell.jsx";
 import "../../packages/ui/src/answer-process.css";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
@@ -101,6 +102,48 @@ function ProcessHarness({ state }) {
         h("div", { className: "answer-process-row" }, processView)));
 }
 
+// 메모를 소스로(NB1-U2) 상태: 버튼 3상태·진행 중·실패 문구는 Studio 메모 보기, 메모 표시·원본 메모 없음은 노트북 소스 목록.
+// 진행 중·실패는 화면에서 버튼을 눌러 만든다(진행 중은 응답을 끝내지 않고, 실패는 MEMO_EMPTY로 답한다).
+const MEMO_ID = sid("n");
+const memoOutput = item("n", "memo", "회의 메모", { current_revision: 3 });
+const linkOf = (outdated) => ({ source_id: "memo-source-1", reflected_revision_no: outdated ? 2 : 3, outdated });
+const MEMO_STATES = {
+  "memo-create": { label: "메모→소스: 소스로 사용", link: null },
+  "memo-reflect": { label: "메모→소스: 소스에 반영", link: linkOf(true) },
+  "memo-same": { label: "메모→소스: 소스와 같음", link: linkOf(false) },
+  "memo-busy": { label: "메모→소스: 진행 중(버튼 누르기)", link: null, create: () => new Promise(() => {}) },
+  "memo-error": { label: "메모→소스: 실패 문구(버튼 누르기)", link: null, create: async () => { throw Object.assign(new Error("MEMO_EMPTY"), { code: "MEMO_EMPTY", status: 422 }); } },
+  "memo-origin": { label: "메모→소스: 소스 줄 메모 표시·원본 메모 없음", link: linkOf(false), shell: true },
+};
+function makeMemoStudio(view) {
+  let link = view.link;
+  return {
+    listTypes: async () => [{ type_id: "memo", available: true, formats: [], presets: [], export_formats: [], default_format: null, settings_schema: null }],
+    listOutputs: async () => ({ items: [memoOutput], nextCursor: null }),
+    getOutput: async () => ({ ...memoOutput, settings: {}, assets: [], evidence: [], source_link: link, revision: { content: { body: { markdown: "# 6월 회의\n- 보험금 청구 서류는 3일 안에 검토한다.\n- 면책 기간 안내 문구를 고친다." }, warnings: [] } } }),
+    createRevision: async () => ({ revision_no: 4 }),
+    createMemoSource: view.create ?? (async () => { link = linkOf(false); return { source_id: "memo-source-1", source_version_id: "memo-version-1", state: "registered" }; }),
+    reflectMemoSource: async () => { link = linkOf(false); return { source_id: "memo-source-1", source_version_id: "memo-version-2" }; },
+    exportFormats: () => [],
+  };
+}
+const memoSourceRow = (over) => ({ source_id: "source-1", source_version_id: "version-1", filename: "보험약관.pdf", source_state: "ready", processing_state: "completed", job_state: "completed", ...over });
+const MEMO_SOURCES = [
+  memoSourceRow(),
+  memoSourceRow({ source_id: "memo-source-1", source_version_id: "memo-version-1", filename: "회의 메모.txt", memo_origin: { memo_output_id: MEMO_ID, memo_exists: true } }),
+  memoSourceRow({ source_id: "memo-source-2", source_version_id: "memo-version-2", filename: "검토 메모.txt", source_state: "processing", processing_state: "running", job_state: "running", memo_origin: { memo_output_id: sid("o"), memo_exists: true } }),
+  memoSourceRow({ source_id: "memo-source-3", source_version_id: "memo-version-3", filename: "지난 메모.txt", memo_origin: { memo_output_id: sid("p"), memo_exists: false } }),
+];
+function MemoSourceHarness({ state }) {
+  const view = MEMO_STATES[state];
+  const studio = useMemo(() => makeMemoStudio(view), [view]);
+  const adapter = useMemo(() => ({ listSources: async () => MEMO_SOURCES, uploadPdf() {}, getProcessingStatus() {}, askQuestion() {}, citationUrl: () => null, createReport() {},
+    listStudioOutputs: async () => [], listConnectors: async () => [], listKnowledgePackages: async () => [], studioV2: studio }), [studio]);
+  if (view.shell) return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
+  return h("div", { "data-harness-state": state, style: { maxWidth: 420 } },
+    h(StudioPanel, { studio, sourceStats: { sourceCount: 1, checkedCount: 1, readySourceCount: 1, processingCount: 0 }, openOutputRequest: { outputId: MEMO_ID, nonce: 1 } }));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -113,7 +156,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -154,6 +197,7 @@ function App() {
     })() : null,
     view === "login" ? h(AuthPane, {}) : null,
     PROCESS_STATES[view] ? h(ProcessHarness, { key: view, state: view }) : null,
+    MEMO_STATES[view] ? h(MemoSourceHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 
