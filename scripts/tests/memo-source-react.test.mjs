@@ -376,3 +376,28 @@ test("메모로 만든 소스가 처리 중이면 처리가 끝날 때까지 소
     assert.equal(reads, settled, "준비되면 더 읽지 않음");
   } finally { await view.close(); }
 });
+
+test("메모를 소스에 반영해 새 소스가 처리 중이면 처리가 끝날 때까지 소스 목록을 다시 읽는다(NB1-I2 반영 경로)", async () => {
+  // 반영은 새 소스를 만든다(C-1 정정): 응답의 source_id가 바뀐다.
+  const studio = fakeStudio({ sourceLink: { source_id: "memo-source-1", reflected_revision_no: 1, outdated: true },
+    reflect: (state) => { state.link = { source_id: "memo-source-2", reflected_revision_no: state.revision, outdated: false }; return { source_id: "memo-source-2", source_version_id: "memo-version-2", revision_no: state.revision }; } });
+  let reflected = false;
+  let reads = 0;
+  const view = await mountShell(shellAdapter(studio, async () => {
+    if (!reflected) return [rawSource(), memoSource(true)];
+    reads += 1;
+    return [rawSource(), memoSource(true, { source_id: "memo-source-2", source_version_id: "memo-version-2", ...(reads < 3 ? { source_state: "processing", processing_state: "processing", job_state: "processing" } : {}) })];
+  }), { memoSourcePollMs: 5 });
+  try {
+    const card = findElements(view.container, (node) => node.tagName === "BUTTON" && node.getAttribute("aria-label") === "열기: 회의 메모")[0];
+    await view.act(async () => { card.dispatchEvent(new MinimalEvent("click")); });
+    await view.wait();
+    reflected = true;
+    await view.act(async () => { sourceButton(view.container).dispatchEvent(new MinimalEvent("click")); });
+    for (let i = 0; i < 10 && reads < 3; i += 1) await view.wait();
+    await view.wait();
+    const row = findElements(view.container, (node) => node.tagName === "LI" && node.getAttribute("data-source-id") === "memo-source-2")[0];
+    assert.ok(reads >= 3, "처리 중인 동안 다시 읽음");
+    assert.match(row.textContent, /사용 가능/u);
+  } finally { await view.close(); }
+});
