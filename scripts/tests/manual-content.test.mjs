@@ -120,6 +120,55 @@ test("N1 단계 1 두 절(2-13 답변 과정 보기, 2-14 메모를 소스로 �
   });
 });
 
+// WO-N1 단계 2(NB2-M): 질문 도구 켜고 끄기·노트북 개요와 추천 질문 절이 원본과 공개 사본에 모두 있어야 한다.
+test("N1 단계 2 두 절(2-15 질문 도구 켜고 끄기, 2-16 노트북 개요와 추천 질문)은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const section = (heading) => {
+      const start = markdown.indexOf(`\n${heading}\n`);
+      assert.ok(start >= 0, `${file}: ${heading}`);
+      const rest = markdown.slice(start + 1);
+      const next = rest.slice(1).search(/\n#{2,3} /u);
+      return rest.slice(0, next < 0 ? undefined : next + 1);
+    };
+    const tools = section("### 2-15 질문 도구 켜고 끄기");
+    for (const required of [
+      /모델 선택 옆 \*\*도구\*\* 버튼/u,
+      /숫자 배지.*켜진 도구 수/su,
+      /\*\*승인 지식\*\*.*지식 연결/su,
+      /즉시 저장/u,
+      /노트북별로 기억/u,
+      /승인 지식 범위가 선택되지 않았습니다.*연결이 아직 준비되지 않았습니다.*관리자가 끈 연결입니다/su,
+      /소스만으로 답합니다/u,
+      /서버에 저장된 선택으로 판단.*호출되지 않습니다/su,
+      /웹 검색 도구는 없습니다/u,
+      /Citation 칩 앞에.*\*\*승인 지식\*\*.*\*\*문서 근거\*\*.*\*\*법령\*\*.*소스 이름/su,
+      /\*\*답변 과정\*\*.*\*\*질문 범위\*\*/su,
+      /images\/2-15-question-tools\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(tools, required, `2-15 ${required}`);
+    const overview = section("### 2-16 노트북 개요와 추천 질문");
+    for (const required of [
+      /준비된 소스가 처음 생기면.*자동으로 만들어집니다/su,
+      /요약 한 문단.*인용 칩/su,
+      /\*\*추천 질문\*\* 세 개/u,
+      /개요를 만드는 중입니다/u,
+      /입력 칸에 채워집니다.*자동으로 보내지 않/su,
+      /소스가 바뀌었습니다/u,
+      /\*\*다시 만들기\*\*.*누를 때만 새로 만들/su,
+      /편집할 수 있는 사용자만/u,
+      /외부 전송 정책으로 개요를 만들 수 없습니다.*시작 제안/su,
+      /\*\*다시 시도\*\*/u,
+      /\*\*개요 접기\*\*/u,
+      /images\/2-16-notebook-overview\.png/u,
+      /images\/2-16-notebook-overview-stale\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(overview, required, `2-16 ${required}`);
+    assert.match(markdown, /\| 질문할 때 승인 지식·지식 연결 켜고 끄기 \| 2-15 \|/u, "부록 C 2-15");
+    assert.match(markdown, /\| 노트북 요약과 추천 질문 보기, 개요 다시 만들기 \| 2-16 \|/u, "부록 C 2-16");
+  });
+});
+
 test("한국어 Manual 정본은 1부 첫 업무 흐름과 공개 범위를 명시하고 내부 정보를 쓰지 않는다", async () => {
   for (const [id, title] of docs) {
     const markdown = await readFile(new URL(`docs/manual/${id}/index.md`, root), "utf8");
