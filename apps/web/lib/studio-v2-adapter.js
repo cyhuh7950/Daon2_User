@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  cancelStudioOutput, createStudioMemo, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
+  cancelStudioOutput, createStudioMemo, createMemoSource, reflectMemoSource, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, issueExportStepUp,
@@ -43,6 +43,9 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     recordLearningAttempt: (outputId, input) => recordLearningAttempt(workspaceId, outputId, scope(input)),
     listLearningAttempts: (outputId, options) => listLearningAttempts(workspaceId, outputId, scope(options)),
     createMemo: (input) => createStudioMemo(workspaceId, scope({ ...input, title: input?.title ?? localMemoTitle() })),
+    // 메모를 소스로(WO-N1 NB1-F2): 응답 {source_id, source_version_id, state} / 반영 {source_id, source_version_id}.
+    createMemoSource: (outputId, options) => createMemoSource(workspaceId, outputId, scope(options)),
+    reflectMemoSource: (outputId, options) => reflectMemoSource(workspaceId, outputId, scope(options)),
     issueExportStepUp: (outputId, password, options) => issueExportStepUp(outputId, password, options),
     copyNotebook: (input) => copyNotebook(workspaceId, scope(input)),
     clearChatHistory: (options) => clearChatHistory(workspaceId, scope(options)),

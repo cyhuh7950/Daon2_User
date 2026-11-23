@@ -6846,7 +6846,15 @@
           "processing_state": { "type": "string" },
           "job_state": { "type": "string" },
           "safe_error_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
-          "website": { "$ref": "#/components/schemas/WebsiteSourceOriginal" }
+          "website": { "$ref": "#/components/schemas/WebsiteSourceOriginal" },
+          "memo_origin": {
+            "description": "Only on sources made from a Studio memo (WO-N1 N1-3). memo_exists is false after the memo was deleted; the source stays.",
+            "type": "object", "additionalProperties": false, "required": ["memo_output_id", "memo_exists"],
+            "properties": {
+              "memo_output_id": { "type": "string", "pattern": "^sv2-[0-9a-f]{32}$" },
+              "memo_exists": { "type": "boolean" }
+            }
+          }
         }
       },
       "WorkspaceSourceListEnvelope": {

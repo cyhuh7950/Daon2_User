@@ -280,6 +280,15 @@ function safeResponseError(payload, fallback) {
   return error;
 }
 
+// 메모로 만든 소스(WO-N1 NB1-F2)에만 memo_origin {memo_output_id, memo_exists}가 붙는다. 모양이 틀리면 null.
+const MEMO_OUTPUT_ID = /^sv2-[0-9a-f]{32}$/u;
+function withoutMemoOrigin(source) {
+  if (!source || typeof source !== "object" || !Object.hasOwn(source, "memo_origin")) return source;
+  const { memo_origin: origin, ...rest } = source;
+  return exact(origin, ["memo_output_id", "memo_exists"]) && MEMO_OUTPUT_ID.test(origin.memo_output_id)
+    && typeof origin.memo_exists === "boolean" ? rest : null;
+}
+
 export async function listWorkspaceSources(workspaceId, { notebookId, websiteSourceVersionId, includeFailureReason = false, fetchImpl = fetch, signal } = {}) {
   const workspace = requiredWorkspace(workspaceId, "SOURCE_LIST_INPUT_INVALID");
   const notebook = requiredWorkspace(notebookId, "SOURCE_LIST_INPUT_INVALID");
@@ -297,7 +306,7 @@ export async function listWorkspaceSources(workspaceId, { notebookId, websiteSou
     && Array.isArray(payload.data.sources)
     && payload.data.sources.length <= 1_000
     && validMeta(payload.meta, workspace)
-    && payload.data.sources.every((source) => (exact(source, SOURCE_KEYS)
+    && payload.data.sources.map(withoutMemoOrigin).every((source) => source !== null && (exact(source, SOURCE_KEYS)
       || (exact(source, [...SOURCE_KEYS, "safe_error_code"]) && typeof source.safe_error_code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(source.safe_error_code))
       || (websiteSourceVersionId !== undefined && source.source_version_id === websiteSourceVersionId
         && exact(source, [...SOURCE_KEYS, "website"]) && source.source_state === "ready"

@@ -82,6 +82,59 @@ class PostgresSourceUploadService:
     def close(self) -> None:
         self._canon_store.close()
 
+    @property
+    def canon_store(self) -> PostgresDataCanonStore:
+        """같은 canon 저장소로 새 소스 버전을 붙이는 도우미(text_source)가 쓴다."""
+        return self._canon_store
+
+    def store_object(
+        self,
+        *,
+        tenant_id: str,
+        workspace_id: str,
+        actor_id: str,
+        content: bytes,
+        content_type: str,
+        idempotency_key: str,
+        trace_id: str,
+    ) -> str:
+        """업로드와 같은 객체 대기열로 원문을 저장하고 object_id를 돌려준다(canon 기록은 호출자가 한다)."""
+        object_id = self._opaque_id(f"{tenant_id}|{workspace_id}|{actor_id}", idempotency_key)
+        cloud_context = CloudAccessContext(tenant_id, workspace_id, actor_id, "object.write")
+        try:
+            self._store(cloud_context, content=content, content_type=content_type,
+                        idempotency_key=idempotency_key, trace_id=trace_id, object_id=object_id)
+        except ObjectQueueError as error:
+            raise SourceUploadError(
+                "SOURCE_STORAGE_UNAVAILABLE" if error.retryable else error.code,
+                503 if error.retryable else 400,
+                retryable=error.retryable,
+            ) from None
+        return object_id
+
+    def _store(self, cloud_context: CloudAccessContext, *, content: bytes, content_type: str,
+               idempotency_key: str, trace_id: str, object_id: str):  # type: ignore[no-untyped-def]
+        self._queue_store.seed_scope(cloud_context)
+        submission = self._coordinator.submit(
+            cloud_context,
+            area="source",
+            content=content,
+            content_type=content_type,
+            idempotency_key=idempotency_key,
+            trace_id=trace_id,
+            object_id=object_id,
+        )
+        record = self._queue_store.get_object(cloud_context, submission.object_id)
+        for _ in range(64):
+            if record.status in {"completed", "failed"}:
+                break
+            self._worker.run_once(cloud_context)
+            record = self._queue_store.get_object(cloud_context, submission.object_id)
+        if record.status != "completed":
+            code = "SOURCE_STORAGE_FAILED" if record.status == "failed" else "SOURCE_STORAGE_PENDING"
+            raise SourceUploadError(code, 503, retryable=record.status != "failed")
+        return submission
+
     def register_pdf(
         self,
         *,
@@ -122,7 +175,9 @@ class PostgresSourceUploadService:
         trace_id: str,
         content_type: str,
         deletion_policy: str = "delete_with_notebook",
+        deduplicate: bool = True,
     ) -> SourceUploadResult:
+        """deduplicate=False면 같은 내용의 기존 소스를 찾지 않고 항상 새 소스로 등록한다(텍스트 소스)."""
         if deletion_policy not in {"delete_with_notebook", "retain_after_notebook_delete"}:
             raise SourceUploadError("INVALID_DELETION_POLICY")
         scope_text = f"{tenant_id}|{workspace_id}|{actor_id}"
@@ -140,7 +195,7 @@ class PostgresSourceUploadService:
             find_existing = getattr(self._canon_store, "find_source_by_digest", None)
             existing = (
                 find_existing(canon_context, digest_sha256=digest)
-                if callable(find_existing) else None
+                if callable(find_existing) and deduplicate else None
             )
             if isinstance(existing, tuple) and len(existing) == 3:
                 existing_source_id, existing_version_id, existing_object_id = existing
@@ -168,25 +223,8 @@ class PostgresSourceUploadService:
                     content_type=content_type,
                     deletion_policy=deletion_policy,
                 )
-            self._queue_store.seed_scope(cloud_context)
-            submission = self._coordinator.submit(
-                cloud_context,
-                area="source",
-                content=content,
-                content_type=content_type,
-                idempotency_key=idempotency_key,
-                trace_id=trace_id,
-                object_id=object_id,
-            )
-            record = self._queue_store.get_object(cloud_context, submission.object_id)
-            for _ in range(64):
-                if record.status in {"completed", "failed"}:
-                    break
-                self._worker.run_once(cloud_context)
-                record = self._queue_store.get_object(cloud_context, submission.object_id)
-            if record.status != "completed":
-                code = "SOURCE_STORAGE_FAILED" if record.status == "failed" else "SOURCE_STORAGE_PENDING"
-                raise SourceUploadError(code, 503, retryable=record.status != "failed")
+            submission = self._store(cloud_context, content=content, content_type=content_type,
+                                     idempotency_key=idempotency_key, trace_id=trace_id, object_id=object_id)
             self._canon_store.register_uploaded_source(
                 canon_context,
                 notebook_id=notebook_id,

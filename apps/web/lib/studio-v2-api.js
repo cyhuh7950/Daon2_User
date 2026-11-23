@@ -93,10 +93,14 @@ export async function listStudioOutputs(workspaceId, { notebookId, cursor, limit
   return { items: data.items, nextCursor: data.next_cursor, etag };
 }
 
+// 메모를 소스로(WO-N1 NB1-F2): 메모 조회 응답의 source_link는 없거나(null 포함) 정확한 모양이다.
+const validSourceLink = (l) => l === undefined || l === null || (exact(l, ["source_id", "reflected_revision_no", "outdated"])
+  && SAFE_ID.test(l.source_id) && Number.isSafeInteger(l.reflected_revision_no) && l.reflected_revision_no >= 1 && typeof l.outdated === "boolean");
+
 export async function getStudioOutput(workspaceId, outputId, { notebookId, revision, signal, fetchImpl } = {}) {
   const suffix = revision ? `?revision=${encodeURIComponent(revision)}` : "";
   const { data, etag } = await json(await request("GET", `${outputPath(workspaceId, notebookId, outputId)}${suffix}`, { signal, fetchImpl }),
-    (d) => isObject(d) && OUTPUT_ID.test(d.output_id) && Array.isArray(d.evidence) && Array.isArray(d.assets));
+    (d) => isObject(d) && OUTPUT_ID.test(d.output_id) && Array.isArray(d.evidence) && Array.isArray(d.assets) && validSourceLink(d.source_link));
   return { ...data, etag };
 }
 
@@ -271,6 +275,23 @@ export async function createStudioMemo(workspaceId, { notebookId, title, markdow
   if (fromRunResultId) body.from_run_result_id = fromRunResultId;
   const { data } = await json(await request("POST", `${base(workspaceId, notebookId)}/memos`,
     { body, idempotent: true, idempotencyKey, signal, fetchImpl }), (d) => exact(d, ["output_id", "status", "replayed"]));
+  return data;
+}
+
+// 메모를 소스로 사용: 메모 본문을 텍스트 소스로 등록한다(201). 응답 {source_id, source_version_id, state}.
+// 오류 코드: STUDIO_OUTPUT_NOT_FOUND, OUTPUT_NOT_MEMO, MEMO_SOURCE_EXISTS, MEMO_EMPTY, MEMO_TOO_LARGE, FORBIDDEN.
+export async function createMemoSource(workspaceId, outputId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("POST", `${outputPath(workspaceId, notebookId, outputId)}/source`, { signal, fetchImpl }),
+    (d) => exact(d, ["source_id", "source_version_id", "state"]) && SAFE_ID.test(d.source_id) && SAFE_ID.test(d.source_version_id)
+      && typeof d.state === "string");
+  return data;
+}
+
+// 소스에 반영: 메모의 현재 리비전을 같은 소스의 새 버전으로 붙인다(200). 응답 {source_id, source_version_id}.
+// 오류 코드: MEMO_SOURCE_NOT_LINKED, MEMO_SOURCE_UNCHANGED, MEMO_EMPTY, MEMO_TOO_LARGE, SOURCE_PROCESSING_ACTIVE, FORBIDDEN.
+export async function reflectMemoSource(workspaceId, outputId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("POST", `${outputPath(workspaceId, notebookId, outputId)}/source/reflect`, { signal, fetchImpl }),
+    (d) => exact(d, ["source_id", "source_version_id"]) && SAFE_ID.test(d.source_id) && SAFE_ID.test(d.source_version_id));
   return data;
 }
 

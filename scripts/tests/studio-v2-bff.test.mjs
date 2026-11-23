@@ -67,6 +67,8 @@ test("Studio v2 쓰기 경로는 Idempotency-Key·If-Match를 전달하고 CSRF 
     ["POST", "/outputs/sv2-1/cancel", seg("outputs", "sv2-1", "cancel")],
     ["POST", "/outputs/sv2-1/learning-attempts", seg("outputs", "sv2-1", "learning-attempts")],
     ["PUT", "/customization", seg("customization")], ["POST", "/memos", seg("memos")],
+    ["POST", "/outputs/sv2-1/source", seg("outputs", "sv2-1", "source")],
+    ["POST", "/outputs/sv2-1/source/reflect", seg("outputs", "sv2-1", "source", "reflect")],
   ]) {
     const response = await proxy(write(method, path), segments);
     assert.equal(response.status, 200, `${method} ${path}`);
@@ -215,4 +217,20 @@ test("요구사항이 많은 작성 확정 요청도 전달하고 다른 쓰기 
   assert.equal(other.status, 413);
   const huge = await proxy(write("PUT", "/authoring/sessions/sv2-1/review", JSON.stringify("a".repeat(1_048_577))), seg("authoring", "sessions", "sv2-1", "review"));
   assert.equal(huge.status, 413);
+});
+
+test("메모를 소스로 경로는 POST만, 정확한 세그먼트로 전달한다", async () => {
+  const captured = [];
+  const proxy = makeProxy(captured);
+  const created = await proxy(write("POST", "/outputs/sv2-1/source"), seg("outputs", "sv2-1", "source"));
+  assert.equal(created.status, 200);
+  assert.equal(captured.at(-1).url, "https://api.example.com/api/v1/workspaces/workspace-1/notebooks/notebook-1/studio/outputs/sv2-1/source");
+  const reflected = await proxy(write("POST", "/outputs/sv2-1/source/reflect"), seg("outputs", "sv2-1", "source", "reflect"));
+  assert.equal(reflected.status, 200);
+  assert.equal(captured.at(-1).url, "https://api.example.com/api/v1/workspaces/workspace-1/notebooks/notebook-1/studio/outputs/sv2-1/source/reflect");
+  const count = captured.length;
+  assert.equal((await proxy(get("/outputs/sv2-1/source"), seg("outputs", "sv2-1", "source"))).status, 405);
+  assert.equal((await proxy(write("DELETE", "/outputs/sv2-1/source/reflect"), seg("outputs", "sv2-1", "source", "reflect"))).status, 405);
+  assert.equal((await proxy(write("POST", "/outputs/sv2-1/source/other"), seg("outputs", "sv2-1", "source", "other"))).status, 404);
+  assert.equal(captured.length, count);
 });

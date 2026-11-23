@@ -2452,6 +2452,222 @@
           }
         }
       }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/source": {
+      "post": {
+        "operationId": "createStudioV2MemoSource",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2EmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2MemoSourceReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Edit permission required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Memo is larger than the text source limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a memo or empty memo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs/{output_id}/source/reflect": {
+      "post": {
+        "operationId": "reflectStudioV2MemoSource",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/OutputId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudioV2EmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2MemoSourceReflectReceiptEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Edit permission required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Memo is larger than the text source limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a memo or empty memo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2622,7 +2838,16 @@
                   "CHAT_EDIT_STALE",
                   "CHAT_EDIT_INVALID",
                   "CHAT_EDIT_TOO_LARGE",
-                  "CHAT_EDIT_STATE_INVALID"
+                  "CHAT_EDIT_STATE_INVALID",
+                  "FORBIDDEN",
+                  "STUDIO_OUTPUT_NOT_FOUND",
+                  "OUTPUT_NOT_MEMO",
+                  "MEMO_SOURCE_EXISTS",
+                  "MEMO_EMPTY",
+                  "MEMO_TOO_LARGE",
+                  "MEMO_SOURCE_NOT_LINKED",
+                  "MEMO_SOURCE_UNCHANGED",
+                  "SOURCE_PROCESSING_ACTIVE"
                 ]
               },
               "trace_id": {
@@ -3039,10 +3264,83 @@
                     }
                   }
                 }
+              },
+              "source_link": {
+                "description": "Memo outputs only (null when the memo is not used as a source).",
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/StudioV2MemoSourceLink"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             }
           }
         ]
+      },
+      "StudioV2MemoSourceLink": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "reflected_revision_no",
+          "outdated"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "reflected_revision_no": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "outdated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StudioV2MemoSourceReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "source_version_id",
+          "state"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "source_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
+      "StudioV2MemoSourceReflectReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_id",
+          "source_version_id"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          },
+          "source_version_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+          }
+        }
       },
       "StudioV2RenameRequest": {
         "type": "object",
@@ -3121,10 +3419,6 @@
         "properties": {
           "settings": {
             "type": "object"
-          },
-          "format_id": {
-            "type": "string",
-            "maxLength": 64
           }
         }
       },
@@ -3257,8 +3551,7 @@
                 "id",
                 "before_text",
                 "after_text",
-                "reason",
-                "anchor_text"
+                "reason"
               ],
               "properties": {
                 "op": {
@@ -3279,9 +3572,6 @@
                   "type": "string"
                 },
                 "reason": {
-                  "type": "string"
-                },
-                "anchor_text": {
                   "type": "string"
                 }
               }
@@ -4231,6 +4521,44 @@
             "$ref": "#/components/schemas/StudioV2Meta"
           }
         }
+      },
+      "StudioV2MemoSourceReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2MemoSourceReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2MemoSourceReflectReceiptEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2MemoSourceReflectReceipt"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
+          }
+        }
+      },
+      "StudioV2EmptyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
       }
     }
   }

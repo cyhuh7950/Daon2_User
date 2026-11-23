@@ -27,6 +27,9 @@ STUDIO_V2_PUBLIC_CODES = frozenset({
     "STUDIO_GENERATION_FAILED", "STUDIO_CANCELLED", "STUDIO_EXTERNAL_PROVIDER_UNSUPPORTED", "STUDIO_REVISION_TOO_LARGE",
     "STUDIO_SOURCE_TOO_LARGE", "NOTEBOOK_SCOPE_REQUIRED", "NOTEBOOK_SCOPE_MISMATCH",
     "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
+    # 메모를 소스로(WO-N1 NB1-F2)
+    "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
+    "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TURN_ID = re.compile(r"^svt-[0-9a-f]{32}$")
@@ -72,6 +75,10 @@ class CustomizationBody(_Strict):
     instruction: str = Field(max_length=4000)
 
 
+class EmptyBody(_Strict):
+    pass
+
+
 class MemoBody(_Strict):
     title: str | None = Field(default=None, max_length=160)
     markdown: str | None = Field(default=None, max_length=200_000)
@@ -97,7 +104,8 @@ def _parse_range(header: str | None, size: int) -> tuple[int, int] | None:
     return start, min(end, size - 1)
 
 
-def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, license_check: Any = None, authoring: Any = None, tts_resolver: Any = None) -> None:
+def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, license_check: Any = None, authoring: Any = None, tts_resolver: Any = None,
+                              memo_sources: Any = None) -> None:
     from .tts_engines import configured_from_env
     file_tts = configured_from_env()
     """`service`는 PostgresStudioV2Repository + export(context, output_id, format, revision)를 가진 객체."""
@@ -196,6 +204,15 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         data = await run(service.get_output, ctx, _output_id(output_id), _revision(request))
         if not data.get("stale") and hasattr(service, "knowledge_changed"):
             data["stale"] = await run(service.knowledge_changed, ctx, _output_id(output_id), _revision(request))
+        if data.get("type_id") == "memo":
+            # 메모를 소스로 쓴 연결(NB1-F2). 연결이 없거나 소스를 노트북에서 뗐으면 null.
+            data["source_link"] = None
+            if memo_sources is not None:
+                from .cloud_storage import CloudDatabaseError
+                try:
+                    data["source_link"] = await run(memo_sources.source_link, ctx, data["output_id"], data.get("current_revision"))
+                except CloudDatabaseError:
+                    pass  # 연결을 못 읽어도(예: 0084 적용 전 DB) 메모 조회는 막지 않는다.
         response = JSONResponse({"data": data, "meta": _meta(request, id)})
         response.headers["ETag"] = f'"studio-v2:{data["output_id"]}:{data["updated_at"]}"'
         response.headers["Cache-Control"] = "no-store"
@@ -396,6 +413,34 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         else:
             data = await run(service.create_memo, ctx, body.title, body.markdown or "", idempotency_key)
         return JSONResponse({"data": data, "meta": _meta(request, id)}, status_code=201)
+
+    def _memo_sources() -> Any:
+        if memo_sources is None:
+            raise StudioError("STUDIO_SERVICE_UNAVAILABLE", 503)
+        return memo_sources
+
+    @app.post(base + "/outputs/{output_id}/source", status_code=201)
+    async def studio_v2_memo_source_create(id: str, notebook_id: str, output_id: str, body: EmptyBody, request: Request) -> JSONResponse:
+        """메모를 소스로 사용(N1-3). 메모 본문을 텍스트 소스로 등록하고 문서 처리 작업에 넣는다."""
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        data = await run(_memo_sources().create, ctx, _output_id(output_id))
+        _audit(ctx, "studio.memo.source_created", output_id, metadata={
+            "notebook_id": notebook_id, "source_id": data["source_id"], "source_version_id": data["source_version_id"],
+            "revision_no": data["revision_no"]})
+        return JSONResponse({"data": {k: data[k] for k in ("source_id", "source_version_id", "state")}, "meta": _meta(request, id)},
+                            status_code=201)
+
+    @app.post(base + "/outputs/{output_id}/source/reflect", status_code=200)
+    async def studio_v2_memo_source_reflect(id: str, notebook_id: str, output_id: str, body: EmptyBody, request: Request) -> JSONResponse:
+        """메모의 현재 리비전을 같은 소스의 새 버전으로 반영한다(D-10: 버튼으로만)."""
+        _require_query_keys(request, frozenset())
+        ctx = _ctx(request, id, notebook_id, Action.EDIT)
+        data = await run(_memo_sources().reflect, ctx, _output_id(output_id))
+        _audit(ctx, "studio.memo.source_reflected", output_id, metadata={
+            "notebook_id": notebook_id, "source_id": data["source_id"], "source_version_id": data["source_version_id"],
+            "revision_no": data["revision_no"]})
+        return JSONResponse({"data": {k: data[k] for k in ("source_id", "source_version_id")}, "meta": _meta(request, id)})
 
     @app.get(base + "/outputs/{output_id}/evidence/{ref_id}/content")
     async def studio_v2_evidence_content(id: str, notebook_id: str, output_id: str, ref_id: str, request: Request) -> Response:
