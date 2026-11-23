@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 
 from .cloud_storage import CloudAccessContext, CloudDatabaseError, PostgresCloudStore
 from .object_queue import ObjectKeyPolicy, ObjectQueueError, ObjectStorageError, ObjectStoragePort
+from .answer_process import safe_answer_process
 from .data_canon import canonical_json_bytes
 from .document_index_postgres import IndexedEvidenceChunk, _source_access_allowed
 from .document_processing import text_source_format
@@ -108,6 +109,7 @@ class StoredQuestionAnswer:
     citations: tuple[StoredCitation, ...]
     provider_kind: str | None = None
     egress_scope: Mapping[str, object] | None = None
+    process: Mapping[str, object] | None = None  # 답변 과정(N1-1). 없으면 None
 
 
 class PostgresQuestionAnsweringRepository:
@@ -581,6 +583,7 @@ class PostgresQuestionAnsweringRepository:
                 bool(result_payload["insufficient"]), (*citations, *external.get(str(rows[0][0]), ())),
                 str(rows[0][4]) if rows[0][4] is not None else None,
                 cast(Mapping[str, object], rows[0][5]) if rows[0][5] is not None else None,
+                safe_answer_process(result_payload.get("process")),
             )
         except (KeyError, TypeError, ValueError):
             raise QuestionRepositoryError("QUESTION_RESULT_INVALID", status=500) from None
@@ -1515,7 +1518,10 @@ class PostgresQuestionAnsweringRepository:
         request_fingerprint: str | None = None,
         access_source_version_ids: tuple[str, ...] = (),
         external_citations: tuple[object, ...] = (),
+        process: Mapping[str, object] | None = None,
     ) -> StoredQuestionAnswer:
+        # 답변 과정은 허용 목록 검사를 통과한 값만 결과 정규화 JSON에 함께 남긴다(digest 포함).
+        process = safe_answer_process(process)
         if external_citations and context.notebook_id is None:
             raise QuestionRepositoryError("QUESTION_RESULT_INVALID")
         if (
@@ -1752,6 +1758,7 @@ class PostgresQuestionAnsweringRepository:
                     "run_id": run_id, "answer": result.answer,
                     "insufficient": result.insufficient,
                     "citation_ids": [item.citation_id for item in citations],
+                    **({"process": process} if process is not None else {}),
                 }, extra_columns=("run_id", "routing_decision_id", "selected_model_attempt_id"),
                     extra_values=(
                         run_id,
@@ -1830,5 +1837,5 @@ class PostgresQuestionAnsweringRepository:
             ) from None
         return StoredQuestionAnswer(
             run_id, run_result_id, result.answer, result.insufficient, (*citations, *(row[0] for row in external_rows)),
-            selection.provider_kind, replay_egress_scope,
+            selection.provider_kind, replay_egress_scope, process,
         )

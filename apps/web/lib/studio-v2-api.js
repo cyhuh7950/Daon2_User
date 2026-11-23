@@ -1,6 +1,7 @@
 "use client";
 
 import { secureUuid } from "@daon2-user/ui/secure-uuid";
+import { withAnswerProcess } from "./answer-process.js";
 
 // Studio v2 BFF 클라이언트(WO-S1 T-S1-01). 경로: /bff/api/workspaces/{ws}/notebooks/{nb}/studio/...
 // 규칙: 직접 fetch 호출 금지(fetchImpl 기본 인자), same-origin 쿠키, 쓰기는 Idempotency-Key, 응답은 모양을 검증한다.
@@ -329,11 +330,12 @@ export async function saveModelSelection(workspaceId, { notebookId, connectionId
   return data;
 }
 
-/** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다. */
+/** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다.
+ * 각 답변의 process(답변 과정)는 질문 응답과 같은 규칙으로 검사해 열거되지 않는 `answer.process`로 붙인다(틀리면 null). */
 export async function listChatTurns(workspaceId, { notebookId, signal, fetchImpl } = {}) {
   const { data } = await json(await request("GET", `${notebookBase(workspaceId, notebookId)}/chat-history`, { signal, fetchImpl }),
     (d) => exact(d, ["turns"]) && Array.isArray(d.turns));
-  return data.turns;
+  return data.turns.map((turn) => (isObject(turn) && isObject(turn.answer) ? { ...turn, answer: withAnswerProcess(turn.answer) } : turn));
 }
 
 // ---- 작성(Authoring)과 지식 Connector -----------------------------------------------------------

@@ -344,6 +344,7 @@ class ResolvedModel:
     _released: bool = field(default=False, repr=False, compare=False)
     adapter_type: str = ""
     reasoning_level: str | None = None
+    connection_name: str | None = None  # 관리자가 정한 연결 이름(답변 과정 표시용, 비밀값 아님)
 
     @property
     def profile_id(self) -> str:
@@ -412,7 +413,7 @@ class PostgresWorkspaceModelResolver:
                     "c.encrypted_credential,c.credential_nonce,c.encryption_key_version,"
                     "c.credential_schema_version,c.credential_version,c.enabled,c.verification_status,"
                     "m.effective_capabilities,m.catalog_status,m.catalog_version,"
-                    "c.access_mode,c.credential_requirement,c.adapter_type "
+                    "c.access_mode,c.credential_requirement,c.adapter_type,c.display_name "
                     + ("FROM system_provider_connections c "
                        "JOIN system_provider_models m ON m.connection_id=c.connection_id "
                        "JOIN system_provider_allowed_models a ON a.connection_id=m.connection_id AND a.model_id=m.model_id "
@@ -506,6 +507,7 @@ class PostgresWorkspaceModelResolver:
             daon_fallback_allowed=not native_asr and provider_code not in _ROUTING_GATEWAYS | {"SENTENCE_TRANSFORMERS"},
             _credential=credential,
             adapter_type=str(values[17]),
+            connection_name=str(values[18]) if len(values) > 18 and values[18] is not None else None,
         )
         try:
             yield resolved
