@@ -149,6 +149,7 @@
 
 | 결함 ID | 발견 단위 | 내용 | 원인 단위 | 수정 커밋 | 재확인 |
 | --- | --- | --- | --- | --- | --- |
+| N1-B01 | NB1-I1 | 근거 없는 질문이 '근거 부족' 답변 대신 TEXT_GENERATION_GROUNDING_INVALID로 실패(로그 reason=anchors_unsupported, cited 0). 모델의 근거 없음 설명에 숫자가 섞이면 검증이 질문 전체를 실패시킴(기존 결함, UAT-02 차단) | NB1-F1 영역(question_answering.py) | claude/n1-nb1-f1-fix | 재배포 후 NB1-I1 3번 재확인 |
 
 ## 판단 기록 (Ruling)
 
