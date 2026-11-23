@@ -689,6 +689,38 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview": {
+      "get": {
+        "operationId": "getNotebookOverview", "tags": ["Workspace"],
+        "summary": "Notebook 개요·추천 질문 조회", "x-implementation-owner": "WO-N1-NB2-F2",
+        "description": "노트북마다 1건이며 같은 워크스페이스 사용자가 함께 본다. 행이 없고 준비된 소스(연결된 최신 버전, 떼지 않음, 삭제되지 않음, 이해 결과나 근거 구간 있음)가 1개 이상이면 queued 행을 한 번 만들고 state=queued를 돌려준다(결정 D-06 첫 자동 생성). 준비된 소스가 없으면 state=none이고 행을 만들지 않는다. 생성에 쓴 소스 버전 지문과 지금 지문이 다르면 stale=true이며 자동으로 다시 만들지 않는다. summary·questions(정확히 3개)·citations·generated_at은 state=ready일 때만 채워진다. error_code는 failed·blocked일 때의 안전한 코드다. 폴링 권장: queued·working이면 3초 간격, none·ready·failed·blocked에서 멈춘다. 노트북 보기 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "responses": {
+          "200": { "description": "Notebook overview", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotebookOverviewEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate": {
+      "post": {
+        "operationId": "regenerateNotebookOverview", "tags": ["Workspace"],
+        "summary": "Notebook 개요 다시 만들기", "x-implementation-owner": "WO-N1-NB2-F2",
+        "description": "ready·failed·blocked 개요를 비우고 queued로 되돌린다(시도 횟수 0부터). 행이 없으면 준비된 소스가 있을 때 queued 행을 만든다. 본문은 빈 JSON 객체다. 생성은 studio-v2 워커가 소스 근거만으로 하며(문장마다 인용, 인용 검증 실패 문장은 버림), 외부 전송 판정에서 막히면 모델을 부르지 않고 blocked가 된다. 감사 notebook.overview.generate에는 상태·소스 수만 남는다. 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "properties": {} } } } },
+        "responses": {
+          "202": { "description": "Overview queued", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NotebookOverviewEnvelope" } } } },
+          "409": { "description": "OVERVIEW_IN_PROGRESS (queued·working) or OVERVIEW_NO_READY_SOURCE", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings": {
       "post": {
         "operationId": "unbindWorkspaceNotebookSource", "tags": ["Workspace"],
@@ -7615,6 +7647,9 @@
           "QUESTION_TOOL_UNKNOWN",
           "QUESTION_TOOLS_INVALID",
           "QUESTION_TOOLS_UNAVAILABLE",
+          "OVERVIEW_IN_PROGRESS",
+          "OVERVIEW_NO_READY_SOURCE",
+          "OVERVIEW_UNAVAILABLE",
           "AUTHENTICATION_REQUIRED",
           "FORBIDDEN",
           "RESOURCE_UNAVAILABLE",
@@ -9424,6 +9459,31 @@
       "QuestionToolsUpdateRequest": {
         "type": "object", "additionalProperties": false, "required": ["enabled"],
         "properties": { "enabled": { "type": "object", "maxProperties": 64, "propertyNames": { "type": "string", "maxLength": 256 }, "additionalProperties": { "type": "boolean" } } }
+      },
+      "NotebookOverviewCitation": {
+        "type": "object", "additionalProperties": false, "required": ["label", "source_title", "page"],
+        "properties": {
+          "label": { "type": "string", "pattern": "^[1-9][0-9]{0,2}$" },
+          "source_title": { "type": "string", "maxLength": 300 },
+          "page": { "type": ["integer", "null"], "minimum": 1 }
+        }
+      },
+      "NotebookOverview": {
+        "description": "노트북 개요(WO-N1 N1-4). summary의 문장 끝 [n]은 citations의 label이다.",
+        "type": "object", "additionalProperties": false, "required": ["state", "summary", "questions", "citations", "stale", "generated_at", "error_code"],
+        "properties": {
+          "state": { "type": "string", "enum": ["none", "queued", "working", "ready", "failed", "blocked"] },
+          "summary": { "type": ["string", "null"], "maxLength": 4000 },
+          "questions": { "type": "array", "maxItems": 3, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+          "citations": { "type": "array", "maxItems": 64, "items": { "$ref": "#/components/schemas/NotebookOverviewCitation" } },
+          "stale": { "type": "boolean" },
+          "generated_at": { "type": ["string", "null"], "format": "date-time" },
+          "error_code": { "type": ["string", "null"], "enum": ["OVERVIEW_UNGROUNDED", "OVERVIEW_BLOCKED", "OVERVIEW_NO_READY_SOURCE", "OVERVIEW_PROVIDER_UNAVAILABLE", "OVERVIEW_GENERATION_FAILED", null] }
+        }
+      },
+      "NotebookOverviewEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/NotebookOverview" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
       },
       "NotebookContextEnvelope": {
         "type": "object", "additionalProperties": false, "required": ["data", "meta"],

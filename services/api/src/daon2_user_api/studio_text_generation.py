@@ -112,6 +112,10 @@ def _json_from_text(raw: object) -> Mapping[str, object]:
     return value
 
 
+class _EgressDenied(StudioError):
+    """외부 전송 판정에서 막힌 후보(코드는 기존과 같은 PROVIDER_UNAVAILABLE). 모델 호출 전에만 생긴다."""
+
+
 class StudioTextGenerator:
     def __init__(self, resolver, catalog: StudioModelCatalog, *, transport=None, egress_gate=None,
                  schema_validator: Callable[[Mapping[str, object], Mapping[str, object]], None] | None = None) -> None:  # type: ignore[no-untyped-def]
@@ -121,12 +125,16 @@ class StudioTextGenerator:
         self._transport = transport or UrlLibDocumentUnderstandingTransport()
         self._validate = schema_validator
 
-    def generate(self, context: StudioContext, prompt: StudioPrompt, *, cancel_check: Callable[[], None] | None = None) -> StudioGeneration:
+    def generate(self, context: StudioContext, prompt: StudioPrompt, *, cancel_check: Callable[[], None] | None = None,
+                 report_egress_block: bool = False) -> StudioGeneration:
+        """report_egress_block=True(노트북 개요 NB2-F2)면 모든 후보가 외부 전송 판정에서 막혔을 때 모델을 부르지 않고
+        STUDIO_EGRESS_BLOCKED로 끝낸다. 기본값은 지금까지와 같이 PROVIDER_UNAVAILABLE이다."""
         candidates = self._catalog.candidates(context)
         if not candidates:
             raise StudioError("PROVIDER_UNAVAILABLE", 503)
         model_context = WorkspaceModelContext(context.tenant_id, context.workspace_id, context.actor_id, "system")
         last: StudioError | None = None
+        denied = 0
         for connection_id, model_id, short_code in candidates:
             if cancel_check is not None:
                 cancel_check()
@@ -141,7 +149,10 @@ class StudioTextGenerator:
             except StudioError as error:
                 if error.code not in {"PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT", "STUDIO_VALIDATION_FAILED"}:
                     raise
+                denied += isinstance(error, _EgressDenied)
                 last = error
+        if report_egress_block and denied == len(candidates):
+            raise StudioError("STUDIO_EGRESS_BLOCKED", 403)
         raise last or StudioError("PROVIDER_UNAVAILABLE", 503)
 
     def _authorize(self, context: StudioContext, model, prompt: StudioPrompt) -> tuple[StudioPrompt, bool]:  # type: ignore[no-untyped-def]
@@ -150,12 +161,12 @@ class StudioTextGenerator:
         if kind in INTERNAL_KINDS:
             return prompt, False
         if self._egress is None:
-            raise StudioError("PROVIDER_UNAVAILABLE", 503)
+            raise _EgressDenied("PROVIDER_UNAVAILABLE", 503)
         masked_prompt = prompt
         size = len((prompt.system + prompt.user).encode("utf-8"))
         decision = self._egress.authorize(context, model, size)
         if not decision.allowed:
-            raise StudioError("PROVIDER_UNAVAILABLE", 503)
+            raise _EgressDenied("PROVIDER_UNAVAILABLE", 503)
         if decision.masked:
             from dataclasses import replace
             masked_prompt = replace(prompt, user=mask_text(prompt.user))

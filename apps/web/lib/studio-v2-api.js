@@ -384,6 +384,37 @@ export async function saveQuestionTools(workspaceId, { notebookId, enabled, sign
   return data;
 }
 
+// 노트북 개요·추천 질문(WO-N1 NB2-F2, 결정 D-06). none: 준비된 소스 없음. ready일 때만 summary·questions(3개)·citations·generated_at이 있다.
+// 폴링 권장: queued·working이면 3초 간격으로 다시 읽고 none·ready·failed·blocked에서 멈춘다.
+const OVERVIEW_STATES = new Set(["none", "queued", "working", "ready", "failed", "blocked"]);
+const OVERVIEW_ERRORS = new Set(["OVERVIEW_UNGROUNDED", "OVERVIEW_BLOCKED", "OVERVIEW_NO_READY_SOURCE", "OVERVIEW_PROVIDER_UNAVAILABLE", "OVERVIEW_GENERATION_FAILED"]);
+const OVERVIEW_KEYS = ["state", "summary", "questions", "citations", "stale", "generated_at", "error_code"];
+const validCitation = (c) => exact(c, ["label", "source_title", "page"]) && typeof c.label === "string" && /^[1-9][0-9]{0,2}$/u.test(c.label)
+  && typeof c.source_title === "string" && c.source_title.length <= 300 && (c.page === null || (Number.isSafeInteger(c.page) && c.page >= 1));
+const validQuestion = (q) => typeof q === "string" && q.length >= 1 && q.length <= 200;
+
+function validNotebookOverview(d) {
+  if (!exact(d, OVERVIEW_KEYS) || !OVERVIEW_STATES.has(d.state) || typeof d.stale !== "boolean" || !Array.isArray(d.questions) || !Array.isArray(d.citations)) return false;
+  const failed = d.state === "failed" || d.state === "blocked";
+  if (!(d.error_code === null || (failed && OVERVIEW_ERRORS.has(d.error_code)))) return false;
+  if (d.state !== "ready") return d.summary === null && d.generated_at === null && d.questions.length === 0 && d.citations.length === 0;
+  return typeof d.summary === "string" && d.summary.length >= 1 && d.summary.length <= 4000
+    && typeof d.generated_at === "string" && d.questions.length === 3 && d.questions.every(validQuestion)
+    && d.citations.length >= 1 && d.citations.length <= 64 && d.citations.every(validCitation);
+}
+
+/** 노트북 개요. 행이 없고 준비된 소스가 있으면 서버가 첫 생성을 대기열에 넣고 queued를 돌려준다. stale=true면 소스가 바뀐 것이다(자동 재생성 없음). */
+export async function getNotebookOverview(workspaceId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("GET", `${notebookBase(workspaceId, notebookId)}/overview`, { signal, fetchImpl }), validNotebookOverview);
+  return data;
+}
+
+/** 개요 다시 만들기(노트북 편집 권한). 202와 queued 개요. 진행 중이면 409 OVERVIEW_IN_PROGRESS, 준비된 소스가 없으면 409 OVERVIEW_NO_READY_SOURCE. */
+export async function regenerateNotebookOverview(workspaceId, { notebookId, signal, fetchImpl } = {}) {
+  const { data } = await json(await request("POST", `${notebookBase(workspaceId, notebookId)}/overview/regenerate`, { signal, fetchImpl }), validNotebookOverview);
+  return data;
+}
+
 /** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다.
  * 각 답변의 process(답변 과정)는 질문 응답과 같은 규칙으로 검사해 열거되지 않는 `answer.process`로 붙인다(틀리면 null). */
 export async function listChatTurns(workspaceId, { notebookId, signal, fetchImpl } = {}) {

@@ -368,6 +368,43 @@ class TextGenerationTests(unittest.TestCase):
         self.assertTrue(StudioEgressGate(None).authorize(CTX, model("OLLAMA", "https://o.example"), 10**9).allowed)
         self.assertFalse(StudioEgressGate(None).authorize(CTX, ext, 1).allowed)
 
+    def test_report_egress_block_when_every_candidate_is_denied_without_model_call(self):
+        """노트북 개요(NB2-F2)용 선택: 모든 후보가 외부 전송 판정에서 막히면 모델을 부르지 않고 STUDIO_EGRESS_BLOCKED."""
+        from daon2_user_api.studio_egress import EgressDecision
+        class Deny:
+            def authorize(self, context, model, size):
+                return EgressDecision(False, "EGRESS_POLICY_DENIED")
+        resolver = FakeResolver({"a": model("CUSTOM", "https://a.example/v1", kind="external_api"),
+                                 "b": model("UPSTAGE", "https://b.example/v1", kind="external_api")})
+        catalog = FakeCatalog([("a", "m", "MS"), ("b", "m", "US")])
+        transport = FakeTransport([])
+        with self.assertRaises(StudioError) as caught:
+            StudioTextGenerator(resolver, catalog, transport=transport, egress_gate=Deny()).generate(CTX, PROMPT, report_egress_block=True)
+        self.assertEqual(caught.exception.code, "STUDIO_EGRESS_BLOCKED")
+        self.assertEqual(transport.calls, [])
+        # 게이트가 없어 외부를 못 쓰는 것도 차단이다(외부 전송 판정을 통과하지 못함).
+        with self.assertRaises(StudioError) as caught:
+            StudioTextGenerator(resolver, catalog, transport=transport).generate(CTX, PROMPT, report_egress_block=True)
+        self.assertEqual(caught.exception.code, "STUDIO_EGRESS_BLOCKED")
+        # 기본 동작(다른 생성기)은 그대로 PROVIDER_UNAVAILABLE이다.
+        with self.assertRaisesRegex(StudioError, "PROVIDER_UNAVAILABLE"):
+            StudioTextGenerator(resolver, catalog, transport=transport, egress_gate=Deny()).generate(CTX, PROMPT)
+        self.assertEqual(transport.calls, [])
+
+    def test_report_egress_block_is_not_used_when_another_candidate_failed_for_other_reasons(self):
+        from daon2_user_api.studio_egress import EgressDecision
+        class Deny:
+            def authorize(self, context, model, size):
+                return EgressDecision(False, "EGRESS_POLICY_DENIED")
+        resolver = FakeResolver({"a": model("CUSTOM", "https://a.example/v1", kind="external_api"),
+                                 "b": model("OLLAMA", "https://b.example", kind="local")}, unavailable={"b"})
+        with self.assertRaisesRegex(StudioError, "PROVIDER_UNAVAILABLE"):
+            StudioTextGenerator(resolver, FakeCatalog([("a", "m", "MS"), ("b", "m", "OL")]), transport=FakeTransport([]),
+                                egress_gate=Deny()).generate(CTX, PROMPT, report_egress_block=True)
+        with self.assertRaisesRegex(StudioError, "PROVIDER_UNAVAILABLE"):  # 후보가 없으면 차단이 아니다
+            StudioTextGenerator(resolver, FakeCatalog([]), transport=FakeTransport([]), egress_gate=Deny()).generate(
+                CTX, PROMPT, report_egress_block=True)
+
     def test_catalog_priority_env(self):
         import os
         from unittest import mock

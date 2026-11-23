@@ -76,6 +76,13 @@ class GeneratorRegistry:
     def attach_chat_editor(self, editor: object) -> None:
         self._chat_editor = editor
 
+    def attach_overview(self, generator: object) -> None:
+        """노트북 개요 생성기(NB2-F2). 스텁 레지스트리에는 없다(개요 작업을 처리하지 않는다)."""
+        self._overview = generator
+
+    def overview(self) -> Any:
+        return getattr(self, "_overview", None)
+
     def chat_editor(self) -> Any:
         editor = getattr(self, "_chat_editor", None)
         if editor is None:
