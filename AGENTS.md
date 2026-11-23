@@ -8,6 +8,8 @@
 - 요구·설계: D:\Project\Daon2_User\docs\daon2-user-studio-design.md
 - 실행 계획: D:\Project\Daon2_User\docs\daon2_user_development_plan.md
 - 현황·인터뷰·오류·미검증: D:\Project\Daon2_User\WORK_STATUS.md
+- WO-N1 작업 계획(작업 단위·검수 기준·인계): NOTEBOOK_WORK_PLAN.md
+- WO-N1 작업 상황 보고(단위별 진도): NOTEBOOK_WORK_CHECK.md
 - 실제 환경: docs/DEVELOPMENT_ENVIRONMENT.md
 - 제품 맥락 요약: PRODUCT.md
 
