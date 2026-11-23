@@ -10,6 +10,8 @@ import { TtsEnginesPane } from "../../packages/ui/src/tts-engines-pane.jsx";
 import { OrganizationJoinForm } from "../../apps/web/components/organization-join-form.jsx";
 import OrganizationAdminConsole from "../../apps/web/components/organization-admin-console.jsx";
 import { AuthPane } from "../../apps/web/lib/auth-pane.jsx";
+import { AnswerProcess } from "../../packages/ui/src/answer-process.jsx";
+import "../../packages/ui/src/answer-process.css";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
 import "../../apps/web/app/globals.css";
@@ -73,6 +75,32 @@ const review = { output_id: sid("w"), template_id: "rfp_response_proposal", stat
   plan: { sections: [{ key: "a", title: "1. 사업의 이해", purpose: "", knowledge_refs: [], requirement_ids: ["REQ-001"] }, { key: "b", title: "2. 수행 방안", purpose: "", knowledge_refs: [], requirement_ids: ["REQ-002"] }] },
   output_formats: ["docx"], pending_questions: [], requests: [], inputs: {}, assumptions: [], error_code: null, document: null, knowledge_count: 3, job_status: "completed", revision_no: 3 };
 
+// 답변 과정(NB1-U1) 5상태: 정상·근거 부족·외부 전송 차단·일반 대화·기록 없음. 값은 answer_process.v1 예시다.
+const processItem = (over = {}) => ({ title: "보험약관.pdf", page: 3, origin: "raw_source", source_id: "source-1", source_version_id: "sv-1", ...over });
+const processNormal = { version: 1,
+  scope: { source_count: 2, knowledge_packages: [{ name: "제안서 작업" }], tools: null },
+  evidence: { searched: 24, selected: [processItem(), processItem({ page: 7 }), processItem({ title: "가입 안내.txt", page: null, source_id: "source-2", source_version_id: "sv-2" })] },
+  egress: { decision: "allowed", masked: true, redacted: false, policy_ref: "3f2a9c1b0d4e" },
+  model: { connection: "Media Bridge", model: "uss/solar-pro4", reasoning: "high" },
+  verification: { citations: 3, valid: true, insufficient: false, retried: false } };
+const PROCESS_STATES = {
+  "process-normal": { label: "답변 과정: 정상", process: processNormal, answer: "보험금 청구는 사고일로부터 3년 안에 해야 합니다." },
+  "process-insufficient": { label: "답변 과정: 근거 부족", process: { ...processNormal, evidence: { searched: 18, selected: [] }, verification: { citations: 0, valid: true, insufficient: true, retried: true } }, answer: "선택한 소스에서 질문에 답할 근거를 찾지 못했습니다." },
+  "process-blocked": { label: "답변 과정: 외부 전송 차단", process: { ...processNormal, egress: { decision: "blocked", masked: false, redacted: false, policy_ref: "3f2a9c1b0d4e" }, model: null, verification: null }, error: "질문 실행에 실패했습니다. (EGRESS_POLICY_DENIED) 입력을 확인한 뒤 다시 제출해 주세요." },
+  "process-general": { label: "답변 과정: 일반 대화", process: { ...processNormal, scope: { source_count: 0, knowledge_packages: [], tools: null }, evidence: null, egress: { decision: "not_needed", masked: false, redacted: false, policy_ref: null } }, answer: "안녕하세요. 무엇을 도와드릴까요?" },
+  "process-none": { label: "답변 과정: 기록 없음", process: null, answer: "이전에 저장된 답변입니다." },
+};
+function ProcessHarness({ state }) {
+  const view = PROCESS_STATES[state];
+  const processView = h(AnswerProcess, { process: view.process, defaultExpanded: true, canOpenEvidence: (item) => item.source_id === "source-1", onOpenEvidence: () => {} });
+  return h("div", { className: "conversation-transcript", "data-harness-state": state, style: { maxWidth: 640, background: "var(--daon-color-surface)", border: "1px solid var(--daon-color-border)", borderRadius: 12 } },
+    h("article", { className: "user-message" }, h("div", null, h("span", { className: "message-author" }, "나"), h("p", null, "보험금 청구 기한을 알려 주세요"))),
+    view.error ? h("div", { className: "inline-alert compact", role: "alert" }, view.error, h("div", { className: "answer-process-row" }, processView))
+      : h("div", null,
+        h("article", { className: "assistant-message" }, h("div", { className: "assistant-avatar", "aria-hidden": "true" }, "D"), h("div", null, h("span", { className: "message-author" }, "Daon"), h("p", null, view.answer))),
+        h("div", { className: "answer-process-row" }, processView)));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -85,7 +113,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"]];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -125,6 +153,7 @@ function App() {
       return h("div", { style: { maxWidth: 1000 } }, h(OrganizationAdminConsole, { mode: "organization", api }));
     })() : null,
     view === "login" ? h(AuthPane, {}) : null,
+    PROCESS_STATES[view] ? h(ProcessHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 
