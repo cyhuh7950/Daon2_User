@@ -16,6 +16,7 @@ import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
 import { approvedKnowledgeCitationLabel, citationKeys, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import { ManualMarkdown } from "./manual-markdown.jsx";
+import { AnswerProcess } from "./answer-process.jsx";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -608,7 +609,20 @@ export function projectSafeQuestionAnswer(answer, workspaceId, citationUrl, sele
     if (contentUrl !== expectedUrl && contentUrl !== expectedNativeUrl) throw new Error("QUESTION_RESPONSE_INVALID");
     return { ...citation, content_url: contentUrl };
   });
-  return { ...answer, citations };
+  // 답변 과정(N1-1): 웹 클라이언트가 검사해 열거되지 않는 속성으로 붙인 answer.process를 직접 읽어 평범한 키로 옮긴다({...answer}로는 사라진다).
+  return { ...answer, citations, process: projectAnswerProcess(answer.process) };
+}
+
+function projectAnswerProcess(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && value.version === 1 ? value : null;
+}
+
+// 답변 과정의 근거 항목과 같은 소스·버전의 Citation(같은 쪽 우선). 승인 지식 외부 링크(mcp_daon_rag)는 제외한다.
+export function citationForEvidence(answerValue, item) {
+  if (!item || typeof item.source_id !== "string" || typeof item.source_version_id !== "string") return null;
+  const candidates = (answerValue?.citations ?? []).filter((citation) => citation.origin !== "mcp_daon_rag"
+    && citation.source_id === item.source_id && citation.source_version_id === item.source_version_id);
+  return candidates.find((citation) => Number.isSafeInteger(item.page) && citation.page === item.page) ?? candidates[0] ?? null;
 }
 
 function AnswerSegments({ segments }) {
@@ -1605,9 +1619,11 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     } catch (error) {
       if (!current()) return;
       const failureCode = safeErrorCode(error, "QUESTION_FAILED");
+      // 외부 전송 차단 오류는 웹 클라이언트가 검사한 답변 과정(error.process)을 함께 준다.
+      const errorProcess = projectAnswerProcess(error?.process);
       setViewState((state) => ({
         ...projectQuestionFailureState(state, new Error(failureCode)),
-        turns: (state.turns ?? []).map((turn) => turn.id === turnId ? { ...turn, pending: false, error: failureCode } : turn),
+        turns: (state.turns ?? []).map((turn) => turn.id === turnId ? { ...turn, pending: false, error: failureCode, errorProcess } : turn),
       }));
     } finally {
       if (questionRequestRef.current === token) {
@@ -2205,9 +2221,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             const turns = viewState.turns?.length ? viewState.turns
               : (viewState.answer ? [{ id: "legacy", question: null, answer: viewState.answer, error: null, pending: false }] : []);
             if (!turns.length) return <div className="conversation-empty"><span className="conversation-orbit" aria-hidden="true"><StudioIcon name="sparkle" size={28} /></span><h3>{viewState.selectedSource || selectedKnowledgeId ? "Source에 대해 무엇이든 물어보세요." : "Source를 추가한 뒤 질문하세요."}</h3><p>{viewState.selectedSource || selectedKnowledgeId ? "선택한 Source의 근거와 Citation을 사용해 답합니다." : "답변은 Source가 제공한 지식으로만 만듭니다. Source가 없으면 모델을 호출하지 않습니다."}</p></div>;
-            const renderCitations = (answerValue) => (
-          <div className="citation-row">{answerValue?.citations?.map((citation) => (
-            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => {
+            // Citation을 눌렀을 때 소스 보기(원문 창)를 여는 함수. 답변 과정의 근거 항목도 같은 함수로 연다.
+            const openCitation = (event, citation) => {
               if (citation.origin === "mcp_daon_rag") return;
               if(citation.origin==='raw_source' && citation.locator.kind==='section' && /^law-source-[0-9a-f]{32}$/u.test(citation.source_id)){
                 event.preventDefault();lawCitationRequest.current?.abort();const controller=new AbortController();lawCitationRequest.current=controller;
@@ -2295,7 +2310,22 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               }).catch((error) => {
                 setViewState((current) => ({ ...current, status: "error", safeError: safeErrorCode(error, "CITATION_RESPONSE_INVALID") }));
               });
-            }}>{citation.origin === "mcp_daon_rag" ? approvedKnowledgeCitationLabel(citation) : <>Citation · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
+            };
+            // 근거 항목은 링크가 아니라 버튼이므로, 링크 기본 이동(원문 주소 열기)이 필요했던 경우에는 같은 주소로 이동한다.
+            const openEvidence = (event, answerValue, item) => {
+              const citation = citationForEvidence(answerValue, item);
+              if (!citation) return;
+              openCitation(event, citation);
+              const prevented = typeof event?.isDefaultPrevented === "function" ? event.isDefaultPrevented() : event?.defaultPrevented === true;
+              if (!prevented && typeof citation.content_url === "string") globalThis.location?.assign?.(citation.content_url);
+            };
+            const renderProcess = (answerValue, process) => <div className="answer-process-row">
+              <AnswerProcess process={process} canOpenEvidence={(item) => citationForEvidence(answerValue, item) !== null}
+                onOpenEvidence={(event, item) => openEvidence(event, answerValue, item)} />
+            </div>;
+            const renderCitations = (answerValue) => (
+          <div className="citation-row">{answerValue?.citations?.map((citation) => (
+            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => openCitation(event, citation)}>{citation.origin === "mcp_daon_rag" ? approvedKnowledgeCitationLabel(citation) : <>Citation · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
           ))}</div>
             );
             return turns.map((turn, index) => {
@@ -2303,7 +2333,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               return <div className="conversation-turn" key={turn.id} data-turn-state={turn.pending ? "pending" : turn.error ? "failed" : "answered"}>
                 {turn.question ? <article className="user-message"><div><span className="message-author">나</span><p>{turn.question}</p></div></article> : null}
                 {turn.pending ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
-                {turn.error ? <div className="inline-alert compact" role="alert">{turn.error === "QUESTION_CANCELLED" ? "질문이 중단되었습니다." : turn.error === "CONVERSATION_TURN_UNAVAILABLE" ? "이 답변은 접근 권한이 바뀌어 표시할 수 없습니다." : turn.error === "SELECTED_MODEL_UNAVAILABLE" ? "선택한 모델을 사용할 수 없어 답변하지 못했습니다. 다른 모델로 자동 전환하지 않습니다. 모델을 다시 고르거나 기본 모델로 되돌려 주세요." : `질문 실행에 실패했습니다. (${turn.error}) 입력을 확인한 뒤 다시 제출해 주세요.`}</div> : null}
+                {turn.error ? <div className="inline-alert compact" role="alert">{turn.error === "QUESTION_CANCELLED" ? "질문이 중단되었습니다." : turn.error === "CONVERSATION_TURN_UNAVAILABLE" ? "이 답변은 접근 권한이 바뀌어 표시할 수 없습니다." : turn.error === "SELECTED_MODEL_UNAVAILABLE" ? "선택한 모델을 사용할 수 없어 답변하지 못했습니다. 다른 모델로 자동 전환하지 않습니다. 모델을 다시 고르거나 기본 모델로 되돌려 주세요." : `질문 실행에 실패했습니다. (${turn.error}) 입력을 확인한 뒤 다시 제출해 주세요.`}{turn.errorProcess ? renderProcess(null, turn.errorProcess) : null}</div> : null}
                 {turn.answer ? <article className="assistant-message"><div className="assistant-avatar" aria-hidden="true">D</div><div><span className="message-author">Daon</span><AnswerText text={turn.answer.answer} />
                   <div className="answer-actions" role="group" aria-label="답변 작업">
                     {adapter?.studioV2 ? <button type="button" className="answer-action" disabled={turn.answer.insufficient === true || memoSave.pending} onClick={() => void saveAnswerToMemo(turn.answer)}>메모에 저장</button> : null}
@@ -2318,6 +2348,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 {last && !turn.answer?.insufficient && viewState.answerIntent === "work_support_source_backed"
                   ? <div className="context-selection-status" role="status">작업 상담 · Source 사용</div> : null}
                 {turn.answer ? renderCitations(turn.answer) : null}
+                {turn.answer ? renderProcess(turn.answer, turn.answer.process ?? null) : null}
               </div>;
             });
           })()}

@@ -1,0 +1,28 @@
+/* 답변 과정(NB1-U1). 색은 --daon-color-* / --daon-status-* 토큰만, 글씨는 12px 이상. 강조는 색과 "확인 필요" 글자를 함께 쓴다. */
+.answer-process { margin: 6px 0 0; font-size: 12px; color: var(--daon-color-text-primary); }
+.answer-process-toggle { min-height: 28px; padding: 0 10px; border: 1px solid var(--daon-color-border); border-radius: 999px; background: transparent; color: var(--daon-color-text-secondary); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.answer-process-toggle::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.answer-process-toggle[aria-expanded="true"]::after { transform: translateY(1px) rotate(-135deg); }
+.answer-process-toggle:hover { border-color: var(--daon-color-accent); color: var(--daon-color-accent); }
+.answer-process-toggle:focus-visible, .answer-process-evidence-open:focus-visible { outline: 2px solid var(--daon-color-focus, var(--daon-color-accent)); outline-offset: 2px; }
+.answer-process-panel { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--daon-color-border); border-radius: 10px; background: var(--daon-color-surface); }
+.answer-process-none { margin: 0; color: var(--daon-color-text-secondary); }
+.answer-process-steps { display: grid; gap: 6px; margin: 0; padding-left: 20px; }
+.answer-process-step { padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; }
+.answer-process-step::marker { color: var(--daon-color-text-secondary); font-weight: 700; }
+.answer-process-step[data-emphasis="true"] { border-color: var(--daon-status-warn-fg); background: var(--daon-status-warn-bg); }
+.answer-process-step[data-step="egress"][data-emphasis="true"] { border-color: var(--daon-status-danger-fg); background: var(--daon-status-danger-bg); }
+.answer-process-step-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.answer-process-attention { padding: 1px 6px; border: 1px solid currentColor; border-radius: 999px; color: var(--daon-status-warn-fg); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.answer-process-step[data-step="egress"] .answer-process-attention { color: var(--daon-status-danger-fg); }
+.answer-process-facts { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 3px 0 0; padding: 0; list-style: none; color: var(--daon-color-text-secondary); }
+.answer-process-step[data-emphasis="true"] .answer-process-facts { color: var(--daon-color-text-primary); }
+.answer-process-evidence { flex-basis: 100%; }
+.answer-process-evidence ul { display: grid; gap: 3px; margin: 2px 0 0; padding: 0; list-style: none; }
+.answer-process-evidence li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.answer-process-evidence-open { min-height: 24px; max-width: 100%; padding: 2px 8px; overflow: hidden; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--daon-color-accent) 14%, var(--daon-color-surface)); color: var(--daon-color-accent); font: inherit; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.answer-process-origin { padding: 0 6px; border-radius: 999px; background: var(--daon-status-neutral-bg); color: var(--daon-status-neutral-fg); font-size: 12px; white-space: nowrap; }
+.answer-process-muted { color: var(--daon-color-text-secondary); }
+.inline-alert .answer-process { color: var(--daon-color-text-primary); }
+.answer-process-row { margin: 4px 38px 0; }
+.inline-alert .answer-process-row { margin: 6px 0 0; }
