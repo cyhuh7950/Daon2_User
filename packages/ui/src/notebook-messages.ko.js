@@ -105,7 +105,7 @@ export const NOTEBOOK_MESSAGES = {
   "notebook.memo_source.created": "소스로 만들었습니다. 소스 목록에서 처리 상태를 확인하세요.",
   "notebook.memo_source.reflected": "소스에 반영했습니다. 새 버전을 처리하는 동안 소스 목록에 처리 상태가 보입니다.",
   "notebook.memo_source.error.memo_empty": "메모가 비어 있어 소스로 쓸 수 없습니다. 내용을 적은 뒤 다시 시도하세요.",
-  "notebook.memo_source.error.memo_too_large": "메모가 너무 깁니다(32KB 초과). 내용을 줄인 뒤 다시 시도하세요.",
+  "notebook.memo_source.error.memo_too_large": "메모가 너무 깁니다(2 MiB 초과). 내용을 줄이거나 나눠서 다시 시도하세요.",
   "notebook.memo_source.error.memo_source_exists": "이미 이 메모로 만든 소스가 있습니다. 메모를 고친 뒤에는 \"소스에 반영\"을 누르세요.",
   "notebook.memo_source.error.studio_output_not_found": "메모를 찾을 수 없습니다. 목록으로 돌아가 다시 열어 주세요.",
   "notebook.memo_source.error.output_not_memo": "메모만 소스로 쓸 수 있습니다.",
