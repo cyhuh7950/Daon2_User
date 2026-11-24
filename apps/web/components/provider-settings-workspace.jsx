@@ -291,6 +291,9 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
   const [savingDefault, setSavingDefault] = useState(false);
   const [saveResult, setSaveResult] = useState(null);
   const [testResult, setTestResult] = useState(null);
+  // 연결 시험 결과는 그 시험을 한 입력에만 해당한다. Key·모델·설정이 바뀌면(내용 기준) 이전 결과를 지운다.
+  const testInputKey = JSON.stringify([draft, credential]);
+  useEffect(() => { setTestResult(null); }, [testInputKey]);
   const [reasoningProbe, setReasoningProbe] = useState({});
   const saveLockRef = useRef(false);
   const previewRequestRef = useRef(null);
@@ -452,6 +455,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
 
   // 같은 저장·시험을 연달아 눌러도 한 번만 실행한다(시험 비용 반복 방지).
   async function saveConnection(includeCredential, options = {}) {
+    setTestResult(null); // 저장을 시도하면 이전 연결 시험 결과는 지운다(저장 결과와 섞이지 않게)
     if (saveLockRef.current) return;
     saveLockRef.current = true;
     try {

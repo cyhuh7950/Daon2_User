@@ -17,6 +17,7 @@ from .document_index_postgres import IndexedEvidenceChunk
 from .document_understanding_adapter import _evidence_anchors
 from .provider_settings import ProviderSettingsSnapshot
 from .operations_telemetry import CostReceipt,ReportedCost,reported_cost_from_usage
+from .openai_chat import openai_chat_payload
 
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
@@ -310,19 +311,21 @@ class OpenAICompatibleTextGenerationAdapter:
         if self._api_key is None:
             if selection.provider_code != "CUSTOM":
                 raise ValueError("TEXT_ADAPTER_CONFIG_INVALID")
+            url = _append_provider_path(self._base_url(selection), "/chat/completions")
             return self._transport.post_json_no_auth(
-                url=_append_provider_path(self._base_url(selection), "/chat/completions"),
-                payload=payload,
+                url=url,
+                payload=openai_chat_payload(url, payload),
                 timeout_seconds=self._timeout_seconds,
             )
+        url = _append_provider_path(
+            self._base_url(selection),
+            "/v1/chat/completions" if selection.provider_code == "EOUL_GATEWAY"
+            else "/chat/completions",
+        )
         return self._transport.post_json(
-            url=_append_provider_path(
-                self._base_url(selection),
-                "/v1/chat/completions" if selection.provider_code == "EOUL_GATEWAY"
-                else "/chat/completions",
-            ),
+            url=url,
             api_key=self._api_key,
-            payload=payload,
+            payload=openai_chat_payload(url, payload),
             timeout_seconds=self._timeout_seconds,
         )
 

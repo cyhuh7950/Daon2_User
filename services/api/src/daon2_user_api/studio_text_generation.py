@@ -18,6 +18,7 @@ from .document_understanding_adapter import DocumentUnderstandingError, UrlLibDo
 from .studio_egress import INTERNAL_KINDS, mask_text
 from .studio_workspace import StudioContext, StudioError
 from .workspace_model_defaults import WorkspaceModelContext, WorkspaceModelUnavailable
+from .openai_chat import openai_chat_payload
 
 DEFAULT_PRIORITY = ("MS", "US", "AF", "OL")
 CAPABILITY = "text_generation"
@@ -207,9 +208,11 @@ class StudioTextGenerator:
                        "response_format": {"type": "json_schema", "json_schema": {"name": prompt.schema_name, "strict": False,
                                                                                     "schema": dict(prompt.json_schema)}}}
             key = model.credential_text(required=False) if hasattr(model, "credential_text") else None
+            url = _openai_url(model.base_url)
+            payload = openai_chat_payload(url, payload)
             if key:
-                return self._transport.post_json(url=_openai_url(model.base_url), api_key=key, payload=payload, timeout_seconds=timeout)
-            return self._transport.post_json_no_auth(url=_openai_url(model.base_url), payload=payload, timeout_seconds=timeout)
+                return self._transport.post_json(url=url, api_key=key, payload=payload, timeout_seconds=timeout)
+            return self._transport.post_json_no_auth(url=url, payload=payload, timeout_seconds=timeout)
         except DocumentUnderstandingError as error:
             if error.retryable:
                 raise StudioError("PROVIDER_UNAVAILABLE", 503) from None

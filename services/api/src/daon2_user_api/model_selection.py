@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .audit import ActorType, AuditEventDraft, AuditOutcome
 from .cloud_storage import CloudAccessContext, CloudDatabaseError, PostgresCloudStore
+from .openai_chat import openai_chat_payload
 from .workspace_model_defaults import (
     _ACTIVE_PROVIDERS, PostgresWorkspaceModelDefaultsService, WorkspaceModelDefaultsContext,
 )
@@ -237,7 +238,9 @@ def probe_reasoning_levels(
                     if level:
                         payload["reasoning_effort"] = level
                 else:
-                    payload = {"model": selected.model_id, "messages": [{"role": "user", "content": "1+1="}], "max_tokens": 256}
+                    payload = openai_chat_payload(
+                        url, {"model": selected.model_id, "messages": [{"role": "user", "content": "1+1="}], "max_tokens": 256},
+                        min_completion_tokens=1024)
                     if level:
                         payload["reasoning_effort"] = level
                 if key is None:
