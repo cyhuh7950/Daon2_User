@@ -1393,28 +1393,8 @@ class GroundingFailureReasonLogTests(unittest.TestCase):
         self.assertIn("missing_quantity=2", joined)
         self.assertIn("missing_identifier=1", joined)
         self.assertIn("missing_in_uncited=2", joined)
-        self.assertIn("missing_chunk_id=0", joined)
         for value in ("85", "8개월", "DAR-002", "30일"):
             self.assertNotIn(value, joined)
-
-    def test_unsupported_anchor_log_counts_echoed_internal_chunk_ids(self) -> None:
-        class Transport(RecordingTransport):
-            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
-                response = super().post_json(**kwargs)
-                response["choices"][0]["message"]["content"] = json.dumps({
-                    "answer": "기술평가는 85% 이상이다 (chunk-a72cd9210f48b63e).", "cited_chunk_ids": ["chunk-a72cd9210f48b63e"], "insufficient": False}, ensure_ascii=False)
-                return response
-
-        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
-        evidence = (IndexedEvidenceChunk("chunk-a72cd9210f48b63e", "source-1", "version-1", 1, "기술평가 점수가 배점의 85% 이상", "span-1", 1.0),)
-        with self.assertLogs("daon2_user_api.question_answering", level="WARNING") as logs, \
-                self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
-            OpenAICompatibleTextGenerationAdapter(transport=Transport(), api_key="server-secret").generate(
-                GroundedQuestionRequest("요건은?", evidence, "trace-b14b"), selection)
-        joined = "\n".join(logs.output)
-        self.assertIn("missing_identifier=1", joined)
-        self.assertIn("missing_chunk_id=1", joined)
-        self.assertNotIn("a72cd9210f48b63e", joined)
 
 class InsufficientAnswerAnchorTests(unittest.TestCase):
     """NB1-I1 실서버: 근거 없음(insufficient) 답변 설명에 숫자가 섞이면 근거 검증 오류로 질문 전체가 실패했다.
@@ -1463,3 +1443,48 @@ class InsufficientAnswerAnchorTests(unittest.TestCase):
         self.assertTrue(result.insufficient)
         self.assertEqual(result.cited_chunk_ids, ())
         self.assertEqual(result.answer, "선택한 원문 근거에 질문에 답할 정보가 없습니다.")
+
+
+class CitationReconcileTests(unittest.TestCase):
+    """N1-B14 실서버: 근거가 10개쯤이면 모델이 긴 근거 ID를 잘못 옮겨 적거나(citation_unknown) 본문에 섞어
+    (anchors_unsupported) 질문 전체가 실패했다. 실제 ID로 하나로 정해지면 바로잡고, 아니면 그 인용만 버린다.
+    본문에 섞인 근거 ID는 사실이 아니므로 지운다. 숫자·고유값은 남은 실제 근거로 그대로 검사한다."""
+
+    A = "ext-" + "a1b2c3d4" * 4
+    B = "chunk-a72cd9210f48b63e"
+
+    def _generate(self, payload):  # type: ignore[no-untyped-def]
+        class Transport(RecordingTransport):
+            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+                response = super().post_json(**kwargs)
+                response["choices"][0]["message"]["content"] = json.dumps(payload, ensure_ascii=False)
+                return response
+
+        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
+        evidence = (
+            IndexedEvidenceChunk(self.A, "doc-1", "ver-1", 1, "기술평가 점수가 배점의 85% 이상인 자를 협상적격자로 선정", "blk-1", 1.0),
+            IndexedEvidenceChunk(self.B, "source-1", "version-1", 1, "제안서는 PDF로 제출한다", "span-1", 0.9),
+        )
+        return OpenAICompatibleTextGenerationAdapter(transport=Transport(), api_key="server-secret").generate(
+            GroundedQuestionRequest("요건은?", evidence, "trace-b14c"), selection)
+
+    def test_miscopied_citation_that_matches_one_real_id_is_corrected(self) -> None:
+        result = self._generate({"answer": "협상적격자는 기술평가 85% 이상이다.", "cited_chunk_ids": ["[" + self.A.upper()[:20] + "]"], "insufficient": False})
+        self.assertEqual(result.cited_chunk_ids, (self.A,))
+
+    def test_fabricated_citation_is_dropped_and_real_one_kept(self) -> None:
+        result = self._generate({"answer": "제안서는 PDF로 제출한다.", "cited_chunk_ids": ["ext-ffffffffffffffffffffffffffffffff", self.B], "insufficient": False})
+        self.assertEqual(result.cited_chunk_ids, (self.B,))
+
+    def test_only_fabricated_citations_still_fail(self) -> None:
+        with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            self._generate({"answer": "제안서는 PDF로 제출한다.", "cited_chunk_ids": ["ext-ffffffffffffffffffffffffffffffff"], "insufficient": False})
+
+    def test_echoed_internal_id_is_removed_from_the_answer(self) -> None:
+        result = self._generate({"answer": f"제안서는 PDF로 제출한다 ({self.B}).", "cited_chunk_ids": [self.B], "insufficient": False})
+        self.assertNotIn("chunk-", result.answer)
+        self.assertEqual(result.answer, "제안서는 PDF로 제출한다 .")
+
+    def test_corrected_citations_still_need_to_support_every_number(self) -> None:
+        with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            self._generate({"answer": "협상적격자는 기술평가 90% 이상이다.", "cited_chunk_ids": [self.A.upper()], "insufficient": False})

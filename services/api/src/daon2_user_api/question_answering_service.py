@@ -354,6 +354,7 @@ class PreparedQuestionAuthorization:
 class _QaMediaBridgeDiagnosticAdapter(OpenAICompatibleTextGenerationAdapter):
     """Transient, exact-QA response structure only; never retain response values."""
     _repair_insufficient_with_citation = False
+    _reconcile_citations = False
 
     _INSUFFICIENT_ANSWER = "선택한 원문 근거에 질문에 답할 정보가 없습니다."
     _RESULT_SCHEMA = {
