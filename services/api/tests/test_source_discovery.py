@@ -456,6 +456,26 @@ class AddTests(unittest.TestCase):
             service.add(CTX, NB, ref)
         self.assertEqual(caught.exception.diagnostic, {"tool": "get_document_text", "code": "TOOL_ERROR"})
 
+    def test_add_source_uses_the_server_limit_maximum_for_page_sizes(self):
+        # 배포된 Daon2-RAG가 알린 limit 최댓값보다 크게 보내면 MCP 클라이언트가 MCP_ARGUMENTS_INVALID로 막는다(NB4-I1 실서버).
+        connectors = FakeConnectors()
+        connectors.tool_limits = {"list_approved_documents": 50, "get_document_text": 20}
+        connectors.tool_limit = lambda context, connector_id, tool: connectors.tool_limits.get(tool)
+        service, _, _ = make_service(connectors)
+        ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        service.add(CTX, NB, ref)
+        limits = {tool: args.get("limit") for _, tool, args in connectors.calls if tool in connectors.tool_limits}
+        self.assertEqual(limits, {"list_approved_documents": 50, "get_document_text": 20})
+
+    def test_add_source_keeps_defaults_when_server_limit_is_unknown_or_larger(self):
+        connectors = FakeConnectors()
+        connectors.tool_limit = lambda context, connector_id, tool: {"list_approved_documents": 1000}.get(tool)
+        service, _, _ = make_service(connectors)
+        ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        service.add(CTX, NB, ref)
+        limits = {tool: args.get("limit") for _, tool, args in connectors.calls if tool in ("list_approved_documents", "get_document_text")}
+        self.assertEqual(limits, {"list_approved_documents": 200, "get_document_text": 100})
+
     def test_invalid_ref_is_rejected(self):
         service, connectors, _ = make_service()
         for ref in ({"kind": "web", "project_id": "p", "work_package_id": "w"}, {"kind": "document", "project_id": "p", "work_package_id": "w"},
@@ -478,9 +498,17 @@ class CountingGate:
 
 class _Client:
     _connection = object()
+    # 실제 클라이언트처럼 서버가 알린 도구 설명(limit 최댓값 포함)을 가진다.
+    _tools = {
+        "list_approved_documents": {"name": "list_approved_documents", "inputSchema": {"properties": {"limit": {"maximum": 200}}}},
+        "get_document_text": {"name": "get_document_text", "inputSchema": {"properties": {"limit": {"maximum": 100}}}},
+    }
 
     def __init__(self, fake):
         self.fake = fake
+
+    def list_tools(self):
+        return list(self._tools.values())
 
     def call_tool(self, name, arguments, **_options):
         self.fake.calls.append(("client", name, dict(arguments)))
@@ -515,7 +543,8 @@ class EgressGateTests(unittest.TestCase):
         with patch.object(connector_module, "_is_private_host", return_value=False):
             discovery.add(CTX, NB, ref)
         self.assertEqual(len(fake.calls), 3)
-        self.assertEqual(gate.calls, len(fake.calls))
+        # 도구 호출 3회 + 쪽 크기를 정하려고 서버 도구 설명(limit 최댓값)을 읽는 2회도 같은 외부 전송 판정을 거친다.
+        self.assertEqual(gate.calls, len(fake.calls) + 2)
 
     def test_denied_egress_means_no_tool_call(self):
         service, fake, gate = self.connector_service()
