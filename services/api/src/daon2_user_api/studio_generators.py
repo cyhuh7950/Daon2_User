@@ -11,6 +11,7 @@ from .studio_source_reader import StudioSourceReader
 from .studio_workspace import StudioError
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import GenerationContext, GenerationResult, GeneratorRegistry
+from .studio_v2_types import OUTLINE_LIMITS, OutlineInvalid, parse_confirmed_outline
 from . import studio_validation as V
 
 SYSTEM_RULES = (
@@ -46,6 +47,17 @@ def _user_block(ctx: GenerationContext) -> str:
     language = "한국어" if ctx.language == "ko" else "English"
     extra.append(f"[출력 언어] {language}")
     return "\n\n".join(extra)
+
+
+def confirmed_list(ctx: GenerationContext, type_id: str) -> dict[str, Any] | None:
+    """슬라이드·동영상 확정 목록(WO-N1 NB3-F1). 없으면 None. 작업 요청에 남은 값도 같은 규칙으로 다시 검증한다."""
+    raw = ctx.settings.get("confirmed_outline")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return parse_confirmed_outline(type_id, raw)
+    except OutlineInvalid:
+        raise StudioError("OUTLINE_INVALID", 422) from None
 
 
 class _Base:
@@ -249,16 +261,64 @@ class SlidesGenerator(_Base):
         "layout": {"type": "string", "enum": ["title", "bullets", "two_column", "table"]}, "title": {"type": "string"},
         "bullets": {"type": "array", "items": {"type": "string"}}, "notes": {"type": "string"}, "refs": _REFS,
         "table": {"type": "object"}}, "required": ["title", "refs"]}}}, "required": ["slides"]}
+    OUTLINE = {"type": "object", "properties": {"title": {"type": "string"}, "slides": {"type": "array", "items": {"type": "object", "properties": {
+        "title": {"type": "string"}, "points": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "points"]}}}, "required": ["slides"]}
     LENGTHS = {"short": 6, "normal": 10, "long": 16}
 
     def generate(self, ctx: GenerationContext) -> GenerationResult:
         pack = self._pack(ctx)
         count = self.LENGTHS.get(str(ctx.settings.get("length", "normal")), 10)
+        confirmed = confirmed_list(ctx, self.type_id)
+        if confirmed is not None:
+            return self._from_confirmed(ctx, pack, confirmed)
+        if ctx.settings.get("confirm_outline") == "yes":
+            return self._outline_review(ctx, pack, count)
         ctx.progress(15, "슬라이드 구성")
         data = self._ask(ctx, f"발표 자료 슬라이드 {count}장을 만드세요. 첫 장은 표지(title 레이아웃)이고, 나머지는 소스의 챕터(주제) 하나당 한 장입니다. "
                               "title은 챕터 이름, bullets는 그 챕터의 핵심 내용 2~5개(각 80자 이내)로 반드시 채우고, "
                               "notes에 발표자 노트를 쓰고 refs를 붙입니다.", self.SCHEMA, pack, tokens=min(5000, 380 * count + 600))
         body, warnings, used = V.validate_slides(data, pack)
+        return self._finish(ctx, pack, body, warnings, used)
+
+    def _outline_review(self, ctx: GenerationContext, pack: ContextPack, count: int) -> GenerationResult:
+        """장 목록만 짧게 만들고 멈춘다(보고서와 같은 outline_review 봉투). 확정하면 confirmed_outline으로 다시 만든다."""
+        ctx.progress(10, "구성 작성")
+        data = self._ask(ctx, f"발표 자료 슬라이드 {count}장의 구성(장 목록)을 JSON으로 만드세요. 첫 장은 표지이고, 나머지는 소스의 챕터(주제) 하나당 한 장입니다. "
+                              "title은 장 제목(100자 이내), points는 그 장에서 다룰 요지 0~5개(각 120자 이내)입니다.", self.OUTLINE, pack, tokens=1500)
+        review: list[dict[str, object]] = []
+        for item in V.as_list(data.get("slides"), OUTLINE_LIMITS["slides"]):
+            title = V.text_field(item.get("title"), 100) if isinstance(item, Mapping) else ""
+            if title:
+                points = [V.text_field(p, 120) for p in V.as_list(item.get("points"), 5) if isinstance(p, str) and p.strip()]
+                review.append({"title": title, "points": points})
+        if not review:
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        return self._finish(ctx, pack, {"title": V.text_field(data.get("title"), 160), "slides": [], "outline_review": review}, [], [])
+
+    def _from_confirmed(self, ctx: GenerationContext, pack: ContextPack, confirmed: Mapping[str, Any]) -> GenerationResult:
+        """사람이 확정한 장 목록 그대로(순서·제목 고정) 본문을 채운다. 모델이 빠뜨린 장은 확정한 요지로 채운다."""
+        items: list[Mapping[str, Any]] = confirmed["slides"]
+        plan = "\n".join(f"{i + 1}. {item['title']}" + (f" — 요지: {'; '.join(item['points'])}" if item["points"] else "") for i, item in enumerate(items))
+        ctx.progress(15, "확정한 구성으로 슬라이드 작성")
+        data = self._ask(ctx, f"사용자가 확정한 아래 구성 그대로 발표 자료 슬라이드 {len(items)}장을 만드세요. 장의 순서와 title은 바꾸지 않습니다. 첫 장은 표지(title 레이아웃)입니다. "
+                              "각 장의 bullets는 요지를 바탕으로 소스에서 확인한 핵심 내용 2~5개(각 80자 이내)로 채우고, notes에 발표자 노트를 쓰고 refs를 붙입니다.\n"
+                              f"[확정한 구성 — 사용자 지시]\n{plan}", self.SCHEMA, pack, tokens=min(8000, 380 * len(items) + 600))
+        raw = [s for s in V.as_list(data.get("slides"), 2 * OUTLINE_LIMITS["slides"]) if isinstance(s, Mapping)]
+        titles = [str(item["title"]) for item in items]
+        by_title = {V.text_field(s.get("title"), 100): s for s in raw}
+        merged: list[dict[str, object]] = []
+        for index, item in enumerate(items):
+            source = by_title.get(item["title"])
+            if source is None and index < len(raw) and V.text_field(raw[index].get("title"), 100) not in titles:
+                source = raw[index]
+            source = dict(source or {})
+            bullets = [b for b in V.as_list(source.get("bullets"), 6) if isinstance(b, str) and b.strip()] or list(item["points"])
+            layout = source.get("layout") if source.get("layout") in {"bullets", "two_column", "table"} else "bullets"
+            merged.append({**source, "title": item["title"], "bullets": bullets, "layout": "title" if index == 0 else layout})
+        body, warnings, used = V.validate_slides({"title": confirmed.get("title") or data.get("title"), "slides": merged}, pack,
+                                                 max_slides=OUTLINE_LIMITS["slides"], min_slides=1, require_points=False)
+        if [s["title"] for s in body["slides"]] != titles:  # type: ignore[index]
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
         return self._finish(ctx, pack, body, warnings, used)
 
 

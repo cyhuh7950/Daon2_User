@@ -233,5 +233,89 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
 
+
+class VideoOutlineConfirmTests(unittest.TestCase):
+    """생성 전 구성 확인(WO-N1 NB3-F1): 장면 목록에서 멈추면 TTS·화면 그리기·MP4 합성을 하지 않는다."""
+
+    def make(self, data=SCENES, *, llm=None):
+        with tempfile.TemporaryDirectory() as directory:
+            config = load_config(config_file(directory))
+        self.factory_calls = 0
+        self.composed = []
+        self.client = FakeClient(seconds=0.4)
+
+        def factory(engine):
+            self.factory_calls += 1
+            return self.client
+
+        def composer(pngs, spans, wav, chapters):
+            self.composed.append(chapters)
+            return b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
+        self.llm = llm or ScriptedLLM(data)
+        return video.VideoOverviewGenerator(FakeReader(), self.llm, config, client_factory=factory, composer=composer)
+
+    def test_confirmation_stops_at_the_scene_list_without_tts_render_or_mp4(self):
+        from unittest import mock
+        generator = self.make()
+        with mock.patch.object(video, "ffmpeg_path", return_value="ffmpeg"),                 mock.patch.object(video, "render_scene_png", side_effect=AssertionError("render called")):
+            result = generator.generate(gen_ctx("video_overview", {"confirm_outline": "yes"})[0])
+        body = result.content["body"]
+        self.assertEqual(body["scenes"], [])
+        self.assertEqual([(s["title"], s["narration_summary"]) for s in body["outline_review"]],
+                         [(s["title"], s["narration"]) for s in SCENES["scenes"]])
+        self.assertEqual(body["outline_review"][1]["bullets"], ["접수일부터 3일 이내", "한도 1,000,000원"])
+        self.assertEqual((self.factory_calls, self.client.calls, self.composed), (0, [], []))
+        self.assertEqual(result.assets, ())
+        self.assertNotIn("tts_engine", result.generated_with)
+        self.assertEqual(len(self.llm.prompts), 1)
+
+    def test_confirmed_list_skips_scene_writing_and_keeps_the_titles(self):
+        import json
+        from unittest import mock
+        confirmed = {"title": "고친 영상", "scenes": [
+            {"title": "시작", "narration_summary": "보험금 지급 안내를 시작합니다."},
+            {"title": "고친 지급 기한", "narration_summary": "보험금은 3일 이내에 지급합니다.", "bullets": ["3일 이내"]},
+            {"title": "새 정리", "narration_summary": ""}]}
+        generator = self.make(llm=ScriptedLLM())  # 응답이 없으므로 장면 생성을 다시 부르면 실패한다
+        settings = {"confirm_outline": "no", "confirmed_outline": json.dumps(confirmed, ensure_ascii=False)}
+        with mock.patch.object(video, "ffmpeg_path", return_value="ffmpeg"):
+            result = generator.generate(gen_ctx("video_overview", settings)[0])
+        body = result.content["body"]
+        self.assertEqual(self.llm.prompts, [])
+        self.assertEqual([s["title"] for s in body["scenes"]], ["시작", "고친 지급 기한", "새 정리"])
+        self.assertEqual([c["title"] for c in body["chapters"]], ["시작", "고친 지급 기한", "새 정리"])
+        self.assertEqual([c["title"] for c in self.composed[0]], ["시작", "고친 지급 기한", "새 정리"])
+        self.assertEqual(body["scenes"][0]["layout"], "title")
+        self.assertEqual(body["scenes"][1]["bullets"], ["3일 이내"])
+        self.assertEqual(body["title"], "고친 영상")
+        self.assertIn("보험금은 3일 이내에 지급합니다.", [call[0] for call in self.client.calls])
+        self.assertIn("NARRATION_FALLBACK", [w["code"] for w in result.warnings])
+        self.assertNotIn("outline_review", body)
+        self.assertEqual(result.assets[0]["kind"], "mp4")
+
+    def test_cancel_after_confirmation_spends_no_tts(self):
+        import json
+        from unittest import mock
+        generator = self.make(llm=ScriptedLLM())
+        settings = {"confirmed_outline": json.dumps({"scenes": [{"title": "하나", "narration_summary": "하나입니다."}]}, ensure_ascii=False)}
+
+        def cancelled():
+            raise StudioError("STUDIO_CANCELLED", 409)
+        with mock.patch.object(video, "ffmpeg_path", return_value="ffmpeg"), self.assertRaises(StudioError) as caught:
+            generator.generate(gen_ctx("video_overview", settings, cancel=cancelled)[0])
+        self.assertEqual(caught.exception.code, "STUDIO_CANCELLED")
+        self.assertEqual((self.client.calls, self.composed), ([], []))
+
+    def test_confirmation_off_is_the_existing_full_flow(self):
+        from unittest import mock
+        generator = self.make()
+        with mock.patch.object(video, "ffmpeg_path", return_value="ffmpeg"):
+            result = generator.generate(gen_ctx("video_overview", {"confirm_outline": "no"})[0])
+        self.assertEqual(len(result.content["body"]["scenes"]), 4)
+        self.assertNotIn("outline_review", result.content["body"])
+        self.assertEqual(self.factory_calls, 1)
+        self.assertEqual(len(self.composed), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,7 +19,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import studio_validation as V
 from .studio_audio import _EgressModel
 from .studio_egress import StudioEgressGate, mask_text
-from .studio_generators import _REFS, _Base
+from .studio_generators import _REFS, _Base, confirmed_list
 from .studio_infographic import _font, _width, wrap
 from .studio_v2_generation import GenerationContext, GenerationResult
 from .studio_workspace import StudioError
@@ -305,20 +305,48 @@ class VideoOverviewGenerator(_Base):
             raise StudioError(decision.reason, 409)
         return decision.masked
 
+    @staticmethod
+    def _confirmed_scenes(confirmed: Mapping[str, Any]) -> tuple[dict[str, object], list[dict[str, object]], list[str]]:
+        """확정 목록을 장면으로 바꾼다. narration_summary가 그대로 내레이션이 되고, 비어 있으면 제목+글머리로 대신한다."""
+        warnings: list[dict[str, object]] = []
+        scenes: list[dict[str, object]] = []
+        for index, item in enumerate(confirmed["scenes"]):
+            bullets = [str(b) for b in item.get("bullets", [])]
+            narration = str(item.get("narration_summary") or "")
+            if not narration:
+                narration = V.text_field(" ".join([str(item["title"]), *bullets]), 600)
+                warnings.append({"code": "NARRATION_FALLBACK", "path": f"scenes[{index}]"})
+            scenes.append({"layout": "title" if index == 0 else "bullets", "title": str(item["title"]), "bullets": bullets,
+                           "refs": [], "narration": narration})
+        body: dict[str, object] = {"title": str(confirmed.get("title") or scenes[0]["title"]), "scenes": scenes}
+        V.ensure_size(body)
+        return body, warnings, []
+
     def generate(self, ctx: GenerationContext) -> GenerationResult:
         if ffmpeg_path() is None:
             raise StudioError("VIDEO_ENCODER_UNAVAILABLE", 503)
         config = self._config_for(ctx)
         engine, voice = self._engine_and_voice(ctx, config)
         pack = self._pack(ctx)
-        lo, hi, span = LENGTHS.get(str(ctx.settings.get("length", "normal")), LENGTHS["normal"])
-        ctx.progress(8, "장면 작성")
-        data = self._ask(
-            ctx, f"소스의 핵심을 설명하는 동영상 개요의 장면 {lo}~{hi}개를 만드세요({span} 분량). 첫 장면은 layout=title로 주제를 소개하고 마지막 장면은 정리합니다. "
-                 "각 장면은 슬라이드 화면(title 40자 이내, bullets 최대 4개·각 60자 이내 또는 table)과 내레이션(narration, 화면 자막용 원문, 한 장면 300자 이내의 말하는 문장)과 refs를 갖습니다. "
-                 "화면에 보이는 title·bullets·narration에는 숫자와 기호를 소스 원문 그대로 씁니다(예: 1,000,000원, 90일). 소리 내어 읽는 형태(백만 원, 구십 일)는 오직 speech에만 적고, 읽는 형태가 narration과 같으면 speech를 생략합니다. 소스에 없는 사실·숫자를 만들지 마세요.",
-            self.SCHEMA, pack, tokens=self.max_tokens)
-        body, warnings, used = V.validate_video_scenes(data, pack, max_scenes=hi + 4)
+        confirmed = confirmed_list(ctx, self.type_id)
+        if confirmed is not None:
+            # 사람이 확정한 장면 목록(WO-N1 NB3-F1): 장면 작성을 다시 하지 않고 그 목록으로 바로 음성·화면을 만든다.
+            ctx.progress(8, "확정한 장면 사용")
+            body, warnings, used = self._confirmed_scenes(confirmed)
+        else:
+            lo, hi, span = LENGTHS.get(str(ctx.settings.get("length", "normal")), LENGTHS["normal"])
+            ctx.progress(8, "장면 작성")
+            data = self._ask(
+                ctx, f"소스의 핵심을 설명하는 동영상 개요의 장면 {lo}~{hi}개를 만드세요({span} 분량). 첫 장면은 layout=title로 주제를 소개하고 마지막 장면은 정리합니다. "
+                     "각 장면은 슬라이드 화면(title 40자 이내, bullets 최대 4개·각 60자 이내 또는 table)과 내레이션(narration, 화면 자막용 원문, 한 장면 300자 이내의 말하는 문장)과 refs를 갖습니다. "
+                     "화면에 보이는 title·bullets·narration에는 숫자와 기호를 소스 원문 그대로 씁니다(예: 1,000,000원, 90일). 소리 내어 읽는 형태(백만 원, 구십 일)는 오직 speech에만 적고, 읽는 형태가 narration과 같으면 speech를 생략합니다. 소스에 없는 사실·숫자를 만들지 마세요.",
+                self.SCHEMA, pack, tokens=self.max_tokens)
+            body, warnings, used = V.validate_video_scenes(data, pack, max_scenes=hi + 4)
+            if ctx.settings.get("confirm_outline") == "yes":
+                # 장면 목록에서 멈춘다(보고서와 같은 outline_review 봉투). TTS·화면 그리기·MP4 합성은 확정한 뒤에만 한다.
+                review = [{"title": s["title"], "narration_summary": s["narration"], **({"bullets": s["bullets"]} if s.get("bullets") else {})}
+                          for s in body["scenes"]]  # type: ignore[union-attr]
+                return self._finish(ctx, pack, {"title": body["title"], "scenes": [], "outline_review": review}, [], [])
         scenes: list[dict[str, Any]] = body["scenes"]  # type: ignore[assignment]
         spoken_texts = [str(s.get("speech") or s["narration"]) for s in scenes]
         sentences = [split_sentences(text) for text in spoken_texts]

@@ -224,6 +224,16 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Confirmed outline is invalid (OUTLINE_INVALID)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
           }
         }
       }
@@ -588,6 +598,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Confirmed outline is invalid (OUTLINE_INVALID)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2847,7 +2867,8 @@
                   "MEMO_TOO_LARGE",
                   "MEMO_SOURCE_NOT_LINKED",
                   "MEMO_SOURCE_UNCHANGED",
-                  "SOURCE_PROCESSING_ACTIVE"
+                  "SOURCE_PROCESSING_ACTIVE",
+                  "OUTLINE_INVALID"
                 ]
               },
               "trace_id": {
@@ -3419,6 +3440,90 @@
         "properties": {
           "settings": {
             "type": "object"
+          }
+        }
+      },
+      "StudioV2SlidesConfirmedOutline": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slides"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "slides": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 30,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "points": {
+                  "type": "array",
+                  "maxItems": 5,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "StudioV2VideoConfirmedOutline": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scenes"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "scenes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "title"
+              ],
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "narration_summary": {
+                  "type": "string",
+                  "maxLength": 600
+                },
+                "bullets": {
+                  "type": "array",
+                  "maxItems": 5,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
           }
         }
       },

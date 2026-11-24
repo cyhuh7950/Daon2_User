@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 
 from .cloud_storage import CloudAccessContext
 from .studio_v2_edit_turns import StudioV2EditTurnsMixin
-from .studio_v2_types import STUDIO_V2_TYPES, is_available, validate_settings
+from .studio_v2_types import STUDIO_V2_TYPES, checked_settings, is_available
 from .studio_workspace import StudioContext, StudioError
 from .studio_workspace_postgres import PostgresStudioWorkspaceRepository
 
@@ -160,10 +160,8 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
             raise StudioError("STUDIO_INPUT_INVALID", 400)
         if not is_available(str(type_id), tts_enabled=self._tts_enabled(context.tenant_id)):
             raise StudioError("STUDIO_TYPE_UNAVAILABLE", 409)
-        try:
-            format_id, settings = validate_settings(str(type_id), request.get("format_id"), request.get("settings") or {})  # type: ignore[arg-type]
-        except ValueError:
-            raise StudioError("STUDIO_INPUT_INVALID", 400) from None
+        # 확정 목록(슬라이드·동영상) 오류는 422 OUTLINE_INVALID, 그 밖의 설정 오류는 400(WO-N1 NB3-F1).
+        format_id, settings = checked_settings(str(type_id), request.get("format_id"), request.get("settings") or {})  # type: ignore[arg-type]
         requested = request.get("source_version_ids")
         if requested is not None and (not isinstance(requested, (list, tuple)) or len(requested) > 64
                                       or any(not isinstance(v, str) for v in requested)):
@@ -233,10 +231,7 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
             if str(row[9]) != context.actor_id:
                 raise StudioError("RESOURCE_UNAVAILABLE", 404)
             merged = {**current_settings, **dict(settings_override or {})}
-            try:
-                format_id, merged = validate_settings(str(type_id), format_id, merged)
-            except ValueError:
-                raise StudioError("STUDIO_INPUT_INVALID", 400) from None
+            format_id, merged = checked_settings(str(type_id), format_id, merged)
             if versions:
                 self.require_scope(connection, context, versions)
             connection.execute(

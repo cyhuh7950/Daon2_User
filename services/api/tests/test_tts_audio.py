@@ -351,7 +351,9 @@ class TypeAndRouteRuleTests(unittest.TestCase):
         with mock.patch.object(studio_video, "ffmpeg_path", return_value="/x"):
             on = next(t for t in available_types(tts_enabled=True, tts_settings=overlay) if t["type_id"] == "video_overview")
         self.assertTrue(on["available"])
-        self.assertEqual(sorted(on["settings_schema"]["properties"]), ["engine", "focus", "language", "length", "voice_a"])
+        # 두 번째 목소리(voice_b)는 없다. 생성 전 구성 확인(WO-N1 NB3-F1)으로 confirm_outline·confirmed_outline이 더해졌다.
+        self.assertEqual(sorted(on["settings_schema"]["properties"]),
+                         ["confirm_outline", "confirmed_outline", "engine", "focus", "language", "length", "voice_a"])
         self.assertEqual(STUDIO_V2_TYPES["video_overview"].export_formats, ("mp4", "vtt"))
 
     def test_settings_validation(self):

@@ -264,16 +264,18 @@ def validate_quiz(data: Mapping[str, object], pack: ContextPack) -> tuple[dict[s
     return body, w.items, used
 
 
-def validate_slides(data: Mapping[str, object], pack: ContextPack) -> tuple[dict[str, object], list[dict[str, object]], list[str]]:
+def validate_slides(data: Mapping[str, object], pack: ContextPack, *, max_slides: int = 20, min_slides: int = 2,
+                    require_points: bool = True) -> tuple[dict[str, object], list[dict[str, object]], list[str]]:
+    """슬라이드 검증. 확정 목록으로 만들 때(WO-N1 NB3-F1)는 장 수 상한·하한과 요지 필수 조건을 바꿔 부른다."""
     w = Warnings()
     used: list[str] = []
     slides = []
-    for si, slide in enumerate(as_list(data.get("slides"), 20)):
+    for si, slide in enumerate(as_list(data.get("slides"), max_slides)):
         if not isinstance(slide, Mapping):
             continue
         title = text_field(slide.get("title"), 100)
         bullets = [text_field(b, 120) for b in as_list(slide.get("bullets"), 6) if isinstance(b, str) and b.strip()][:5]
-        if not title or (si > 0 and not bullets and not isinstance(slide.get("table"), Mapping)):
+        if not title or (require_points and si > 0 and not bullets and not isinstance(slide.get("table"), Mapping)):
             continue  # 표지 뒤의 슬라이드는 챕터 제목과 핵심 내용을 함께 가진다
         layout = slide.get("layout") if slide.get("layout") in {"title", "bullets", "two_column", "table"} else "bullets"
         if si == 0:
@@ -290,7 +292,7 @@ def validate_slides(data: Mapping[str, object], pack: ContextPack) -> tuple[dict
             if cols and rows:
                 item["table"] = {"columns": cols, "rows": rows}
         slides.append(item)
-    if len(slides) < 2:
+    if len(slides) < min_slides:
         raise StudioError("STUDIO_VALIDATION_FAILED", 502)
     fail_if_all_unreferenced(bool(used))
     body = {"title": text_field(data.get("title"), 160), "slides": slides}

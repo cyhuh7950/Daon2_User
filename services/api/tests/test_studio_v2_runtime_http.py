@@ -348,6 +348,18 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(self.v2.calls[-1], ("regenerate", OID, {"focus": "핵심"}, "briefing"))
 
+    async def test_invalid_confirmed_outline_is_a_public_422(self):
+        # 슬라이드·동영상 확정 목록 검증 실패(WO-N1 NB3-F1)는 OUTLINE_INVALID 그대로 화면에 간다.
+        self.v2.fail = ("OUTLINE_INVALID", 422)
+        with self.authenticated():
+            regenerate = await self.client.post(BASE + f"/outputs/{OID}/regenerate", cookies=self.cookies,
+                                                headers={"Idempotency-Key": "studio-v2-key-000078"},
+                                                json={"settings": {"confirm_outline": "no", "confirmed_outline": "{\"slides\": []}"}})
+            create = await self.client.post(BASE + "/outputs", cookies=self.cookies, headers={"Idempotency-Key": "studio-v2-key-000079"},
+                                            json={"type_id": "slides", "settings": {"confirmed_outline": "{\"slides\": []}"}})
+        for response in (regenerate, create):
+            self.assertEqual((response.status_code, response.json()["error"]["code"]), (422, "OUTLINE_INVALID"))
+
     async def test_validation_idempotency_and_unknown_fields(self):
         with self.authenticated():
             missing_key = await self.client.post(BASE + "/outputs", cookies=self.cookies, json={"type_id": "report"})

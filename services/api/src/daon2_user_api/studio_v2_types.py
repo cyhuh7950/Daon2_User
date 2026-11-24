@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 _LANGUAGE = {"type": "string", "enum": ["ko", "en"], "default": "ko"}
 _FOCUS = {"type": "string", "maxLength": 500}
+_CONFIRM_OUTLINE = {"type": "string", "enum": ["no", "yes"]}
+# 슬라이드·동영상 확정 목록(WO-N1 NB3-F1)은 JSON 문자열이다. 장 30개·장면 20개를 담을 수 있게 보고서보다 길게 둔다.
+_CONFIRMED_LIST = {"type": "string", "maxLength": 40000, "hidden": True}
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +38,7 @@ def _t(type_id, export_formats, *, presets=(), default_format=None, schema=None,
 STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
     t.type_id: t for t in (
         _t("report", ("docx", "pdf", "md"), presets=("summary", "briefing", "blog", "study_guide", "custom"),
-           default_format="summary", schema={"custom_instruction": {"type": "string", "maxLength": 1000}, "confirm_outline": {"type": "string", "enum": ["no", "yes"]},
+           default_format="summary", schema={"custom_instruction": {"type": "string", "maxLength": 1000}, "confirm_outline": _CONFIRM_OUTLINE,
                    "confirmed_outline": {"type": "string", "maxLength": 4000, "hidden": True}}),
         _t("data_table", ("xlsx", "csv", "pdf")),
         _t("mind_map", ("svg", "png", "json")),
@@ -44,7 +48,8 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
         _t("quiz", ("csv", "json", "pdf"),
            schema={"count": {"type": "integer", "minimum": 5, "maximum": 30},
                    "difficulty": {"type": "string", "enum": ["easy", "normal", "hard"]}}),
-        _t("slides", ("pptx", "pdf"), schema={"length": {"type": "string", "enum": ["short", "normal", "long"]}}),
+        _t("slides", ("pptx", "pdf"), schema={"length": {"type": "string", "enum": ["short", "normal", "long"]},
+                                              "confirm_outline": _CONFIRM_OUTLINE, "confirmed_outline": _CONFIRMED_LIST}),
         _t("infographic", ("png", "svg", "pdf"), phase="2"),
         _t("audio_overview", ("mp3",), phase="3",
            schema={"engine": {"type": "string", "maxLength": 32}, "voice_a": {"type": "string", "maxLength": 40},
@@ -52,7 +57,8 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
                    "length": {"type": "string", "enum": ["short", "normal", "long"]}}),
         _t("video_overview", ("mp4", "vtt"), phase="4",
            schema={"engine": {"type": "string", "maxLength": 32}, "voice_a": {"type": "string", "maxLength": 40},
-                   "length": {"type": "string", "enum": ["short", "normal", "long"]}}),
+                   "length": {"type": "string", "enum": ["short", "normal", "long"]},
+                   "confirm_outline": _CONFIRM_OUTLINE, "confirmed_outline": _CONFIRMED_LIST}),
         _t("memo", ("md", "txt"), requires_llm=False),
         _t("authored_document", ("docx", "pptx", "pdf"), phase="A1",
            schema={"template_id": {"type": "string", "maxLength": 64}}),
@@ -104,8 +110,88 @@ def available_types(*, tts_enabled: bool = False, authoring_enabled: bool = Fals
     return result
 
 
+# ------------------------------------------------------------------ 생성 전 구성 확인(WO-N1 NB3-F1)
+OUTLINE_LIMITS: Mapping[str, int] = {"slides": 30, "video_overview": 20}
+_OUTLINE_KEY = {"slides": "slides", "video_overview": "scenes"}
+_TITLE_MAX = 100
+_POINTS_MAX, _POINT_MAX = 5, 120
+_NARRATION_MAX = 600
+_BULLETS_MAX = 5
+
+
+class OutlineInvalid(ValueError):
+    """확정 목록이 비었거나 상한을 넘거나 제목이 비었다. 응답은 422 OUTLINE_INVALID."""
+
+    def __init__(self) -> None:
+        super().__init__("OUTLINE_INVALID")
+
+
+def _text(value: object, limit: int, *, required: bool = False) -> str:
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str):
+        raise OutlineInvalid()
+    text = " ".join(value.split())
+    if len(text) > limit or (required and not text):
+        raise OutlineInvalid()
+    return text
+
+
+def _texts(value: object, count: int, limit: int) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > count:
+        raise OutlineInvalid()
+    return [text for text in (_text(item, limit, required=False) for item in value) if text]
+
+
+def parse_confirmed_outline(type_id: str, raw: object) -> dict[str, Any]:
+    """슬라이드 {slides:[{title, points}]}·동영상 {scenes:[{title, narration_summary, bullets?}]} 확정 목록을 검증·정규화한다.
+
+    빈 목록, 상한(슬라이드 30장·장면 20개) 초과, 빈 제목, 형식 오류는 OutlineInvalid.
+    """
+    key = _OUTLINE_KEY[type_id]
+    if not isinstance(raw, str) or len(raw) > int(_CONFIRMED_LIST["maxLength"]):
+        raise OutlineInvalid()
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise OutlineInvalid() from None
+    if not isinstance(data, Mapping) or set(data) - {"title", key}:
+        raise OutlineInvalid()
+    items = data.get(key)
+    if not isinstance(items, list) or not 1 <= len(items) <= OUTLINE_LIMITS[type_id]:
+        raise OutlineInvalid()
+    allowed = {"title", "points"} if type_id == "slides" else {"title", "narration_summary", "bullets"}
+    clean: list[dict[str, object]] = []
+    for item in items:
+        if not isinstance(item, Mapping) or set(item) - allowed:
+            raise OutlineInvalid()
+        title = _text(item.get("title"), _TITLE_MAX, required=True)
+        if type_id == "slides":
+            clean.append({"title": title, "points": _texts(item.get("points"), _POINTS_MAX, _POINT_MAX)})
+        else:
+            scene: dict[str, object] = {"title": title, "narration_summary": _text(item.get("narration_summary"), _NARRATION_MAX)}
+            bullets = _texts(item.get("bullets"), _BULLETS_MAX, _POINT_MAX)
+            if bullets:
+                scene["bullets"] = bullets
+            clean.append(scene)
+    return {"title": _text(data.get("title"), 160), key: clean}
+
+
+def checked_settings(type_id: str, format_id: str | None, settings: Mapping[str, object]) -> tuple[str | None, dict[str, object]]:
+    """validate_settings + 서비스 오류 변환. 확정 목록 오류는 422 OUTLINE_INVALID, 그 밖은 400 STUDIO_INPUT_INVALID."""
+    from .studio_workspace import StudioError
+    try:
+        return validate_settings(type_id, format_id, settings)
+    except OutlineInvalid:
+        raise StudioError("OUTLINE_INVALID", 422) from None
+    except ValueError:
+        raise StudioError("STUDIO_INPUT_INVALID", 400) from None
+
+
 def validate_settings(type_id: str, format_id: str | None, settings: Mapping[str, object]) -> tuple[str | None, dict[str, object]]:
-    """유형별 선택 설정을 검증한다. 오류는 ValueError('STUDIO_INPUT_INVALID')."""
+    """유형별 선택 설정을 검증한다. 오류는 ValueError('STUDIO_INPUT_INVALID'), 확정 목록 오류는 OutlineInvalid."""
     spec = STUDIO_V2_TYPES.get(type_id)
     if spec is None or not isinstance(settings, Mapping):
         raise ValueError("STUDIO_INPUT_INVALID")
@@ -121,6 +207,11 @@ def validate_settings(type_id: str, format_id: str | None, settings: Mapping[str
         rule = properties.get(key)
         if rule is None:
             raise ValueError("STUDIO_INPUT_INVALID")
+        if key == "confirmed_outline" and type_id in OUTLINE_LIMITS:
+            if isinstance(value, str) and value.strip() == "":
+                continue  # 빈 값은 확정 목록을 지운다(보고서와 같다)
+            clean[key] = json.dumps(parse_confirmed_outline(type_id, value), ensure_ascii=False)
+            continue
         kind = rule["type"]
         if kind == "string":
             if not isinstance(value, str) or len(value) > int(rule.get("maxLength", 500)):
