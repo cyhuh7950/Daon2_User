@@ -8,14 +8,25 @@ import { OUTLINE_REVIEW_TYPES, OutlineReviewEditor } from "./outline-review.jsx"
 const LEVEL_COLORS = ["#3b6fd8", "#3fa37a", "#8e5bd1", "#b57b00", "#2a8ea3", "#c0453f"];
 
 // 근거 번호 [S#]를 클릭 가능한 각주로 렌더한다. 근거가 없는 사실 문장은 "근거 미확인"으로 표시한다.
-export function Refs({ refs = [], evidence = [], onOpen }) {
+// 심층 조사 보고서(NB4-U2, byRef)는 근거 라벨(S1…)을 그대로 보여 보고서 아래 "사용한 자료"의 라벨과 맞춘다.
+export function Refs({ refs = [], evidence = [], onOpen, byRef = false }) {
   const names = new Map(evidence.map((item) => [item.ref_id, item]));
   return <>{refs.map((ref, index) => {
     const item = names.get(ref);
+    if (byRef) {
+      const name = item?.source_name ?? item?.external_ref?.name ?? "";
+      return <button key={ref} type="button" className="studio-ref" aria-label={msg("studio.research.ref_label", { ref, name }).trim()} onClick={() => onOpen?.(ref)}>[{ref}]</button>;
+    }
     const label = msg("studio.evidence.label", { n: index + 1, name: item?.source_name ?? "", where: item?.locator_kind === "page" ? msg("dialog.page_suffix", { n: item.locator_value }) : item?.locator_value ?? "" }).trim();
     return <button key={ref} type="button" className="studio-ref" aria-label={label} onClick={() => onOpen?.(ref)}>[{index + 1}]</button>;
   })}</>;
 }
+
+// 근거 없는 문장(NB4-F2): 서버가 refs 없이 글 앞에 "근거 부족: "을 붙여 준다. 근거 있는 문장과 구분되게 표시를 붙여 그대로 보인다.
+const unsupportedText = (block) => {
+  const prefix = msg("studio.research.unsupported_prefix");
+  return block?.type === "paragraph" && !(block.refs ?? []).length && typeof block.text === "string" && block.text.startsWith(prefix) ? block.text.slice(prefix.length) : null;
+};
 
 const Unverified = ({ warnings, path }) => warnings?.some((w) => w.code === "UNVERIFIED_CLAIM" && w.path === path)
   ? <span className="studio-warning">{msg("studio.evidence.unverified")}</span> : null;
@@ -36,7 +47,7 @@ function OutlineReview({ body, onConfirm }) {
   </article>;
 }
 
-export function ReportViewer({ content, evidence, onOpenEvidence, onConfirmOutline }) {
+export function ReportViewer({ content, evidence, onOpenEvidence, onConfirmOutline, research = false }) {
   const body = content.body ?? {};
   const warnings = content.warnings ?? [];
   if (body.outline_review?.length) return <OutlineReview body={body} onConfirm={onConfirmOutline} />;
@@ -47,9 +58,12 @@ export function ReportViewer({ content, evidence, onOpenEvidence, onConfirmOutli
       <h3>{section.heading}</h3>
       {section.blocks.map((block, bi) => {
         const path = `sections[${si}].blocks[${bi}]`;
-        if (block.type === "bullets") return <ul key={bi}>{block.items.map((item, ii) => <li key={ii}>{item}{ii === block.items.length - 1 && <><Refs refs={block.refs} evidence={evidence} onOpen={onOpenEvidence} /><Unverified warnings={warnings} path={path} /></>}</li>)}</ul>;
+        if (block.type === "bullets") return <ul key={bi}>{block.items.map((item, ii) => <li key={ii}>{item}{ii === block.items.length - 1 && <><Refs refs={block.refs} evidence={evidence} onOpen={onOpenEvidence} byRef={research} /><Unverified warnings={warnings} path={path} /></>}</li>)}</ul>;
         if (block.type === "table") return <table key={bi} className="studio-table"><tbody>{block.rows.map((row, ri) => <tr key={ri}>{row.map((cell, ci) => ri === 0 ? <th key={ci}>{cell}</th> : <td key={ci}>{cell}</td>)}</tr>)}</tbody></table>;
-        return <p key={bi}>{block.text}<Refs refs={block.refs} evidence={evidence} onOpen={onOpenEvidence} /><Unverified warnings={warnings} path={path} /></p>;
+        const unsupported = unsupportedText(block);
+        if (unsupported !== null) return <p key={bi} className="studio-report__unsupported" data-unsupported="true" title={msg("studio.research.unsupported_hint")}>
+          <span className="studio-chip">{msg("studio.research.unsupported")}</span>{unsupported}</p>;
+        return <p key={bi}>{block.text}<Refs refs={block.refs} evidence={evidence} onOpen={onOpenEvidence} byRef={research} /><Unverified warnings={warnings} path={path} /></p>;
       })}
     </section>)}
   </article>;
@@ -463,7 +477,7 @@ export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, on
   </div>;
 }
 
-export function StudioViewer({ output, onConfirmOutline, onCancelOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, memoSource = null, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
+export function StudioViewer({ output, research = false, onConfirmOutline, onCancelOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, memoSource = null, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
   const content = output.revision?.content;
   if (!content) return <p>{msg("studio.card.generating")}</p>;
   const common = { content, evidence: output.evidence ?? [], onOpenEvidence };
@@ -472,7 +486,7 @@ export function StudioViewer({ output, onConfirmOutline, onCancelOutline, onOpen
     return <OutlineReviewEditor key={`${output.output_id}:${output.current_revision}`} typeId={output.type_id} body={content.body} onConfirm={onConfirmOutline} onCancel={onCancelOutline} />;
   }
   switch (output.type_id) {
-    case "report": return <ReportViewer {...common} onConfirmOutline={onConfirmOutline} />;
+    case "report": return <ReportViewer {...common} onConfirmOutline={onConfirmOutline} research={research} />;
     case "data_table": return <TableViewer {...common} />;
     case "mind_map": return <MindMapViewer {...common} onAskAboutNode={onAskAboutNode} />;
     case "flashcards": return <FlashcardsViewer {...common} onAttempt={(payload) => onAttempt?.("flashcard", payload)} />;

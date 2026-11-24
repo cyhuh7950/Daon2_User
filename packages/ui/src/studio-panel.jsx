@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { StudioIcon, STUDIO_TYPE_STYLE } from "./studio-icon.js";
 import {
-  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, reduce, tileState, waitingOutputIds,
+  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds,
 } from "./studio-panel-model.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 import { ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDialog, SettingsDialog, ShareDialog } from "./studio-dialogs.jsx";
@@ -11,6 +11,7 @@ import { StudioViewer } from "./studio-viewers.jsx";
 import { AuthoringWizard } from "./authoring-wizard.jsx";
 import { EDITABLE_TYPES, StudioEditor } from "./studio-editor.jsx";
 import { CHAT_EDIT_TYPES, StudioChatEdit } from "./studio-chat-edit.jsx";
+import { ResearchSourcesPanel } from "./source-discovery.jsx";
 import "./studio-icon.css";
 import "./studio-panel.css";
 
@@ -19,6 +20,8 @@ const label = (type) => msg(`studio.tile.${type}`);
 // 생성 전 구성 확인에서 멈출 수 있는 유형(보고서 WO-K4, 슬라이드·동영상 WO-N1 NB3-F1).
 const OUTLINE_TYPES = new Set(["report", "slides", "video_overview"]);
 const inOutlineReview = (output) => Boolean(output?.revision?.content?.body?.outline_review?.length);
+// 심층 조사 보고서(NB4-U2): 보고서 본문에서 실제로 인용한 근거 라벨(S1…) 목록.
+const citedRefs = (content) => [...new Set((content?.body?.sections ?? []).flatMap((section) => (section?.blocks ?? []).flatMap((block) => (Array.isArray(block?.refs) ? block.refs : []))))];
 
 function CardMenu({ output, onAction, onClose }) {
   const ref = useRef(null);
@@ -49,18 +52,22 @@ function CardMenu({ output, onAction, onClose }) {
   </div>;
 }
 
-function Card({ output, now, waiting = false, outlinePending = false, confirmedOutline = false, menuOpen, renaming, onOpen, onToggleMenu, onMenuAction, onRename, onCancelRename, onCancel, onRetry }) {
+function Card({ output, now, waiting = false, outlinePending = false, confirmedOutline = false, focused = false, menuOpen, renaming, onOpen, onToggleMenu, onMenuAction, onRename, onCancelRename, onCancel, onRetry }) {
   const state = cardState(output);
   const type = STUDIO_TYPE_STYLE[output.type_id] ?? STUDIO_TYPE_STYLE.report;
   const [title, setTitle] = useState(output.title);
   const generating = state === "generating";
   let subtitle = cardSubtitle(output, { now });
   // 동시 생성 한도 때문에 시작을 기다리는 산출물은 "대기 중"으로 구분한다(낙관적 카드와 실행 중 카드는 "생성 중").
-  if (generating) subtitle = waiting ? msg("studio.card.queued") : confirmedOutline ? msg("studio.card.generating_confirmed") : msg("studio.card.generating");
+  // 심층 조사(NB4-U2)는 서버 진행 메모로 단계(계획 → 찾기 n/m → 작성)를 보인다. 조사는 구성 확인을 쓰지 않아 확정 문구와 겹치지 않는다.
+  const research = generating && !waiting ? researchProgress(output) : null;
+  if (generating) subtitle = waiting ? msg("studio.card.queued") : research ? msg(`studio.research.progress.${research.step}`, research)
+    : confirmedOutline ? msg("studio.card.generating_confirmed") : msg("studio.card.generating");
   else if (state === "failed") subtitle = studioErrorMessage(output.error_code) || msg("studio.card.failed");
   else if (state === "cancelled") subtitle = msg("studio.card.cancelled");
   const needsReview = outlinePending && (state === "ready" || state === "stale");
-  return <li className="studio-card" data-state={state} data-outline={needsReview ? "review" : undefined}>
+  return <li className="studio-card" data-state={state} data-outline={needsReview ? "review" : undefined} data-output-id={output.output_id}
+    data-research-step={research?.step} data-focused={focused ? "true" : undefined}>
     <button type="button" className="studio-card__main" disabled={generating && output.optimistic} onClick={() => onOpen(output)} aria-label={`${msg("studio.card.open")}: ${output.title}`}>
       <StudioIcon name={generating ? "spinner" : state === "failed" ? "warning" : type.icon} accent={!generating && state !== "failed" ? output.type_id : false} size={24} />
       <span className="studio-card__text">
@@ -68,7 +75,8 @@ function Card({ output, now, waiting = false, outlinePending = false, confirmedO
           ? null
           : <span className="studio-card__title">{output.title}</span>}
         <span className="studio-card__subtitle">{subtitle}{needsReview && <span className="studio-chip">{msg("studio.card.outline_needed")}</span>}{state === "stale" && <span className="studio-chip">{msg("studio.card.stale")}</span>}</span>
-        {generating && <span className="studio-progress" aria-hidden="true"><span style={{ width: `${output.progress_pct ?? 20}%` }} /></span>}
+        {generating && <span className="studio-progress" aria-hidden="true"><span style={{ width: `${progressPercent(output)}%` }} /></span>}
+        {focused && <span className="sr-only">{msg("studio.card.focused")}</span>}
       </span>
     </button>
     {renaming && <input className="studio-rename" aria-label={msg("studio.menu.rename")} value={title} maxLength={160} autoFocus
@@ -85,7 +93,7 @@ function Card({ output, now, waiting = false, outlinePending = false, confirmedO
 // 메모를 소스로(NB1-U2): 이 오류 뒤에는 서버의 연결 상태가 화면과 다를 수 있어 메모를 다시 읽는다.
 const MEMO_SOURCE_RELOAD_CODES = new Set(["MEMO_SOURCE_EXISTS", "MEMO_SOURCE_UNCHANGED", "MEMO_SOURCE_NOT_LINKED"]);
 
-function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAskAboutNode, onError, onMemoSourceChanged, onOutlineConfirmed }) {
+function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAskAboutNode, onError, onMemoSourceChanged, onOutlineConfirmed, onDiscoveryAdded }) {
   const [output, setOutput] = useState(null);
   const [error, setError] = useState(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -149,6 +157,8 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
     else setOutput(await studio.getOutput(outputId));
   };
   const memoSource = memoSourceAvailable ? { link: output.source_link, onCreate: () => runMemoSource("created"), onReflect: () => runMemoSource("reflected") } : null;
+  // 심층 조사 보고서(NB4-U2): 어댑터의 researchOf(=studioResearchOf)가 조사 정보를 줄 때만 근거 라벨·사용한 자료를 보인다.
+  const research = output && output.type_id === "report" && !reviewing && typeof studio.researchOf === "function" ? studio.researchOf(output) : null;
   return <div className="studio-detail">
     <div className="studio-detail__bar">
       <button type="button" className="studio-icon-button" aria-label={msg("studio.back")} onClick={onBack}><StudioIcon name="chevron_right" size={20} className="studio-flip" style={{ transform: "rotate(180deg)" }} /></button>
@@ -170,7 +180,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
         setOutput(await studio.getOutput(outputId));  // 서버가 정리한 본문·새 리비전 번호로 다시 읽는다
         setEditing(false);
       }} />}
-      {output && !editing && <StudioViewer output={output} onConfirmOutline={confirmOutline} onCancelOutline={onBack} onOpenEvidence={(ref) => onOpenEvidence(output, ref)} onAskAboutNode={onAskAboutNode}
+      {output && !editing && <StudioViewer output={output} research={Boolean(research)} onConfirmOutline={confirmOutline} onCancelOutline={onBack} onOpenEvidence={(ref) => onOpenEvidence(output, ref)} onAskAboutNode={onAskAboutNode}
         onLoadImage={loadImage} onLoadAudio={loadAudio} onLoadVideo={loadVideo} onLoadCaptions={loadCaptions}
         onAttempt={(kind, payload) => studio.recordLearningAttempt?.(outputId, { revisionNo: output.current_revision, kind, payload }).catch(() => {})}
         memoSource={memoSource}
@@ -180,6 +190,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
           setOutput((o) => ({ ...o, current_revision: saved.revision_no,
             ...(o.source_link ? { source_link: { ...o.source_link, outdated: saved.revision_no !== o.source_link.reflected_revision_no } } : {}) }));
         }} />}
+      {output && !editing && research && <ResearchSourcesPanel studio={studio} research={research} citedRefs={citedRefs(output.revision?.content)} canEdit={canEdit} onAdded={onDiscoveryAdded} />}
       {output && !editing && !reviewing && output.status === "completed" && CHAT_EDIT_TYPES.includes(output.type_id) && typeof studio.listEditTurns === "function"
         && <StudioChatEdit studio={studio} outputId={outputId} onApplied={async () => setOutput(await studio.getOutput(outputId))} />}
     </div>
@@ -191,7 +202,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
  * sourceStats: { sourceCount, checkedCount, readySourceCount, processingCount }.
  */
 export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSourceVersionIds = [], onToggleCollapse, onAskAboutNode, refreshToken = 0, now = () => Date.now(),
-  canEdit = true, onMemoSourceChanged, openOutputRequest = null }) {
+  canEdit = true, onMemoSourceChanged, openOutputRequest = null, focusOutputRequest = null, onDiscoveryAdded }) {
   const [state, dispatch] = useReducer(reduce, undefined, createStudioPanelState);
   const [menuFor, setMenuFor] = useState(null);
   const [renaming, setRenaming] = useState(null);
@@ -228,6 +239,27 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     setAuthoringOpen(null);
     dispatch({ type: "SELECT", outputId: openOutputRequest.outputId });
   }, [openOutputRequest?.outputId, openOutputRequest?.nonce]);
+
+  // 새 카드로 이동(NB4-U2 심층 조사 시작): 보기·작성 마법사를 닫고 목록을 다시 읽은 뒤, 그 카드가 목록에 나타나면 스크롤하고 강조한다.
+  const [focusTarget, setFocusTarget] = useState(null);
+  const [focusedId, setFocusedId] = useState(null);
+  const listRef = useRef(null);
+  useEffect(() => {
+    if (!focusOutputRequest?.outputId) return;
+    setAuthoringOpen(null);
+    setMenuFor(null);
+    dispatch({ type: "SELECT", outputId: null });
+    setFocusTarget(focusOutputRequest.outputId);
+    reload().catch(() => {});
+  }, [focusOutputRequest?.outputId, focusOutputRequest?.nonce, reload]);
+  useEffect(() => {
+    if (!focusTarget || state.selectedOutputId || !state.outputs.some((o) => o.output_id === focusTarget)) return;
+    const node = [...(listRef.current?.childNodes ?? [])].find((child) => child.getAttribute?.("data-output-id") === focusTarget);
+    if (!node) return;
+    node.scrollIntoView?.({ block: "nearest" });
+    setFocusedId(focusTarget);
+    setFocusTarget(null);
+  }, [focusTarget, state.outputs, state.selectedOutputId]);
 
   useEffect(() => {
     const mark = (id, on) => setOutlinePending((current) => {
@@ -330,7 +362,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     </header>
     {state.error && <p className="studio-alert" role="alert">{studioErrorMessage(state.error)} <button type="button" className="studio-btn" onClick={() => dispatch({ type: "ERROR_CLEARED" })}>{msg("studio.dialog.close")}</button></p>}
     {authoringOpen ? <AuthoringWizard studio={studio} sources={sources} outputId={authoringOpen.outputId} onChanged={() => reload().catch(() => {})}
-      onClose={() => { setAuthoringOpen(null); reload().catch(() => {}); }} /> : selected ? <Detail key={selected} studio={studio} outputId={selected} canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} onOutlineConfirmed={outlineConfirmed} onBack={() => { dispatch({ type: "SELECT", outputId: null }); reload().catch(() => {}); }}
+      onClose={() => { setAuthoringOpen(null); reload().catch(() => {}); }} /> : selected ? <Detail key={selected} studio={studio} outputId={selected} canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} onOutlineConfirmed={outlineConfirmed} onDiscoveryAdded={onDiscoveryAdded} onBack={() => { dispatch({ type: "SELECT", outputId: null }); reload().catch(() => {}); }}
       onOpenEvidence={openEvidence} onAskAboutNode={onAskAboutNode} onError={(code) => dispatch({ type: "ERROR", code })} /> : <>
       <div className="studio-v2-tiles" role="group" aria-label={msg("studio.create_group")}>
         {TILE_ORDER.map((typeId) => {
@@ -355,7 +387,8 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
       <div className="studio-list-header"><span>{msg("studio.card.count", { count: state.outputs.length })}</span></div>
       {state.status === "loading" ? <p className="studio-empty" role="status">…</p> : state.outputs.length === 0
         ? <p className="studio-empty">{msg("studio.empty")}</p>
-        : <ul className="studio-list">{state.outputs.map((output) => <Card key={output.output_id} output={output} now={now()} waiting={waiting.has(output.output_id)}
+        : <ul className="studio-list" ref={listRef}>{state.outputs.map((output) => <Card key={output.output_id} output={output} now={now()} waiting={waiting.has(output.output_id)}
+          focused={focusedId === output.output_id}
           outlinePending={outlinePending.has(output.output_id)} confirmedOutline={confirmedOutlines.has(output.output_id)}
           menuOpen={menuFor === output.output_id} renaming={renaming === output.output_id}
           onOpen={(item) => {
@@ -406,14 +439,14 @@ export function StudioPanelGate({ studio, fallback = null, ...props }) {
 
 /** 셸용 진입점: 어댑터에 studioV2가 없으면 기존 Studio(fallback)를 그대로 보여준다. */
 export function StudioFallbackGate({ adapter, sources = [], unchecked = new Set(), fallback = null, onAskAboutNode, refreshToken = 0, knowledgeCount = 0,
-  canEdit = true, onMemoSourceChanged, openOutputRequest = null }) {
+  canEdit = true, onMemoSourceChanged, openOutputRequest = null, focusOutputRequest = null, onDiscoveryAdded }) {
   const studio = adapter?.studioV2;
   if (!studio) return fallback;
   const ready = sources.filter((source) => source.ready);
   const checked = ready.filter((source) => !unchecked.has(source.sourceVersionId)).map((source) => source.sourceVersionId);
   const processing = sources.filter((source) => !source.ready && ["processing", "queued", "pending", "uploaded"].includes(source.sourceState)).length;
   return <StudioPanelGate studio={studio} fallback={fallback} onAskAboutNode={onAskAboutNode} refreshToken={refreshToken} sources={sources}
-    canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} openOutputRequest={openOutputRequest}
+    canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} openOutputRequest={openOutputRequest} focusOutputRequest={focusOutputRequest} onDiscoveryAdded={onDiscoveryAdded}
     checkedSourceVersionIds={checked} sourceStats={{ sourceCount: sources.length, checkedCount: checked.length, readySourceCount: ready.length, processingCount: processing, knowledgeCount }} />;
 }
 

@@ -74,6 +74,15 @@ export const STUDIO_MESSAGES = Object.freeze({
   "studio.back": "목록으로",
   "studio.evidence.label": "근거 {n}: {name} {where}",
   "studio.evidence.unverified": "근거 미확인",
+  // 심층 조사(WO-N1 NB4-U2): 카드 진행 문구(서버 진행 메모 "계획" → "찾기 n/m" → "작성")와 조사 보고서 표시.
+  "studio.research.progress.plan": "조사 계획 세우는 중",
+  "studio.research.progress.find": "자료 찾는 중 ({n}/{m})",
+  "studio.research.progress.write": "보고서 작성 중",
+  "studio.research.unsupported_prefix": "근거 부족: ",
+  "studio.research.unsupported": "근거 부족",
+  "studio.research.unsupported_hint": "찾은 자료로 확인되지 않은 문장입니다",
+  "studio.research.ref_label": "근거 {ref}: {name}",
+  "studio.card.focused": "방금 시작한 산출물",
   "studio.dialog.settings.confirm_outline": "작성 전에 구성 확인",
   "studio.dialog.settings.title": "{type} 설정",
   "studio.dialog.settings.focus": "포커스 지시문",
@@ -137,6 +146,12 @@ export const STUDIO_ERRORS = Object.freeze({
   PROVIDER_UNAVAILABLE: "모델에 연결하지 못했습니다. 잠시 후 다시 시도하세요.",
   STUDIO_JOB_CANCELLED: "수정 요청이 취소되었습니다.",
   STUDIO_DEAD_LETTER: "여러 번 시도했지만 생성하지 못했습니다.",
+  // 심층 조사 실패(WO-N1 NB4-F2 산출물 error_code)
+  RESEARCH_TIMEOUT: "조사가 제한 시간 안에 끝나지 않아 멈췄습니다. 질문을 좁히거나 범위를 줄여 다시 시도하세요.",
+  RESEARCH_NO_EVIDENCE: "조사에 쓸 자료를 찾지 못했습니다. 질문을 바꿔 다시 시도하세요.",
+  DISCOVERY_SCOPE_UNAVAILABLE: "고른 범위를 지금 쓸 수 없어 조사하지 못했습니다. 관리자에게 지식 연결 확인을 요청하세요.",
+  DISCOVERY_CONNECTOR_FAILED: "지식 연결이 응답하지 않아 조사하지 못했습니다. 잠시 후 다시 시도하세요.",
+  DISCOVERY_UNAVAILABLE: "자료 찾기를 지금 쓸 수 없어 조사하지 못했습니다. 잠시 후 다시 시도하세요.",
 });
 
 export function msg(key, params = {}) {

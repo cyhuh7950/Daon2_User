@@ -5,7 +5,7 @@ import {
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, getNotebookOverview, regenerateNotebookOverview,
-  listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, searchSourceDiscovery, addSourceDiscovery, createStudioResearch, issueExportStepUp,
+  listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, searchSourceDiscovery, addSourceDiscovery, createStudioResearch, studioResearchOf, issueExportStepUp,
   listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
 import { localMemoTitle } from "./memo-title.js";
@@ -69,6 +69,8 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     addSourceDiscovery: (ref, options) => addSourceDiscovery(workspaceId, scope({ ...options, ref })),
     // 심층 조사(WO-N1 NB4-F2): 스튜디오 보고서 산출물을 만든다(응답은 createOutput과 같음). 결과 정보는 studioResearchOf(조회 결과).
     createResearch: (query, scopes, options) => createStudioResearch(workspaceId, scope({ ...options, query, scopes })),
+    // 화면용 보조(NB4-U2): 보고서 조회 결과에서 심층 조사 정보를 꺼낸다(UI 패키지는 apps/web/lib를 직접 가져오지 않고 어댑터로 받는다).
+    researchOf: studioResearchOf,
     getCustomization: (options) => getStudioCustomization(workspaceId, scope(options)),
     saveCustomization: (instruction, options) => saveStudioCustomization(workspaceId, instruction, scope(options)),
     authoring: Object.freeze({
