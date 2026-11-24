@@ -24,7 +24,7 @@ from daon2_user_api.knowledge_scope_service import KnowledgeScopeContext, Knowle
 from daon2_user_api.mcp_client import McpError, McpToolResult
 from daon2_user_api.runtime import WEB_SESSION_COOKIE, RuntimeDependencies, RuntimeSettings, create_app
 from daon2_user_api.source_discovery import (
-    MAX_CANDIDATES, MAX_DOCUMENT_BYTES, MAX_TOOL_CALLS, CallBudget, DiscoveryError, DiscoverySearcher, SourceDiscoveryService,
+    EFFECTIVE_DOCUMENT_BYTES, MAX_CANDIDATES, MAX_DOCUMENT_BYTES, MAX_TOOL_CALLS, CallBudget, DiscoveryError, DiscoverySearcher, SourceDiscoveryService,
     register_source_discovery_routes,
 )
 from daon2_user_api.text_source import TEXT_SOURCE_MAX_BYTES, TextSourceError, _encode
@@ -154,7 +154,7 @@ class FakeTextSources:
         self.registered: list[dict] = []
 
     def register_text_source(self, context, notebook_id, *, title, text, origin, idempotency_key=None):
-        _encode(text)  # 실제 도우미와 같은 크기·빈 글 검사(32 KiB 넘으면 TEXT_SOURCE_TOO_LARGE)
+        _encode(text)  # 실제 도우미와 같은 크기·빈 글 검사(2 MiB 넘으면 TEXT_SOURCE_TOO_LARGE)
         self.registered.append({"notebook_id": notebook_id, "title": title, "text": text, "origin": origin, "key": idempotency_key,
                                 "actor": context.actor_id})
         return f"src-{len(self.registered)}", f"sv-{len(self.registered)}"
@@ -378,7 +378,7 @@ class AddTests(unittest.TestCase):
         self.assertEqual(texts.registered, [])
 
     def test_add_source_over_text_source_limit_is_also_413(self):
-        # 텍스트 소스(TXT 이해)는 32 KiB까지라 그보다 큰 문서는 2 MiB 이하여도 같은 413이다(Ruling).
+        # 텍스트 소스 상한(NB4-F1b 이후 2 MiB)을 넘는 본문도 같은 413이다.
         connectors = FakeConnectors()
         connectors.documents[("p-bid", "제안서")][0]["char_count"] = None
         connectors.text_pages["doc-a"] = [{**connectors.text_pages["doc-a"][1], "blocks": [{"block_id": "b", "page_no": 1, "text": "a" * (TEXT_SOURCE_MAX_BYTES + 10)}]}]
@@ -387,6 +387,24 @@ class AddTests(unittest.TestCase):
         with self.assertRaises(DiscoveryError) as caught:
             service.add(CTX, NB, ref)
         self.assertEqual((caught.exception.code, caught.exception.status), ("DISCOVERY_DOCUMENT_TOO_LARGE", 413))
+
+    def test_add_source_registers_a_document_larger_than_32_kib(self):
+        # NB4-F1b: 텍스트 소스 상한이 2 MiB라 32 KiB를 넘는 승인 문서도 소스로 추가된다.
+        self.assertEqual(EFFECTIVE_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES)
+        connectors = FakeConnectors()
+        connectors.documents[("p-bid", "제안서")][0]["char_count"] = 120_000
+        block = "가나다라 마바사 " * 400
+        connectors.text_pages["doc-a"] = [{**connectors.text_pages["doc-a"][1],
+                                           "blocks": [{"block_id": f"b{i}", "page_no": 1, "text": block} for i in range(30)] +
+                                                     [{"block_id": "tail", "page_no": 2, "text": "맨 끝 표식 ZEBRA-TAIL-77"}]}]
+        texts = FakeTextSources()
+        service, _, _ = make_service(connectors, text_sources=texts)
+        ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        result = service.add(CTX, NB, ref, idempotency_key="discovery-key-0002")
+        self.assertEqual(result.data, {"added": "source", "source_id": "src-1"})
+        text = texts.registered[0]["text"]
+        self.assertGreater(len(text.encode("utf-8")), 32 * 1024)
+        self.assertTrue(text.endswith("ZEBRA-TAIL-77"))
 
     def test_add_source_rechecks_that_document_belongs_to_the_package(self):
         service, connectors, _ = make_service()

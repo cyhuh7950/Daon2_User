@@ -21,6 +21,7 @@ from .answer_process import safe_answer_process
 from .data_canon import canonical_json_bytes
 from .document_index_postgres import IndexedEvidenceChunk, _source_access_allowed
 from .document_processing import text_source_format
+from .text_document_understanding import TEXT_UNDERSTANDING_MAX_BYTES as TEXT_SOURCE_MAX_BYTES  # 텍스트 소스 원문 상한(NB4-F1b, 2 MiB)
 from .document_understanding_adapter import DocumentUnderstandingError
 from .question_answering import GroundedTextResult, TextModelSelection
 from .operations_telemetry import make_cost_receipt, TelemetryUnavailable
@@ -1215,7 +1216,7 @@ class PostgresQuestionAnsweringRepository:
             except (ObjectQueueError, ObjectStorageError):
                 raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=503) from None
             if (
-                len(content) > 1024 * 1024 or len(content) != int(original[7])
+                len(content) > TEXT_SOURCE_MAX_BYTES or len(content) != int(original[7])
                 or hashlib.sha256(content).hexdigest() != str(original[6])
             ):
                 raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=409)

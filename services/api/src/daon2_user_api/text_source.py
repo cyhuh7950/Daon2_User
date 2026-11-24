@@ -21,8 +21,11 @@ from .cloud_storage import CloudAccessContext
 from .data_canon import CanonicalContext, canonical_json_bytes
 from .document_processing import DocumentProcessingContext, text_source_format
 from .source_ingest import SourceIngestor, SourceRejected
+from .text_document_understanding import TEXT_UNDERSTANDING_MAX_BYTES
 
-TEXT_SOURCE_MAX_BYTES = 32 * 1024          # TXT 이해(text_document_understanding)의 상한과 같다
+# TXT 이해(text_document_understanding)의 상한과 같다. NB4-F1b에서 32 KiB → 2 MiB(빠른 찾기 add_source 상한과 같다).
+# 모델에는 앞부분(32 KiB 이하)만 보내고, 색인·근거 구간은 본문 전체로 만든다.
+TEXT_SOURCE_MAX_BYTES = TEXT_UNDERSTANDING_MAX_BYTES
 TEXT_SOURCE_ORIGINS = frozenset({"memo", "research"})
 TEXT_CONTENT_TYPE = "text/plain"
 _CHUNK_CHARS = 1024

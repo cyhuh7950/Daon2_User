@@ -969,6 +969,37 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(QuestionRepositoryError, "CITATION_CONTENT_UNAVAILABLE"):
             self.repository.read_citation_content(self.context, "citation-txt")
 
+    def test_large_text_source_citation_reads_the_whole_original_up_to_the_text_source_limit(self) -> None:
+        # NB4-F1b: 텍스트 소스 상한이 2 MiB라 1 MiB를 넘는 원문의 근거도 열 수 있어야 한다.
+        from daon2_user_api.text_source import TEXT_SOURCE_MAX_BYTES
+        self.context = QuestionContext(
+            "tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1", "notebook-cp3",
+        )
+        for original, readable in (
+            (("가나다 " * 150_000 + "ZEBRA-TAIL-77").encode("utf-8"), True),
+            (b"ZEBRA-TAIL-77 " + b"a" * TEXT_SOURCE_MAX_BYTES, False),
+        ):
+            with self.subTest(size=len(original)):
+                self.cloud.connection.citation_row = (
+                    "source-cp3", "source-version-cp3", "1", "1",
+                    {"kind": "text_source_verbatim_fact", "text": "ZEBRA-TAIL-77"},
+                    "uploaded", "large.txt", "ready", "span-txt",
+                )
+                self.cloud.connection.ready_row = (
+                    "source-cp3", "source-version-cp3", "ready", "large.txt",
+                    "0123456789abcdef0123456789abcdef",
+                    "tenant-cp3/workspace-cp3/source/0123456789abcdef0123456789abcdef",
+                    hashlib.sha256(original).hexdigest(), len(original), "text/plain", "completed",
+                )
+                self.repository._object_storage.content = original
+                if readable:
+                    self.assertGreater(len(original), 1024 * 1024)
+                    content, _ = self.repository.read_citation_content(self.context, "citation-txt")
+                    self.assertEqual(content.content, original)
+                else:
+                    with self.assertRaisesRegex(QuestionRepositoryError, "CITATION_CONTENT_UNAVAILABLE"):
+                        self.repository.read_citation_content(self.context, "citation-txt")
+
     def test_uploaded_markdown_and_csv_citation_reads_exact_current_bound_original(self) -> None:
         self.context = QuestionContext(
             "tenant-cp3", "workspace-cp3", "actor-cp3", "trace-cp3", "policy-v1", "notebook-cp3",
