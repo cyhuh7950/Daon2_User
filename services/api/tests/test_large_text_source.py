@@ -290,3 +290,37 @@ class IndexWholeTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InvalidResponseReasonTests(unittest.TestCase):
+    """TXT 이해 응답이 검증을 통과하지 못하면 이유만(본문 없이) 경고 로그로 남긴다(NB4-I1 실서버 원인 조사)."""
+
+    def run_with(self, choice, model="uss/solar-pro4"):
+        class Transport:
+            def post_json(self, **kwargs):
+                return {"choices": [choice], "model": model}
+            post_json_no_auth = post_json
+        with self.assertLogs("daon2_user_api.text_document_understanding", level="WARNING") as logs:
+            with self.assertRaises(DocumentUnderstandingError) as caught:
+                OpenAICompatibleTextDocumentAdapter(Transport()).understand(document(big_text()), external_model(), CTX)
+        self.assertEqual(caught.exception.code, "TEXT_UNDERSTANDING_RESPONSE_INVALID")
+        return "\n".join(logs.output)
+
+    def test_truncated_response_is_logged_as_truncated(self):
+        out = self.run_with({"message": {"content": '{"title": "큰 약관", "summary": "중간에 잘린'}, "finish_reason": "length"})
+        self.assertIn("reason=truncated", out)
+        self.assertIn("finish=length", out)
+        self.assertNotIn("중간에 잘린", out)
+
+    def test_wrong_shape_is_logged_as_shape(self):
+        out = self.run_with({"message": {"content": json.dumps({"title": "t", "summary": "s"})}, "finish_reason": "stop"})
+        self.assertIn("reason=shape", out)
+
+    def test_too_many_facts_is_logged_as_limits(self):
+        out = self.run_with({"message": {"content": answer([FIRST] * 6)}, "finish_reason": "stop"})
+        self.assertIn("reason=limits", out)
+
+    def test_non_json_is_logged_as_not_json(self):
+        out = self.run_with({"message": {"content": "요약할 수 없습니다"}, "finish_reason": "stop"})
+        self.assertIn("reason=not_json", out)
+        self.assertNotIn("요약할 수 없습니다", out)

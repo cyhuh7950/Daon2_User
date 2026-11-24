@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Mapping, Protocol, cast
 
@@ -241,26 +242,33 @@ def _json_text(text: str) -> object:
     return json.loads(stripped[start:end + 1])
 
 
+_LOG = logging.getLogger(__name__)
+
+
+def _reject_response(reason: str, finish: object = None, chars: int = 0) -> DocumentUnderstandingError:
+    """응답 검증 실패 이유만 남긴다(응답·원문 글은 남기지 않는다). 이유: truncated·not_json·shape·limits."""
+    safe_finish = finish if isinstance(finish, str) and finish.isascii() and len(finish) <= 32 else "-"
+    _LOG.warning("text_understanding_invalid reason=%s finish=%s chars=%d", reason, safe_finish, chars)
+    return DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502)
+
+
 def _validated_understanding(raw_content: object, revision: object, original: str,  # type: ignore[no-untyped-def]
-                             head: str | None = None, sent: str | None = None):
+                             head: str | None = None, sent: str | None = None, finish: object = None):
     """모델 응답(JSON)을 검증해 (title, summary, facts, revision)을 돌려준다. Ollama 경로와 같은 규칙."""
+    chars = len(raw_content) if isinstance(raw_content, str) else 0
     try:
         value = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
-        if not isinstance(value, dict) or set(value) != {"title", "summary", "key_facts"}:
-            raise ValueError
-        title, summary, facts = value["title"], value["summary"], value["key_facts"]
-        if not isinstance(title, str) or not isinstance(summary, str) or not isinstance(revision, str):
-            raise ValueError
-        if not isinstance(facts, list) or not 1 <= len(facts) <= 5 or any(not isinstance(fact, str) for fact in facts):
-            raise ValueError
-        title, summary = title.strip(), summary.strip()
-        fact_values = tuple(fact.strip() for fact in facts)
-        if not title or not summary or not revision.strip() or len(title) > 255 or len(summary) > 4000 or any(
-            not fact or len(fact) > 2000 for fact in fact_values
-        ):
-            raise ValueError
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        raise DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502) from None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise _reject_response("truncated" if finish == "length" else "not_json", finish, chars) from None
+    if not isinstance(value, dict) or set(value) != {"title", "summary", "key_facts"}:
+        raise _reject_response("shape", finish, chars)
+    title, summary, facts = value["title"], value["summary"], value["key_facts"]
+    if not isinstance(title, str) or not isinstance(summary, str) or not isinstance(revision, str) or not isinstance(facts, list)             or any(not isinstance(fact, str) for fact in facts):
+        raise _reject_response("shape", finish, chars)
+    title, summary = title.strip(), summary.strip()
+    fact_values = tuple(fact.strip() for fact in facts)
+    if not 1 <= len(fact_values) <= 5 or not title or not summary or not revision.strip() or len(title) > 255             or len(summary) > 4000 or any(not fact or len(fact) > 2000 for fact in fact_values):
+        raise _reject_response("limits", finish, chars)
     head = original if head is None else head
     summary, fact_values = _grounded_facts(original, head, head if sent is None else sent, summary, fact_values)
     return title, summary, fact_values, revision.strip()
@@ -306,14 +314,21 @@ class OpenAICompatibleTextDocumentAdapter:
             response = self._transport.post_json(url=url, api_key=key, payload=payload, timeout_seconds=120.0)
         else:
             response = self._transport.post_json_no_auth(url=url, payload=payload, timeout_seconds=120.0)
+        finish: object = None
         try:
             choices = cast(list[object], response["choices"])
-            content = cast(Mapping[str, object], cast(Mapping[str, object], choices[0])["message"])["content"]
-            raw = _json_text(content) if isinstance(content, str) else content
+            choice = cast(Mapping[str, object], choices[0])
+            finish = choice.get("finish_reason")
+            content = cast(Mapping[str, object], choice["message"])["content"]
             revision = response.get("model") or selection.model_id
-        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
-            raise DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502) from None
-        title, summary, fact_values, revision = _validated_understanding(raw, revision, original, head, sent)
+        except (KeyError, IndexError, TypeError, AttributeError):
+            raise _reject_response("shape", finish) from None
+        try:
+            raw = _json_text(content) if isinstance(content, str) else content
+        except (ValueError, json.JSONDecodeError):
+            raise _reject_response("truncated" if finish == "length" else "not_json", finish,
+                                   len(content) if isinstance(content, str) else 0) from None
+        title, summary, fact_values, revision = _validated_understanding(raw, revision, original, head, sent, finish)
         return DocumentUnderstandingResult(
             document.source_id, document.source_version_id, "ready",
             ("vision_llm_understanding", "parser_ocr_validation", "evidence_reconciliation"),
