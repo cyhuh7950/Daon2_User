@@ -521,11 +521,24 @@ class SourceDiscoveryService:
             code = "TOOL_ERROR" if getattr(result, "is_error", False) else "RESPONSE_INVALID"
             raise DiscoveryError(FAILED, 502, diagnostic=_diagnostic(tool, code)) from None
 
+    def _page_size(self, context: DiscoveryContext, connector_id: str, tool: str, default: int) -> int:
+        """서버가 도구 설명에 알린 limit 최댓값과 기본값 중 작은 값. 모르면 기본값.
+
+        배포된 Daon2-RAG의 최댓값이 기본값보다 작으면 MCP 클라이언트가 MCP_ARGUMENTS_INVALID로 막는다(NB4-I1 실서버).
+        """
+        reader = getattr(self._connectors, "tool_limit", None)
+        try:
+            maximum = reader(self.searcher.connector_context(context), connector_id, tool) if callable(reader) else None
+        except (McpError, ConnectorError):
+            maximum = None
+        return min(maximum, default) if isinstance(maximum, int) and not isinstance(maximum, bool) and maximum >= 1 else default
+
     def _approved_document(self, context: DiscoveryContext, connector_id: str, ref: Mapping[str, str]) -> Mapping[str, Any]:
         """ref의 문서가 그 업무 패키지의 RAG 승인 문서인지 다시 확인한다(목록에 없으면 404)."""
         cursor: str | None = None
-        for _ in range(MAX_DOCUMENT_PAGES):
-            arguments: dict[str, Any] = {"project_id": ref["project_id"], "work_package_id": ref["work_package_id"], "limit": DOCUMENT_PAGE_SIZE}
+        page_size = self._page_size(context, connector_id, "list_approved_documents", DOCUMENT_PAGE_SIZE)
+        for _ in range(MAX_DOCUMENT_PAGES * max(1, DOCUMENT_PAGE_SIZE // page_size)):
+            arguments: dict[str, Any] = {"project_id": ref["project_id"], "work_package_id": ref["work_package_id"], "limit": page_size}
             if cursor:
                 arguments["cursor"] = cursor
             page = self._connector_call(context, connector_id, "list_approved_documents", arguments)
@@ -545,8 +558,10 @@ class SourceDiscoveryService:
         parts: list[str] = []
         size, name, version, run = 0, "", "", None
         cursor: str | None = None
-        for _ in range(MAX_TEXT_PAGES):
-            arguments: dict[str, Any] = {"document_id": document_id, "limit": TEXT_PAGE_BLOCKS}
+        page_blocks = self._page_size(context, connector_id, "get_document_text", TEXT_PAGE_BLOCKS)
+        # 쪽당 블록이 적어도 전체 읽기 상한(MAX_TEXT_PAGES × TEXT_PAGE_BLOCKS 블록)은 같게 둔다.
+        for _ in range(-(-MAX_TEXT_PAGES * TEXT_PAGE_BLOCKS // page_blocks)):
+            arguments: dict[str, Any] = {"document_id": document_id, "limit": page_blocks}
             if cursor:
                 arguments["cursor"] = cursor
             page = self._connector_call(context, connector_id, "get_document_text", arguments)
