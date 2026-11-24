@@ -20,6 +20,7 @@ import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citati
 import { ManualMarkdown } from "./manual-markdown.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
+import { SourceGroupsList } from "./source-groups.jsx";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -2191,8 +2192,12 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           <section className="source-group" aria-labelledby="raw-source-title">
           <div className="source-group-heading"><h3 id="raw-source-title">Raw Source</h3><span>{viewState.sources.filter(source=>!lawSourcesOnly || source.lawSnapshot).length}</span></div>
           {lawSourcesOnly?<button type="button" onClick={()=>setLawSourcesOnly(false)}>모든 Source 보기</button>:null}
-          <ul className="source-list" aria-label="Raw Source 목록">
-            {viewState.sources.filter(source=>!lawSourcesOnly || source.lawSnapshot).map((source) => (
+          {/* 소스 묶음(NB3-U2): 묶음별로 나눠 그리고 줄은 아래 그대로 그린다. 묶음 체크는 소스 하나씩 체크한 것과 같다(질문 범위 불변). */}
+          <SourceGroupsList studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null}
+            sources={viewState.sources.filter(source=>!lawSourcesOnly || source.lawSnapshot)} refreshKey={viewState.sources.map(source=>source.sourceId).join("|")}
+            isChecked={source=>source.ready && !uncheckedSourceVersionIds.has(source.sourceVersionId)}
+            onSetChecked={(items,checked)=>setUncheckedSourceVersionIds(current=>{const next=new Set(current);for(const item of items){if(!item.ready)continue;if(checked)next.delete(item.sourceVersionId);else next.add(item.sourceVersionId);}return next;})}
+            renderRow={(source, groupControl) => (
               <li className="source-list-row" key={`${source.sourceId}:${source.sourceVersionId}`} data-source-id={source.sourceId}
                 ref={source.sourceId === memoSourceFocusId ? memoSourceRowRef : undefined}>
                 {adapter?.studioV2 ? <input type="checkbox" className="source-use-check" role="checkbox" aria-label={`${source.filename ?? source.sourceId} 사용`}
@@ -2201,6 +2206,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 <button type="button" aria-pressed={viewState.selectedSource?.sourceVersionId === source.sourceVersionId} onClick={() => selectSource(source)} disabled={!source.ready}>
                   <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
+                {groupControl}
                 <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
                 <MemoOriginBadge origin={source.memoOrigin} name={source.filename ?? source.sourceId} onOpen={openMemoFromSource} />
                 {(new Set(["failed", "waiting_model"]).has(source.sourceState)
@@ -2212,8 +2218,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   }}>재처리</button> : null}
                 {FAILED_SOURCE_STATES.has(source.sourceState) ? <p className="source-row-failure" role="status">{sourceFailureText(source.safeErrorCode)}</p> : null}
               </li>
-            ))}
-          </ul>
+            )} />
           {sourceRetryTarget?<section className="source-action-dialog" role="dialog" aria-modal="true" aria-label="Source 재처리 설정">
             <strong>{sourceRetryTarget.filename??sourceRetryTarget.sourceId}</strong>
             <label>처리 방식 <select aria-label="Source 재처리 Mode" value={sourceRetryMode}
