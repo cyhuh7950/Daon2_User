@@ -675,7 +675,7 @@ flowchart LR
 
 #### NB5-A4 종료
 
-- 인수 노트북 3개와 모든 `QA-N1-*` 자원 삭제(잔여 0 확인), 서버 임시 로그 삭제, 브랜치·worktree 정리, `WORK_STATUS.md`·`docs/daon2_user_development_plan.md`·`NOTEBOOK_WORK_CHECK.md` 최종 갱신, 완료 보고(§13)
+- 인수 노트북 3개와 모든 `QA-N1-*` 자원 삭제(잔여 0 확인; 단 `QA-N1-잔여(삭제 불가)`는 2026-11-24 신산님 결정으로 보존), 서버 임시 로그 삭제, 브랜치·worktree 정리, `WORK_STATUS.md`·`docs/daon2_user_development_plan.md`·`NOTEBOOK_WORK_CHECK.md` 최종 갱신, 완료 보고(§13)
 
 ---
 
