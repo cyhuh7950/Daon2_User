@@ -246,7 +246,7 @@ _LOG = logging.getLogger(__name__)
 
 
 def _reject_response(reason: str, finish: object = None, chars: int = 0) -> DocumentUnderstandingError:
-    """응답 검증 실패 이유만 남긴다(응답·원문 글은 남기지 않는다). 이유: truncated·not_json·shape·limits."""
+    """응답 검증 실패 이유만 남긴다(응답·원문 글은 남기지 않는다). 이유: truncated·not_json·shape·limits_{title|summary|facts|revision}."""
     safe_finish = finish if isinstance(finish, str) and finish.isascii() and len(finish) <= 32 else "-"
     _LOG.warning("text_understanding_invalid reason=%s finish=%s chars=%d", reason, safe_finish, chars)
     return DocumentUnderstandingError("TEXT_UNDERSTANDING_RESPONSE_INVALID", status=502)
@@ -265,10 +265,12 @@ def _validated_understanding(raw_content: object, revision: object, original: st
     title, summary, facts = value["title"], value["summary"], value["key_facts"]
     if not isinstance(title, str) or not isinstance(summary, str) or not isinstance(revision, str) or not isinstance(facts, list)             or any(not isinstance(fact, str) for fact in facts):
         raise _reject_response("shape", finish, chars)
-    title, summary = title.strip(), summary.strip()
-    fact_values = tuple(fact.strip() for fact in facts)
-    if not 1 <= len(fact_values) <= 5 or not title or not summary or not revision.strip() or len(title) > 255             or len(summary) > 4000 or any(not fact or len(fact) > 2000 for fact in fact_values):
-        raise _reject_response("limits", finish, chars)
+    # N1-B13: 개수·길이를 넘긴 부분만 버리고 자른다(신산님 결정 2026-11-11: 문장 하나 때문에 TXT 전체를 실패로 만들지 않는다).
+    title, summary = title.strip()[:255].strip(), summary.strip()[:4000].strip()
+    fact_values = tuple(fact for fact in (fact.strip() for fact in facts) if fact and len(fact) <= 2000)[:5]
+    for kind, missing in (("title", not title), ("summary", not summary), ("facts", not fact_values), ("revision", not revision.strip())):
+        if missing:
+            raise _reject_response(f"limits_{kind}", finish, chars)
     head = original if head is None else head
     summary, fact_values = _grounded_facts(original, head, head if sent is None else sent, summary, fact_values)
     return title, summary, fact_values, revision.strip()

@@ -104,3 +104,37 @@ def test_external_adapter_refuses_ollama_models_and_bad_input():
     with pytest.raises(DocumentUnderstandingError, match="TEXT_UNDERSTANDING_ENCODING_INVALID"):
         OpenAICompatibleTextDocumentAdapter(Transport("{}")).understand(
             StoredSourceDocument("s", "v", "a.txt", b"\xff\xfe", "text/plain"), _model(), _context())
+
+
+# N1-B13 (UAT-12): 모델이 핵심 사실 개수·길이 제한을 어기면(reason=limits) 문서 전체가 처리 실패했다.
+# 신산님 결정(2026-11-11) "문장 하나가 어긋났다고 TXT 전체를 실패로 만들지 않는다"에 맞춰 넘친 부분만 버린다.
+FACT = "제3조(면책 기간) 계약일부터 30일 이내 발생한 질병은 보장하지 않습니다."
+
+
+def _understand(value):
+    return OpenAICompatibleTextDocumentAdapter(Transport(json.dumps(value, ensure_ascii=False))).understand(_document(), _model(), _context())
+
+
+def test_external_adapter_keeps_first_five_facts_and_drops_empty_or_overlong_ones():
+    facts = ["", "x" * 2001, FACT, FACT + " ", "원문에 없는 사실", "연락처는", "제3조", "계약일부터"]
+    result = _understand({"title": "약관", "summary": "면책 기간을 설명한다.", "key_facts": facts})
+    assert result.status == "ready"
+    assert 1 <= len(result.semantic.key_facts) <= 5
+    assert all(fact and len(fact) <= 2000 for fact in result.semantic.key_facts)
+    assert FACT in result.semantic.key_facts
+
+
+def test_external_adapter_trims_overlong_title_and_summary_instead_of_failing():
+    result = _understand({"title": "약관" * 200, "summary": "면책 기간을 설명한다. " * 400, "key_facts": [FACT]})
+    assert result.status == "ready"
+    assert len(result.semantic.title) <= 255 and len(result.semantic.summary) <= 4000
+
+
+def test_external_adapter_still_rejects_empty_title_summary_or_no_facts(caplog):
+    for value, kind in (({"title": " ", "summary": "요약", "key_facts": [FACT]}, "title"),
+                        ({"title": "약관", "summary": "", "key_facts": [FACT]}, "summary"),
+                        ({"title": "약관", "summary": "요약", "key_facts": ["", " "]}, "facts")):
+        caplog.clear()
+        with caplog.at_level("WARNING"), pytest.raises(DocumentUnderstandingError, match="TEXT_UNDERSTANDING_RESPONSE_INVALID"):
+            _understand(value)
+        assert f"reason=limits_{kind}" in caplog.text
