@@ -801,6 +801,45 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/search": {
+      "post": {
+        "operationId": "searchNotebookSourceDiscovery", "tags": ["Workspace"],
+        "summary": "자료 찾기(빠른 찾기) 후보 검색", "x-implementation-owner": "WO-N1-NB4-F1",
+        "description": "결정 D-02에 따라 웹은 없고 내부만 찾는다. knowledge: Daon2-RAG list_knowledge_scopes(승인 업무 패키지 첫 쪽)에서 이름이 맞는 패키지와 Daon2 approved_knowledge_search의 승인 자산으로 업무 패키지 후보(add_scope). documents: 노트북이 고른 업무 패키지(없으면 이름이 맞는 승인 패키지)에서 Daon2-RAG search_document_evidence로 문서 후보(add_source). 각 범위는 그 종류의 확인된(verified) 실제 연결에 필요한 도구가 모두 허용돼 있을 때만 쓴다(가상 연결 제외, 허용 도구에 없는 도구는 부르지 않음). 검색 한 번에 도구 호출 최대 4회, 후보 최대 20개, 모든 호출은 지식 연결 외부 전송 판정을 거친다. 쓸 수 없거나 실패한 범위는 unavailable(reason: CONNECTOR_NOT_CONFIGURED·CONNECTOR_NOT_READY·CONNECTOR_DISABLED·TOOL_NOT_ALLOWED·DISCOVERY_CONNECTOR_FAILED)에 적고 다른 범위 결과는 그대로 돌려준다. 모든 범위를 쓸 수 없으면 422 DISCOVERY_SCOPE_UNAVAILABLE, 모두 실패하면 502 DISCOVERY_CONNECTOR_FAILED(error.details.unavailable). 자동 추가는 없다. 감사 source_discovery.search(범위·후보 수·이유·호출 수만, 검색어 저장 안 함). 노트북 보기 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceDiscoverySearchRequest" } } } },
+        "responses": {
+          "200": { "description": "Discovery candidates", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceDiscoverySearchEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "DISCOVERY_SCOPE_UNAVAILABLE", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" },
+          "502": { "description": "DISCOVERY_CONNECTOR_FAILED", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/add": {
+      "post": {
+        "operationId": "addNotebookSourceDiscovery", "tags": ["Workspace"],
+        "summary": "자료 찾기 후보 추가", "x-implementation-owner": "WO-N1-NB4-F1",
+        "description": "사람이 고른 후보의 ref 하나를 추가한다. 서버가 ref를 다시 확인한다. knowledge_package(add_scope): 기존 승인 지식 범위 저장(Daon2-RAG 승인 목록 재확인)으로 노트북 범위에 붙인다. 이미 있으면 200 그대로이고, 범위가 8개면 409 DISCOVERY_SCOPE_LIMIT, 승인 목록에 없으면 404 DISCOVERY_REF_NOT_FOUND. document(add_source): Daon2-RAG list_approved_documents로 그 업무 패키지의 승인 문서인지 확인(없으면 404 DISCOVERY_REF_NOT_FOUND)한 뒤 get_document_text로 본문을 받아 텍스트 소스(origin research, 처리 중으로 나타남)로 등록한다. 본문이 2 MiB를 넘거나 텍스트 소스 상한(32 KiB)을 넘으면 413 DISCOVERY_DOCUMENT_TOO_LARGE, 읽는 중 문서가 바뀌면 409 DISCOVERY_DOCUMENT_CHANGED. Idempotency-Key 필수(8~128자), 같은 키 재시도는 같은 소스. 감사 source_discovery.add(discovery: connector_kind·document_id·document_version, source_id). 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceDiscoveryAddRequest" } } } },
+        "responses": {
+          "200": { "description": "Candidate added", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceDiscoveryAddEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "413": { "description": "DISCOVERY_DOCUMENT_TOO_LARGE", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "422": { "description": "DISCOVERY_SCOPE_UNAVAILABLE, DISCOVERY_DOCUMENT_EMPTY or DISCOVERY_DOCUMENT_INVALID", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" },
+          "502": { "description": "DISCOVERY_CONNECTOR_FAILED", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings": {
       "post": {
         "operationId": "unbindWorkspaceNotebookSource", "tags": ["Workspace"],
@@ -9584,6 +9623,61 @@
       "SourceGroupMembersRequest": {
         "type": "object", "additionalProperties": false, "required": ["source_ids"],
         "properties": { "source_ids": { "type": "array", "maxItems": 500, "uniqueItems": true, "items": { "$ref": "#/components/schemas/OpaqueId" } } }
+      },
+      "SourceDiscoveryRef": {
+        "description": "자료 찾기 후보의 추가 대상(WO-N1 NB4-F1). 문서는 document_id·document_version이 있다. 서버가 추가 때 다시 확인한다.",
+        "type": "object", "additionalProperties": false, "required": ["kind", "project_id", "work_package_id"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["knowledge_package", "document"] },
+          "project_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "work_package_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "document_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "document_version": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      },
+      "SourceDiscoveryCandidate": {
+        "type": "object", "additionalProperties": false, "required": ["candidate_id", "kind", "title", "origin_label", "reason", "preview", "action", "ref"],
+        "properties": {
+          "candidate_id": { "$ref": "#/components/schemas/OpaqueId" },
+          "kind": { "type": "string", "enum": ["knowledge_package", "document"] },
+          "title": { "type": "string", "maxLength": 200 },
+          "origin_label": { "type": "string", "maxLength": 120 },
+          "reason": { "type": "string", "maxLength": 200 },
+          "preview": { "type": "string", "maxLength": 300 },
+          "action": { "type": "string", "enum": ["add_scope", "add_source"] },
+          "ref": { "$ref": "#/components/schemas/SourceDiscoveryRef" }
+        }
+      },
+      "SourceDiscoveryUnavailable": {
+        "type": "object", "additionalProperties": false, "required": ["scope", "reason"],
+        "properties": { "scope": { "type": "string", "enum": ["knowledge", "documents"] }, "reason": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" } }
+      },
+      "SourceDiscoveryResult": {
+        "type": "object", "additionalProperties": false, "required": ["candidates", "unavailable"],
+        "properties": {
+          "candidates": { "type": "array", "maxItems": 20, "items": { "$ref": "#/components/schemas/SourceDiscoveryCandidate" } },
+          "unavailable": { "type": "array", "maxItems": 2, "items": { "$ref": "#/components/schemas/SourceDiscoveryUnavailable" } }
+        }
+      },
+      "SourceDiscoverySearchEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/SourceDiscoveryResult" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
+      },
+      "SourceDiscoverySearchRequest": {
+        "type": "object", "additionalProperties": false, "required": ["query", "scopes"],
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "scopes": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "type": "string", "enum": ["knowledge", "documents"] } }
+        }
+      },
+      "SourceDiscoveryAddRequest": {
+        "type": "object", "additionalProperties": false, "required": ["ref"],
+        "properties": { "ref": { "$ref": "#/components/schemas/SourceDiscoveryRef" } }
+      },
+      "SourceDiscoveryAdded": {
+        "type": "object", "additionalProperties": false, "required": ["added"],
+        "properties": { "added": { "type": "string", "enum": ["scope", "source"] }, "source_id": { "$ref": "#/components/schemas/OpaqueId" } }
+      },
+      "SourceDiscoveryAddEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/SourceDiscoveryAdded" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
       },
       "NotebookOverviewCitation": {
         "type": "object", "additionalProperties": false, "required": ["label", "source_title", "page"],

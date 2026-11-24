@@ -5232,6 +5232,18 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         from .knowledge_scope_service import KnowledgeScopeService, register_knowledge_scope_routes
         knowledge_scope_service = KnowledgeScopeService(dependencies.cloud_store, knowledge_connector_service, os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None)
         register_knowledge_scope_routes(app, dependencies, knowledge_scope_service)
+        # 자료 찾기·빠른 찾기(WO-N1 NB4-F1, 결정 D-02 내부만): 지식 연결 호출은 knowledge_connector_service.call(외부 전송 판정)만 쓴다.
+        # 문서 추가는 메모를 소스로와 같은 텍스트 소스 도우미(업로드·문서 처리 경로)로 등록한다. 도우미를 만들 수 없으면 문서 추가만 503이다.
+        from .source_discovery import SourceDiscoveryService, register_source_discovery_routes
+        _discovery_text_sources = None
+        if dependencies.cloud_store is not None and dependencies.document_processing_service is not None and dependencies.source_upload_service is not None:
+            from .text_source import TextSourceService
+            _discovery_text_sources = TextSourceService(
+                upload_service=dependencies.source_upload_service, processing_service=dependencies.document_processing_service,
+                cloud_store=dependencies.cloud_store)
+        register_source_discovery_routes(app, dependencies, SourceDiscoveryService(
+            knowledge_connector_service, knowledge_scope_service, _discovery_text_sources,
+            os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None))
         # Daon2-RAG 검색의 승인 기준이 확인되기 전에는 켜지 않는다(WO-K3 E1).
         if os.environ.get("DAON_NOTEBOOK_EXTERNAL_EVIDENCE_ENABLED", "false") == "true" and hasattr(question_answering_service, "set_external_evidence"):
             from .question_external_evidence import NotebookKnowledgeEvidence
