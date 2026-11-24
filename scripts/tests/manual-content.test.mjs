@@ -108,7 +108,8 @@ test("N1 단계 1 두 절(2-13 답변 과정 보기, 2-14 메모를 소스로 �
       /\*\*소스와 같음\*\*/u,
       /\*\*소스가 변경됨\*\*/u,
       /메모를 지워도 소스는.*\*\*원본 메모 없음\*\*/su,
-      /32 KiB/u,
+      /소스로 쓸 수 있는 메모는 텍스트 소스와 같이 2 MiB까지/u,
+      /200,000바이트/u,
       /첫 버전을 아직 처리/u,
       /보기 권한만 있으면.*보이지 않습니다/su,
       /images\/2-14-memo-source\.png/u,
@@ -117,6 +118,8 @@ test("N1 단계 1 두 절(2-13 답변 과정 보기, 2-14 메모를 소스로 �
     ]) assert.match(memo, required, `2-14 ${required}`);
     assert.match(markdown, /\| 답변이 어떤 자료·판정·모델을 거쳤는지 보기 \| 2-13 \|/u, "부록 C 2-13");
     assert.match(markdown, /\| 메모를 소스로 쓰기, 고친 메모를 소스에 반영 \| 2-14 \|/u, "부록 C 2-14");
+    // NB4-F1b로 텍스트 소스 상한이 2 MiB가 됐다. 예전 32KB 상한 설명이 남아 있으면 안 된다.
+    assert.doesNotMatch(markdown, /32 ?KB|32 ?KiB/u, "예전 32KB 상한 언급");
   });
 });
 
@@ -228,6 +231,79 @@ test("N1 단계 3 두 절(2-17 만들기 전에 구성 확인, 2-18 소스 묶�
     ]) assert.match(groups, required, `2-18 ${required}`);
     assert.match(markdown, /\| 슬라이드·동영상 만들기 전에 장·장면 목록 고치기 \| 2-17 \|/u, "부록 C 2-17");
     assert.match(markdown, /\| 소스를 묶음으로 정리, 묶음째 체크 \| 2-18 \|/u, "부록 C 2-18");
+  });
+});
+
+// WO-N1 단계 4(NB4-M): 자료 찾기(빠른 찾기·심층 조사) 절이 원본과 공개 사본에 모두 있어야 한다.
+test("N1 단계 4 두 절(2-19 빠른 찾기, 2-20 심층 조사)은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const section = (heading) => {
+      const start = markdown.indexOf(`\n${heading}\n`);
+      assert.ok(start >= 0, `${file}: ${heading}`);
+      const rest = markdown.slice(start + 1);
+      const next = rest.slice(1).search(/\n#{2,3} /u);
+      return rest.slice(0, next < 0 ? undefined : next + 1);
+    };
+    const quick = section("### 2-19 빠른 찾기");
+    for (const required of [
+      /\*\*Source 추가\*\* 아래 \*\*자료 찾기\*\*/u,
+      /"필요한 자료를 찾아보세요"/u,
+      /\*\*승인 지식\*\*과 \*\*문서\*\*가 모두 켜져/u,
+      /최대 20개/u,
+      /\*\*업무 패키지\*\* 또는 \*\*문서\*\*/u,
+      /\*\*승인 지식 범위에 추가\*\* 또는 \*\*텍스트 소스로 추가\*\*/u,
+      /\*\*선택한 자료 추가\*\*/u,
+      /\*\*추가 중\*\*을 거쳐 \*\*추가됨\*\*/u,
+      /왼쪽 \*\*Daon 승인 지식\*\*에 나타납니다/u,
+      /\*\*Raw Source\*\* 목록에 \*\*처리 중\*\*으로/u,
+      /2 MiB까지 추가/u,
+      /요약.*앞부분.*근거 찾기와 Citation은 본문 전체/su,
+      /최대 8개/u,
+      /저절로 추가되는 것은 없/u,
+      /웹 검색은 하지 않습니다/u,
+      /보기 권한으로는 자료를 찾을 수만 있고 추가할 수 없습니다/u,
+      /\*\*사용 불가\*\*/u,
+      /범위에서 찾지 못해 나머지 결과만 보여 드립니다/u,
+      /문서가 너무 커서 소스로 추가할 수 없습니다/u,
+      /승인 지식 범위가 가득 찼습니다/u,
+      /질문 도구\(2-15\) 켜고 끄기와 따로/u,
+      /images\/2-19-quick-find\.png/u,
+      /images\/2-19-quick-find-unavailable\.png/u,
+      /images\/2-19-quick-find-added\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(quick, required, `2-19 ${required}`);
+    const deep = section("### 2-20 심층 조사");
+    for (const required of [
+      /\*\*심층 조사\*\*를 누릅니다/u,
+      /"조사할 질문을 적어 주세요"/u,
+      /\*\*조사 시작\*\*/u,
+      /새 보고서 카드로 이동/u,
+      /"조사 계획 세우는 중" → "자료 찾는 중 \(1\/3\)" → "보고서 작성 중"/u,
+      /최대 5개의 작은 질문/u,
+      /카드의 \*\*취소\*\*를 누릅니다\. 카드가 \*\*취소됨\*\*/u,
+      /근거 번호\(S1, S2…\)/u,
+      /\*\*근거 부족\*\*/u,
+      /\*\*사용한 자료\*\*/u,
+      /\*\*보고서에서 인용\*\*/u,
+      /추가 동작은 빠른 찾기\(2-19\)와 같습니다/u,
+      /10분 안에 끝나지 않음/u,
+      /조사가 제한 시간 안에 끝나지 않아 멈췄습니다/u,
+      /노트북에 올린 소스는 조사 근거로 쓰지 않습니다/u,
+      /만들기 전에 구성 확인\(2-17\)은 쓰지 않습니다/u,
+      /찾은 자료가 나중에 바뀌어도 카드에 바뀜 표시가 붙지 않습니다/u,
+      /웹 검색은 하지 않습니다/u,
+      /보기 권한으로는 심층 조사를 시작할 수 없습니다/u,
+      /DOCX, PDF, MD/u,
+      /images\/2-20-research-start\.png/u,
+      /images\/2-20-research-progress\.png/u,
+      /images\/2-20-research-report\.png/u,
+      /images\/2-20-research-sources\.png/u,
+      /images\/2-20-research-failed\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(deep, required, `2-20 ${required}`);
+    assert.match(markdown, /\| 조직의 승인 지식·문서에서 자료를 찾아 노트북에 더하기 \| 2-19 \|/u, "부록 C 2-19");
+    assert.match(markdown, /\| 질문 하나를 여러 번 찾아 인용이 달린 조사 보고서 만들기 \| 2-20 \|/u, "부록 C 2-20");
   });
 });
 
