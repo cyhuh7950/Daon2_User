@@ -1393,8 +1393,28 @@ class GroundingFailureReasonLogTests(unittest.TestCase):
         self.assertIn("missing_quantity=2", joined)
         self.assertIn("missing_identifier=1", joined)
         self.assertIn("missing_in_uncited=2", joined)
+        self.assertIn("missing_chunk_id=0", joined)
         for value in ("85", "8개월", "DAR-002", "30일"):
             self.assertNotIn(value, joined)
+
+    def test_unsupported_anchor_log_counts_echoed_internal_chunk_ids(self) -> None:
+        class Transport(RecordingTransport):
+            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+                response = super().post_json(**kwargs)
+                response["choices"][0]["message"]["content"] = json.dumps({
+                    "answer": "기술평가는 85% 이상이다 (chunk-a72cd9210f48b63e).", "cited_chunk_ids": ["chunk-a72cd9210f48b63e"], "insufficient": False}, ensure_ascii=False)
+                return response
+
+        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
+        evidence = (IndexedEvidenceChunk("chunk-a72cd9210f48b63e", "source-1", "version-1", 1, "기술평가 점수가 배점의 85% 이상", "span-1", 1.0),)
+        with self.assertLogs("daon2_user_api.question_answering", level="WARNING") as logs, \
+                self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            OpenAICompatibleTextGenerationAdapter(transport=Transport(), api_key="server-secret").generate(
+                GroundedQuestionRequest("요건은?", evidence, "trace-b14b"), selection)
+        joined = "\n".join(logs.output)
+        self.assertIn("missing_identifier=1", joined)
+        self.assertIn("missing_chunk_id=1", joined)
+        self.assertNotIn("a72cd9210f48b63e", joined)
 
 class InsufficientAnswerAnchorTests(unittest.TestCase):
     """NB1-I1 실서버: 근거 없음(insufficient) 답변 설명에 숫자가 섞이면 근거 검증 오류로 질문 전체가 실패했다.
