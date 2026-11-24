@@ -1369,6 +1369,33 @@ class GroundingFailureReasonLogTests(unittest.TestCase):
         self.assertNotIn("page 7", joined)
 
 
+    def test_unsupported_anchor_log_says_kind_counts_and_whether_uncited_evidence_has_them(self) -> None:
+        # N1-B14 실서버: 인용 근거에 없는 값 때문에 막혔는데, 인용 누락인지 근거 없는 값인지 알 수 없었다.
+        class Transport(RecordingTransport):
+            def post_json(self, **kwargs):  # type: ignore[no-untyped-def]
+                response = super().post_json(**kwargs)
+                response["choices"][0]["message"]["content"] = json.dumps({
+                    "answer": "기술평가는 85% 이상이어야 하고 사업 기간은 8개월이며 DAR-002를 따른다. 지급은 30일 안이다.",
+                    "cited_chunk_ids": ["chunk-1"], "insufficient": False}, ensure_ascii=False)
+                return response
+
+        selection = resolve_text_model_selection(external_text_snapshot("UPSTAGE", "https://api.upstage.ai/v1"))
+        evidence = (
+            IndexedEvidenceChunk("chunk-1", "source-1", "version-1", 1, "기술평가 점수가 배점의 85% 이상", "span-1", 1.0),
+            IndexedEvidenceChunk("chunk-2", "source-2", "version-2", 1, "사업 기간은 8개월, 요구사항 DAR-002", "span-2", 0.9),
+        )
+        with self.assertLogs("daon2_user_api.question_answering", level="WARNING") as logs, \
+                self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
+            OpenAICompatibleTextGenerationAdapter(transport=Transport(), api_key="server-secret").generate(
+                GroundedQuestionRequest("요건은?", evidence, "trace-b14"), selection)
+        joined = "\n".join(logs.output)
+        # 인용 밖 근거에 있는 값 2개(8개월·DAR-002), 어디에도 없는 값 1개(30일). 값 자체는 남기지 않는다.
+        self.assertIn("missing_quantity=2", joined)
+        self.assertIn("missing_identifier=1", joined)
+        self.assertIn("missing_in_uncited=2", joined)
+        for value in ("85", "8개월", "DAR-002", "30일"):
+            self.assertNotIn(value, joined)
+
 class InsufficientAnswerAnchorTests(unittest.TestCase):
     """NB1-I1 실서버: 근거 없음(insufficient) 답변 설명에 숫자가 섞이면 근거 검증 오류로 질문 전체가 실패했다.
 
