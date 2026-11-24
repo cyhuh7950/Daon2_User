@@ -165,7 +165,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
       <h2 className="studio-detail__title">{output?.title ?? ""}</h2>
       {output && EDITABLE_TYPES.includes(output.type_id) && output.status === "completed" && !editing && !reviewing && output.revision?.content
         && <button type="button" className="studio-btn" onClick={() => setEditing(true)}>{msg("studio.edit")}</button>}
-      {exportFormats.length > 0 && <span style={{ position: "relative" }}>
+      {exportFormats.length > 0 && !reviewing && <span style={{ position: "relative" }}>
         <button type="button" className="studio-btn" aria-haspopup="menu" aria-expanded={downloadOpen} onClick={() => setDownloadOpen((v) => !v)}>{msg("studio.menu.download")}</button>
         {downloadOpen && <div className="studio-menu" role="menu" style={{ top: 44 }} onKeyDown={(event) => { if (event.key === "Escape") setDownloadOpen(false); }}>
           {exportFormats.map((format) => <button key={format} type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button>)}</div>}
