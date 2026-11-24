@@ -62,13 +62,13 @@
 /* 설정 창(모달) 안: 창은 넓고 크게 */
 .workspace-modal:has(.provider-settings-shell.is-embedded) { width: min(1280px, calc(100vw - 36px)); height: calc(100dvh - 36px); max-height: calc(100dvh - 36px); }
 /* 창 배치(신산님 원칙, 2026-11-24): 머리글·상태 줄 아래에서 연결 목록·연결 상세 창이 먼저 내용만큼 자리를 잡고(넓은 화면: 목록 640px·상세 800px 이하),
-   사용 허용 모델 창이 남은 높이(최소 120px)를 갖는다. 높이가 모자라면 연결 창들이 줄어든다. 넘치는 내용은 각 창 안에서만 스크롤하고
+   사용 허용 모델 창이 남은 높이(최소 120px, 화면 틀의 30% 이하)를 갖는다. 높이가 모자라면 연결 창들이 줄어든다. 넘치는 내용은 각 창 안에서만 스크롤하고
    문서 전체에는 스크롤이 생기지 않는다. 창 최소 높이도 넣을 수 없을 만큼 낮은 화면에서만 화면 틀 자체가 스크롤한다(내용을 자르지 않기 위해). */
 .provider-settings-shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .provider-settings-shell > * { flex: 0 0 auto; min-width: 0; }
 .provider-settings-shell > .provider-admin-panel { flex: 0 1 auto; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .provider-settings-shell .provider-settings-layout { min-height: 0; height: 100%; }
-.provider-settings-shell > .workspace-model-defaults { flex: 1 1 120px; min-height: 120px; max-height: none; }
+.provider-settings-shell > .workspace-model-defaults { flex: 1 1 120px; min-height: 120px; max-height: 30%; }
 /* 임베디드(노트북 설정 창 안): 바깥 머리글 높이를 뺀 만큼 쓰고, 설정 창 본문은 스크롤 대신 이 화면을 꽉 채운다. */
 .provider-settings-shell.is-embedded { height: calc(100dvh - var(--provider-outer-header, 0px)); }
 .workspace-modal:has(.provider-settings-shell.is-embedded) .workspace-modal-content { display: flex; flex-direction: column; overflow: hidden; }
