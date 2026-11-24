@@ -94,7 +94,7 @@
 .studio-detail { display: flex; flex-direction: column; gap: 12px; min-height: 0; flex: 1; }
 .studio-detail__bar { display: flex; align-items: center; gap: 8px; }
 .studio-detail__title { flex: 1; margin: 0; font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.studio-detail__body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.studio-detail__body { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; container-type: inline-size; }
 .studio-warning { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--studio-tile-hover); color: var(--studio-danger); font-size: 12px; }
 .studio-ref { min-width: 24px; margin-left: 2px; padding: 0 3px; border: 0; border-radius: 4px; background: transparent; color: var(--studio-primary); font-size: 12px; vertical-align: super; }
 .studio-report h3 { margin: 18px 0 6px; font-size: 15px; }
@@ -119,7 +119,7 @@
 .studio-option[aria-pressed="true"] { outline: 2px solid var(--studio-primary); }
 
 /* 슬라이드 보기(N1-B12): 칸마다 넘치면 그 칸 안에서 스크롤, 글자를 겹치거나 잘라 숨기지 않는다. 좁은 창이면 장 목록을 위쪽 가로 줄로. */
-.studio-slides { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; container-type: inline-size; }
+.studio-slides { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
 .studio-slides > * { min-width: 0; }
 .studio-thumbs { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
 .studio-thumb { flex: none; padding: 6px; border: 1px solid var(--studio-border); border-radius: 8px; background: var(--studio-tile); font-size: 12px; line-height: 1.35; text-align: left; white-space: normal; overflow-wrap: anywhere; }

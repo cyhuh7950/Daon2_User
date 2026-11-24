@@ -34,6 +34,8 @@ test("표지 장의 가운데 정렬은 넘칠 때 위쪽을 잘라내지 않는
 });
 
 test("슬라이드 보기 너비가 좁으면(창 기준) 장 목록을 위쪽 가로 줄로 옮긴다", () => {
-  assert.match(rulesFor(".studio-slides"), /container-type:\s*inline-size/u);
+  // 컨테이너 조건은 조상 요소를 기준으로 판단한다. 슬라이드 보기 자신이 아니라 감싸는 상세 본문 칸을 컨테이너로 둔다.
+  assert.match(rulesFor(".studio-detail__body"), /container-type:\s*inline-size/u);
+  assert.doesNotMatch(rulesFor(".studio-slides"), /container-type/u);
   assert.match(css, /@container\s*\(max-width:\s*\d+px\)\s*\{[^@]*\.studio-slides\s*\{[^}]*grid-template-columns:\s*1fr/u);
 });
