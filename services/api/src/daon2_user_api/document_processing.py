@@ -398,7 +398,9 @@ class DocumentProcessingService:
                 return result
             if text_source_format(document.filename, document.content_type) is not None:
                 with resolve("text_generation") as text_model:
-                    self._egress_guard.authorize(context, (text_model,), len(document.content))
+                    # 원문 전체가 아니라 실제로 보내는 앞부분(가림 처리 포함)의 바이트로 판정한다(NB4-F1b).
+                    from .text_document_understanding import text_understanding_sent_bytes
+                    self._egress_guard.authorize(context, (text_model,), text_understanding_sent_bytes(document, text_model))
                     # 설정된 기본 모델의 Provider에 맞는 어댑터를 쓴다(Ollama는 기존 경로, 그 밖은 OpenAI 호환 채팅).
                     adapter = self._text_adapter if text_model.provider_code == "OLLAMA" else self._external_text_adapter
                     result = _failure_call("text_generation", text_model.connection_id,

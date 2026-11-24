@@ -202,7 +202,7 @@ class RegisterTextSourceTests(unittest.TestCase):
     def test_rejects_empty_too_large_null_and_unknown_origin(self):
         upload = FakeUpload()
         sources = service(upload=upload)
-        cases = (("   \n", "memo", "TEXT_SOURCE_EMPTY", 422), ("가" * 11000, "memo", "TEXT_SOURCE_TOO_LARGE", 413),
+        cases = (("   \n", "memo", "TEXT_SOURCE_EMPTY", 422), ("가" * (text_source.TEXT_SOURCE_MAX_BYTES // 3 + 1), "memo", "TEXT_SOURCE_TOO_LARGE", 413),
                  ("a\x00b", "memo", "TEXT_SOURCE_INPUT_INVALID", 400), ("본문", "web", "TEXT_SOURCE_INPUT_INVALID", 400),
                  (None, "memo", "TEXT_SOURCE_INPUT_INVALID", 400))
         for text, origin, code, status in cases:
@@ -213,8 +213,18 @@ class RegisterTextSourceTests(unittest.TestCase):
         self.assertEqual(upload.registered, [])
 
     def test_limit_matches_the_txt_understanding_limit(self):
-        self.assertEqual(text_source.TEXT_SOURCE_MAX_BYTES, 32 * 1024)
-        service().register_text_source(CTX, "notebook-1", title="메모", text="a" * (32 * 1024), origin="memo")
+        # NB4-F1b: 2 MiB로 올렸다(빠른 찾기 add_source 상한과 같다). TXT 이해 상한과 같은 값을 쓴다.
+        from daon2_user_api.text_document_understanding import TEXT_UNDERSTANDING_MAX_BYTES
+        self.assertEqual(text_source.TEXT_SOURCE_MAX_BYTES, 2 * 1024 * 1024)
+        self.assertEqual(text_source.TEXT_SOURCE_MAX_BYTES, TEXT_UNDERSTANDING_MAX_BYTES)
+        service().register_text_source(CTX, "notebook-1", title="메모", text="a" * (2 * 1024 * 1024), origin="memo")
+
+    def test_text_larger_than_32_kib_is_registered_whole(self):
+        upload = FakeUpload()
+        text = "큰 문서 첫 줄\n" + "가나다라 마바사 " * 20000 + "\n맨 끝 문장"
+        self.assertGreater(len(text.encode("utf-8")), 32 * 1024)
+        service(upload=upload).register_text_source(CTX, "notebook-1", title="큰 문서", text=text, origin="research")
+        self.assertEqual(upload.registered[0]["content"], text.encode("utf-8"))
 
 
 class AppendTextVersionTests(unittest.TestCase):
@@ -262,6 +272,16 @@ class AppendTextVersionTests(unittest.TestCase):
         self.assertEqual(obj(index[0][4])["strategy"], "text_source_version_snapshot")
         self.assertEqual({obj(s[4])["kind"] for s in spans}, {"text_source_verbatim_fact"})
         self.assertEqual(db.transitions, [])  # 준비된 소스는 상태를 바꾸지 않는다
+
+    def test_large_new_version_indexes_the_whole_text(self):
+        db = FakeDb()
+        text = "앞부분 " * 10000 + "맨 끝 표식 ZEBRA-TAIL-77"
+        self.assertGreater(len(text.encode("utf-8")), 32 * 1024)
+        service(db=db).append_text_version(CTX, "src-1", text)
+        index = [p for s, p in db.statements if s == text_source._INDEX_SQL]
+        chunks = obj(index[0][4])["chunks"]
+        self.assertEqual("".join(c["text"] for c in chunks), text)
+        self.assertIn("ZEBRA-TAIL-77", chunks[-1]["text"])
 
     def test_failed_source_becomes_ready_through_allowed_transitions(self):
         db = FakeDb(state="failed")

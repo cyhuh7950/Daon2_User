@@ -89,7 +89,7 @@ def test_txt_keeps_only_the_verbatim_facts():
 
 def test_txt_invalid_encoding_or_oversize_is_not_sent_to_model():
     transport = Transport(["safe"])
-    for content in (b"\xff", b"a" * (32 * 1024 + 1)):
+    for content in (b"\xff", b"a" * (2 * 1024 * 1024 + 1)):  # NB4-F1b: 상한 2 MiB
         document = StoredSourceDocument("source-txt", "source-version-txt", "report.txt", content, "text/plain")
         with pytest.raises(DocumentUnderstandingError):
             OllamaTextDocumentAdapter(transport).understand(document, _selection(), _context())

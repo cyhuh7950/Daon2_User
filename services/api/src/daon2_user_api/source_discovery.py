@@ -49,7 +49,7 @@ PREVIEW_CHARS = 300
 TITLE_CHARS = 200
 LABEL_CHARS = 120
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
-# 텍스트 소스(TXT 이해)는 32 KiB까지 처리한다. 그보다 큰 문서는 2 MiB 이하여도 등록할 수 없어 같은 413으로 막는다(Ruling).
+# 텍스트 소스 상한(NB4-F1b 이후 2 MiB)과 같다. 둘 중 작은 값을 넘으면 같은 413으로 막는다.
 EFFECTIVE_DOCUMENT_BYTES = min(MAX_DOCUMENT_BYTES, TEXT_SOURCE_MAX_BYTES)
 CATALOG_PAGE_SIZE = 50
 EVIDENCE_LIMIT = 5

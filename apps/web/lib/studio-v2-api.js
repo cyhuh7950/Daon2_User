@@ -494,7 +494,7 @@ export async function setSourceGroupMembers(workspaceId, groupId, { notebookId, 
 // 범위: knowledge(Daon2 승인 지식 → 업무 패키지 후보, add_scope) · documents(Daon2-RAG 문서 → 문서 후보, add_source).
 // 검색 한 번에 후보 최대 20개. 쓸 수 없거나 실패한 범위는 unavailable[{scope, reason}]로 오고 다른 범위 결과는 그대로다.
 // 모든 범위를 쓸 수 없으면 422 DISCOVERY_SCOPE_UNAVAILABLE, 모두 실패하면 502 DISCOVERY_CONNECTOR_FAILED.
-// 추가: 이미 있는 패키지는 200 그대로, 문서가 너무 크면 413 DISCOVERY_DOCUMENT_TOO_LARGE(텍스트 소스 상한 32 KiB 포함).
+// 추가: 이미 있는 패키지는 200 그대로, 문서가 너무 크면 413 DISCOVERY_DOCUMENT_TOO_LARGE(텍스트 소스 상한 2 MiB와 같음).
 const DISCOVERY_SCOPES = new Set(["knowledge", "documents"]);
 const MAX_DISCOVERY_QUERY = 500;
 const MAX_DISCOVERY_CANDIDATES = 20;
