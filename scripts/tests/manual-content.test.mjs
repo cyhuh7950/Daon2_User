@@ -169,6 +169,68 @@ test("N1 단계 2 두 절(2-15 질문 도구 켜고 끄기, 2-16 노트북 개�
   });
 });
 
+// WO-N1 단계 3(NB3-M): 만들기 전에 구성 확인(슬라이드·동영상)·소스 묶음 절이 원본과 공개 사본에 모두 있어야 한다.
+test("N1 단계 3 두 절(2-17 만들기 전에 구성 확인, 2-18 소스 묶음)은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const section = (heading) => {
+      const start = markdown.indexOf(`\n${heading}\n`);
+      assert.ok(start >= 0, `${file}: ${heading}`);
+      const rest = markdown.slice(start + 1);
+      const next = rest.slice(1).search(/\n#{2,3} /u);
+      return rest.slice(0, next < 0 ? undefined : next + 1);
+    };
+    const outline = section("### 2-17 만들기 전에 구성 확인(슬라이드·동영상)");
+    for (const required of [
+      /\*\*슬라이드 자료\*\*.*\*\*동영상 개요\*\*/su,
+      /\*\*만들기 전에 구성 확인\*\*을 체크/u,
+      /\*\*구성 확인 필요\*\*/u,
+      /\*\*구성 검토 중\*\*/u,
+      /제목과 \*\*요지\*\*/u,
+      /\*\*내레이션\*\*.*\*\*글머리\*\*/su,
+      /\*\*위로\*\*·\*\*아래로\*\*/u,
+      /장 추가 버튼\(동영상은 장면 추가 버튼\)/u,
+      /\*\*이대로 만들기\*\*/u,
+      /\*\*확정한 구성으로 생성 중…\*\*/u,
+      /최대 30/u,
+      /최대 20/u,
+      /최대 100자/u,
+      /확정하기 전에는 음성·영상을 만들지 않습니다/u,
+      /\*\*취소\*\*를 누릅니다\. 만들지 않고 목록으로 돌아가며, 카드는 \*\*구성 확인 필요\*\*로 남아/u,
+      /카드 ⋮ → \*\*삭제\*\*/u,
+      /장면별 근거가 표시되지 않습니다/u,
+      /구성 목록이 올바르지 않습니다/u,
+      /images\/2-17-outline-settings\.png/u,
+      /images\/2-17-outline-cards\.png/u,
+      /images\/2-17-outline-review-slides\.png/u,
+      /images\/2-17-outline-review-video\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(outline, required, `2-17 ${required}`);
+    const groups = section("### 2-18 소스 묶음");
+    for (const required of [
+      /\*\*묶음 만들기\*\*/u,
+      /접히고, 다시 누르면 펴집니다/u,
+      /모두 켜짐.*일부만 켜짐.*모두 꺼짐/su,
+      /\*\*묶음으로 이동\*\*/u,
+      /\*\*묶음 밖으로\*\*/u,
+      /\*\*이름 바꾸기\*\*.*\*\*묶음 삭제\*\*/su,
+      /소스는 \*\*묶음 없음\*\*으로 옮겨질 뿐 그대로 남습니다/u,
+      /노트북을 쓰는 사람 모두에게 같게 보입니다/u,
+      /하나씩 체크한 것과 똑같/u,
+      /최대 8개/u,
+      /앞의 8개를 사용합니다/u,
+      /보기 권한이면 \*\*묶음 만들기\*\*, 묶음 ⋮, \*\*묶음으로 이동\*\* 버튼이 보이지 않습니다/u,
+      /노트북당 최대 50개/u,
+      /images\/2-18-source-groups\.png/u,
+      /images\/2-18-source-groups-move\.png/u,
+      /images\/2-18-source-groups-menu\.png/u,
+      /시험 화면\(하네스\)에서 예시 자료로 촬영/u,
+    ]) assert.match(groups, required, `2-18 ${required}`);
+    assert.match(markdown, /\| 슬라이드·동영상 만들기 전에 장·장면 목록 고치기 \| 2-17 \|/u, "부록 C 2-17");
+    assert.match(markdown, /\| 소스를 묶음으로 정리, 묶음째 체크 \| 2-18 \|/u, "부록 C 2-18");
+  });
+});
+
 test("한국어 Manual 정본은 1부 첫 업무 흐름과 공개 범위를 명시하고 내부 정보를 쓰지 않는다", async () => {
   for (const [id, title] of docs) {
     const markdown = await readFile(new URL(`docs/manual/${id}/index.md`, root), "utf8");
