@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { focusInitialModalControl, trapModalTab } from "./workspace-interaction.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
+import { evidenceExcerptView } from "./studio-evidence-view.js";
 
 const FORMAT_LABELS = { summary: msg("dialog.preset.summary"), briefing: msg("dialog.preset.briefing"), blog: msg("dialog.preset.blog"), study_guide: msg("dialog.preset.study_guide"), custom: msg("dialog.preset.custom") };
 const DIFFICULTY = [["easy", msg("dialog.difficulty.easy")], ["normal", msg("dialog.difficulty.normal")], ["hard", msg("dialog.difficulty.hard")]];
@@ -204,7 +205,10 @@ export function EvidenceDialog({ load, title, onClose }) {
   const { content } = state;
   let body = <p role="status">…</p>;
   if (state.status === "error") body = <p role="alert">{studioErrorMessage(state.error)}</p>;
-  else if (content?.kind === "excerpt") body = <>{content.filename && <p><strong>{content.filename}</strong></p>}<pre style={{ whiteSpace: "pre-wrap" }}>{content.text ?? JSON.stringify(content.snapshot ?? {}, null, 2)}</pre></>;
+  else if (content?.kind === "excerpt") {
+    const view = evidenceExcerptView(content);
+    body = <>{view.title && <p><strong>{view.title}</strong></p>}{view.label && <p>{view.label}</p>}<pre style={{ whiteSpace: "pre-wrap" }}>{view.text || msg("dialog.none")}</pre></>;
+  }
   else if (content?.kind === "binary") {
     const blob = new Blob([content.bytes], { type: content.contentType });
     urlRef.current = globalThis.URL.createObjectURL(blob);
