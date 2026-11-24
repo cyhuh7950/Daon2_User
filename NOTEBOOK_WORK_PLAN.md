@@ -167,7 +167,7 @@ flowchart LR
 
 브랜치는 하나씩만 열리므로 실제 진행은 아래 순서다. 통합(I) 단위는 ysna 실서버에서 확인하므로 그 단계의 F·U·M이 병합되고 배포(D)된 직후에 한다(§8의 각 I 단위 선행 조건 참조).
 
-`NB0-P → NB1-F1 → NB1-U1 → NB1-F2 → NB1-U2 → NB1-M → NB1-D → NB1-I1 → NB1-I2 → NB1-H → NB2-F1 → NB2-U1 → NB2-F2 → NB2-U2 → NB2-M → NB2-D → NB2-I1 → NB2-I2 → NB2-H → NB3-F1 → NB3-U1 → NB3-F2 → NB3-U2 → NB3-M → NB3-D → NB3-I1 → NB3-I2 → NB3-H → NB4-F1 → NB4-U1 → NB4-F2 → NB4-U2 → NB4-M → NB4-D → NB4-I1 → NB4-I2 → NB4-H → NB5-A1 → NB5-H → NB5-A2 → (NB5-A3 ↔ NB5-A2) → NB5-A4`
+`NB0-P → NB1-F1 → NB1-U1 → NB1-F2 → NB1-U2 → NB1-M → NB1-D → NB1-I1 → NB1-I2 → NB1-H → NB2-F1 → NB2-U1 → NB2-F2 → NB2-U2 → NB2-M → NB2-D → NB2-I1 → NB2-I2 → NB2-H → NB3-F1 → NB3-U1 → NB3-F2 → NB3-U2 → NB3-M → NB3-D → NB3-I1 → NB3-I2 → NB3-H → NB4-F1 → (NB4-F1b ∥ NB4-U1) → NB4-F2 → NB4-U2 → NB4-M → NB4-D → NB4-I1 → NB4-I2 → NB4-H → NB5-A1 → NB5-H → NB5-A2 → (NB5-A3 ↔ NB5-A2) → NB5-A4`
 
 - 통합 단위에서 결함이 나오면: 총괄이 해당 F 또는 U 단위를 `[2]`로 되돌리고 수정 브랜치를 연다 → 병합 → 같은 단계 배포 기록을 추가(NBk-D 재실행) → 통합 단위를 다시 한다.
 
@@ -581,6 +581,19 @@ flowchart LR
 - **검증 방법**: `tests/test_source_discovery.py`(가짜 연결로 범위별 호출, 호출 상한 4, 한 범위 실패 시 부분 결과, add_scope 중복, add_source 크기 초과, 권한, 검색어가 감사에 없음), 웹 API 시험, 전체 새 실패 0
 - **검수 기준**: 위 시험 모두, 연결 호출이 모두 외부 전송 판정을 거친다(가짜 게이트 호출 수 = 도구 호출 수), 새 실패 0
 - **인계 내용**: `DiscoverySearcher`(NB4-F2가 재사용할 검색 함수) 이름과 사용법
+
+#### NB4-F1b 큰 텍스트 소스 (기능, 2026-11-24 신산님 결정으로 추가)
+
+- **배경**: 빠른 찾기로 승인 문서를 소스로 추가하면 텍스트 소스로 등록되는데, 텍스트 소스 상한(`TEXT_SOURCE_MAX_BYTES`)과 TXT 이해(`text_document_understanding._MAX_TEXT_BYTES`)가 32KiB라 실제 승인 문서 대부분이 추가되지 않는다(NB4-F1 Ruling 1). 신산님이 "지금 늘리기"로 결정
+- **선행**: NB4-F1 병합 · **입력 자료**: `text_source.py`, `text_document_understanding.py`, `pdf_text_understanding.py`(앞부분만 모델에 보내는 방식 `_MAX_SENT_BYTES`), TXT 색인·근거 구간 생성 경로, `source_discovery.py`(add_source 상한)
+- **수정 범위**: 위 서버 파일과 시험. 화면·마이그레이션 없음(필요하면 이유를 인계에)
+- **계약**
+  - 텍스트 소스 상한을 2 MiB로 올린다(빠른 찾기 add_source 상한과 같음). 일반 TXT 업로드도 같은 상한
+  - TXT 이해는 PDF처럼 앞부분(32KiB 이하, 문자 경계)만 모델에 보내 요약한다. key_facts 검증은 보낸 부분 기준
+  - 검색 색인·근거 구간은 본문 전체로 만든다(질문 근거로 뒷부분도 찾힘)
+  - 외부 전송 판정은 실제로 보내는 부분 기준으로 한다(가림 처리 포함)
+- **검증**: 32KiB 초과·2MiB 이하 텍스트 소스 등록·처리 성공, 모델에 보내는 길이 ≤ 32KiB, 뒷부분 문장이 색인·근거에 있음, 2MiB 초과 거부, 기존 TXT 시험 통과, 새 실패 0
+- **인계 내용**: 바뀐 상한 값, 앞부분 자르기 함수 이름, 색인 범위
 
 #### NB4-U1 빠른 찾기 화면 (화면)
 
