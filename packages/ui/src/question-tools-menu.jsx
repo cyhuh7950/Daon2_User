@@ -34,6 +34,20 @@ export function QuestionToolsMenu({ studio, disabled = false }) {
     return () => { mounted.current = false; controller.abort(); };
   }, [studio, supported, reload]);
 
+  // 목록을 열 때마다 서버의 최신 상태를 조용히 다시 읽는다(승인 지식 범위·연결 상태가 화면 밖에서 바뀔 수 있다, N1-B07).
+  // 보이는 값은 그대로 두고 응답이 오면 바꾼다. 저장 중이면 저장 응답이 정본이므로 다시 읽지 않는다.
+  useEffect(() => {
+    if (!open || !supported) return undefined;
+    const controller = new AbortController();
+    studio.getQuestionTools({ signal: controller.signal })
+      .then((data) => {
+        if (!mounted.current || controller.signal.aborted) return;
+        setState((value) => (value.saving ? value : { ...value, status: "ready", tools: data?.tools ?? value.tools }));
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [open, studio, supported]);
+
   // 노트북이 바뀌면 목록을 닫는다.
   useEffect(() => { setOpen(false); }, [studio]);
 

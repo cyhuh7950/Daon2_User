@@ -296,3 +296,19 @@ test("어댑터에 질문 도구 함수가 없으면 아무것도 그리지 않�
     assert.equal(toolsButton(view.container), undefined);
   } finally { await view.close(); }
 });
+
+// N1-B07: 승인 지식 범위를 고른 뒤 새로고침 없이 목록을 열면, 서버의 최신 도구 상태가 보여야 한다.
+test("목록을 열 때마다 서버의 최신 도구 상태를 다시 읽는다(범위 선택 뒤 승인 지식이 사용 가능으로 바뀜)", async () => {
+  let current = [{ ...KNOWLEDGE, available: false, enabled: false, unavailable_reason: "NO_SCOPE" }, RAG];
+  const server = fakeServer({ "nb-1": [KNOWLEDGE, RAG] });
+  const view = await mountMenu(server.studioFor("nb-1", { load: async () => ({ tools: current.map((tool) => ({ ...tool })) }) }));
+  try {
+    assert.equal(badge(view.container), "1", "처음에는 승인 지식이 꺼져 있다");
+    current = [KNOWLEDGE, RAG];
+    await openMenu(view);
+    assert.equal(switchFor(view.container, "승인 지식")?.disabled, false, "열면 승인 지식 스위치가 사용 가능이다");
+    assert.equal(switchFor(view.container, "승인 지식")?.checked, true);
+    assert.equal(badge(view.container), "2", "배지도 최신 값으로 바뀐다");
+    assert.equal(server.calls.filter(([kind]) => kind === "get").length, 2, "열 때 한 번 더 읽는다");
+  } finally { await view.close(); }
+});
