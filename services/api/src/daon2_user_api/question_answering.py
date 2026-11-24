@@ -318,7 +318,9 @@ class OpenAICompatibleTextGenerationAdapter:
                 missing = _evidence_anchors(answer) - _evidence_anchors(cited_text)
                 everywhere = _evidence_anchors("\n".join(item.text for item in request.evidence))
                 kinds = {kind: sum(1 for anchor in missing if anchor.startswith(kind + ":")) for kind in ("date", "identifier", "quantity")}
-                detail = " " + " ".join(f"missing_{kind}={count}" for kind, count in kinds.items()) + f" missing_in_uncited={len(missing & everywhere)}"
+                chunk_ids = {f"identifier:{chunk_id.casefold()}" for chunk_id in allowed}
+                detail = (" " + " ".join(f"missing_{kind}={count}" for kind, count in kinds.items())
+                          + f" missing_in_uncited={len(missing & everywhere)} missing_chunk_id={len(missing & chunk_ids)}")
             logging.getLogger(__name__).warning(
                 "text_grounding_failure reason=%s cited_count=%d evidence_count=%d%s", reason, len(cited), len(request.evidence), detail)
             raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
