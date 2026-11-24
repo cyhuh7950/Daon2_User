@@ -9,6 +9,7 @@ const MAX_SESSION_COOKIE_BYTES = 4_096;
 const MIN_NATIVE_BEARER_BYTES = 16;
 const MAX_NATIVE_BEARER_BYTES = 4_096;
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SOURCE_GROUP_ID = /^sg-[0-9a-f]{32}$/;
 const REQUEST_HEADERS = new Set([
   "content-type",
   "idempotency-key",
@@ -572,6 +573,21 @@ function routeFor(method, segments) {
     return method === "GET" || method === "PUT"
       ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/question-tools`,
           query: new Set(), strictQuery: true, csrfProvenanceRequired: method === "PUT", maxRequestBytes: 8 * 1024 }
+      : { methodRejected: true };
+  }
+  if (
+    segments.length >= 5 && segments.length <= 7 && segments[0] === "workspaces"
+    && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "source-groups"
+    && (segments.length === 5 || SOURCE_GROUP_ID.test(segments[5]))
+    && (segments.length !== 7 || segments[6] === "members")
+  ) {
+    // 소스 묶음(WO-N1 NB3-F2, 결정 D-11): 목록 GET·만들기 POST, 묶음 PATCH·DELETE, 구성원 PUT .../{group_id}/members.
+    const wanted = segments.length === 5 ? ["GET", "POST"] : segments.length === 6 ? ["PATCH", "DELETE"] : ["PUT"];
+    const suffix = segments.slice(5).map((segment) => `/${encodeURIComponent(segment)}`).join("");
+    return wanted.includes(method)
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/source-groups${suffix}`,
+          query: new Set(), strictQuery: true, csrfProvenanceRequired: method !== "GET", maxRequestBytes: 192 * 1024 }
       : { methodRejected: true };
   }
   if (
