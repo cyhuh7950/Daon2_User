@@ -86,11 +86,22 @@ _TEXT_ERRORS = {"TEXT_SOURCE_TOO_LARGE": ("DISCOVERY_DOCUMENT_TOO_LARGE", 413), 
 
 
 class DiscoveryError(RuntimeError):
-    def __init__(self, code: str, status: int = 400, unavailable: list[dict[str, str]] | None = None, calls: int = 0) -> None:
+    def __init__(self, code: str, status: int = 400, unavailable: list[dict[str, str]] | None = None, calls: int = 0,
+                 diagnostic: dict[str, str] | None = None) -> None:
         super().__init__(code)
         self.code, self.status = code, status
         self.unavailable = unavailable or []
         self.calls = calls
+        # 연결 실패 진단(실패한 도구 이름·오류 코드, 안전한 토큰만). 응답 details.connector로 나간다.
+        self.diagnostic = diagnostic
+
+
+_SAFE_DIAGNOSTIC = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _diagnostic(tool: str, code: object) -> dict[str, str]:
+    safe = code if isinstance(code, str) and _SAFE_DIAGNOSTIC.fullmatch(code) else "UNKNOWN"
+    return {"tool": tool, "code": safe}
 
 
 class _Malformed(Exception):
@@ -501,9 +512,14 @@ class SourceDiscoveryService:
 
     def _connector_call(self, context: DiscoveryContext, connector_id: str, tool: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         try:
-            return _structured(self._connectors.call(self.searcher.connector_context(context), connector_id, tool, arguments))
-        except (McpError, ConnectorError, _Malformed):
-            raise DiscoveryError(FAILED, 502) from None
+            result = self._connectors.call(self.searcher.connector_context(context), connector_id, tool, arguments)
+        except (McpError, ConnectorError) as error:
+            raise DiscoveryError(FAILED, 502, diagnostic=_diagnostic(tool, getattr(error, "code", None))) from None
+        try:
+            return _structured(result)
+        except _Malformed:
+            code = "TOOL_ERROR" if getattr(result, "is_error", False) else "RESPONSE_INVALID"
+            raise DiscoveryError(FAILED, 502, diagnostic=_diagnostic(tool, code)) from None
 
     def _approved_document(self, context: DiscoveryContext, connector_id: str, ref: Mapping[str, str]) -> Mapping[str, Any]:
         """ref의 문서가 그 업무 패키지의 RAG 승인 문서인지 다시 확인한다(목록에 없으면 404)."""
@@ -633,7 +649,8 @@ def register_source_discovery_routes(app: FastAPI, dependencies: Any, service: S
 
     def _fail(error: DiscoveryError, request: Request) -> JSONResponse:
         code = error.code if error.code in SOURCE_DISCOVERY_PUBLIC_CODES else "INVALID_REQUEST"
-        details = {"unavailable": error.unavailable} if error.unavailable else None
+        details = {**({"unavailable": error.unavailable} if error.unavailable else {}),
+                   **({"connector": error.diagnostic} if error.diagnostic else {})} or None
         return _error_response(error.status, code, request.state.trace_id, retryable=error.status in {502, 503}, details=details)
 
     def _ok(data: Mapping[str, Any], id: str, request: Request) -> JSONResponse:

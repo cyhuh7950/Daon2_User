@@ -432,6 +432,30 @@ class AddTests(unittest.TestCase):
             service.add(CTX, NB, ref)
         self.assertEqual((caught.exception.code, caught.exception.status), ("DISCOVERY_CONNECTOR_FAILED", 502))
 
+    def test_add_source_connector_failure_names_the_tool_and_code(self):
+        connectors = FakeConnectors()
+        connectors.fail["list_approved_documents"] = McpError("MCP_ARGUMENTS_INVALID")
+        service, _, _ = make_service(connectors)
+        ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        with self.assertRaises(DiscoveryError) as caught:
+            service.add(CTX, NB, ref)
+        self.assertEqual(caught.exception.diagnostic, {"tool": "list_approved_documents", "code": "MCP_ARGUMENTS_INVALID"})
+
+    def test_add_source_tool_error_result_is_reported_as_tool_error(self):
+        connectors = FakeConnectors()
+        original = connectors.call
+
+        def tool_error(context, connector_id, tool, arguments):
+            if tool == "get_document_text":
+                return McpToolResult({"error": "mcp_evidence_not_found"}, True, "2026-07-28")
+            return original(context, connector_id, tool, arguments)
+        connectors.call = tool_error
+        service, _, _ = make_service(connectors)
+        ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        with self.assertRaises(DiscoveryError) as caught:
+            service.add(CTX, NB, ref)
+        self.assertEqual(caught.exception.diagnostic, {"tool": "get_document_text", "code": "TOOL_ERROR"})
+
     def test_invalid_ref_is_rejected(self):
         service, connectors, _ = make_service()
         for ref in ({"kind": "web", "project_id": "p", "work_package_id": "w"}, {"kind": "document", "project_id": "p", "work_package_id": "w"},
@@ -565,6 +589,15 @@ class SourceDiscoveryHttpTests(unittest.IsolatedAsyncioTestCase):
         for part in ("제안서", "평가", "기준", QUERY):
             self.assertNotIn(part, str(event.metadata))
             self.assertNotIn(part, str(event))
+
+    async def test_add_connector_failure_reports_tool_and_code(self):
+        self.connectors.fail["list_approved_documents"] = McpError("MCP_ARGUMENTS_INVALID")
+        doc_ref = {"kind": "document", "project_id": "p-bid", "work_package_id": "제안서", "document_id": "doc-a", "document_version": "v-doc-a"}
+        with self.authenticated():
+            failed = await self.client.post(f"{BASE}/add", cookies=self.cookies, headers={"Idempotency-Key": "discovery-key-diag"},
+                                            json={"ref": doc_ref})
+        self.assertEqual((failed.status_code, failed.json()["error"]["code"]), (502, "DISCOVERY_CONNECTOR_FAILED"))
+        self.assertEqual(failed.json()["error"]["details"]["connector"], {"tool": "list_approved_documents", "code": "MCP_ARGUMENTS_INVALID"})
 
     async def test_search_errors_are_safe_codes_and_audited_without_query(self):
         self.connectors.fail["search_document_evidence"] = McpError("MCP_UNAVAILABLE", retryable=True)
