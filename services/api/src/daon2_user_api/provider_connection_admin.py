@@ -89,12 +89,23 @@ class ProviderConnectionAdminError(RuntimeError):
     def __init__(
         self, code: str, status: int = 400, *, retryable: bool = False,
         references: Mapping[str, int] | None = None,
+        details: Mapping[str, object] | None = None,
     ) -> None:
         self.code = code
         self.status = status
         self.retryable = retryable
         self.references = dict(references or {})
+        self.details = dict(details or {})
         super().__init__(code)
+
+
+def admin_error_from(error: Exception) -> ProviderConnectionAdminError:
+    """어댑터·설정 오류를 관리 오류로 바꾼다. 어댑터의 진단 정보(실패 모델·상위 오류 code)는 그대로 넘긴다."""
+    return ProviderConnectionAdminError(
+        str(getattr(error, "code", str(error))), int(getattr(error, "status", 400)),
+        retryable=bool(getattr(error, "retryable", False)),
+        details=getattr(error, "details", None) if isinstance(getattr(error, "details", None), Mapping) else None,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,9 +512,7 @@ class PostgresProviderConnectionService:
             verified_ok = True
             result: dict[str, object] = {"ok": True, "checked_at": checked_at, "model_count": len(models), "persisted": False}
         except (AdapterError, ProviderCatalogError, ProviderCredentialError, ProviderSettingsError) as error:
-            failure = ProviderConnectionAdminError(
-                str(getattr(error, "code", str(error))), int(getattr(error, "status", 400)),
-                retryable=bool(getattr(error, "retryable", False)))
+            failure = admin_error_from(error)
         else:
             failure = None
         if persist and row is not None and not overrides and str(row[13]) == "public" and code != "CUSTOM":
@@ -695,10 +704,7 @@ class PostgresProviderConnectionService:
                     readiness_probe_sink(probe)
             return profile, sealed, models
         except (AdapterError, ProviderCatalogError, ProviderCredentialError, ProviderSettingsError) as error:
-            raise ProviderConnectionAdminError(
-                str(getattr(error, "code", str(error))), int(getattr(error, "status", 400)),
-                retryable=bool(getattr(error, "retryable", False)),
-            ) from None
+            raise admin_error_from(error) from None
 
     @staticmethod
     def _replace_models(

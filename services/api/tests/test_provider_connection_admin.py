@@ -2227,3 +2227,16 @@ def test_logical_embedding_catalog_without_runtime_request_is_not_readiness_obse
     assert result["status"] == "failed"  # 기존 health 경로에는 논리 목록 주입이 없어 실패하며 이 판정은 유지한다.
     assert transport.requests == []
     assert probes == []  # 실제 런타임 호출 없는 논리 catalog를 연결 복귀로 승격하지 않는다.
+
+
+def test_admin_error_from_adapter_error_keeps_provider_details() -> None:
+    from daon2_user_api.provider_connection_adapters import AdapterError
+    from daon2_user_api.provider_connection_admin import admin_error_from
+
+    converted = admin_error_from(AdapterError("PROVIDER_CONNECTION_FAILED", 503, details={
+        "model_id": "gpt-x", "upstream_status": 404, "upstream_code": "model_not_found"}))
+
+    assert converted.code == "PROVIDER_CONNECTION_FAILED"
+    assert converted.status == 503
+    assert converted.details == {"model_id": "gpt-x", "upstream_status": 404, "upstream_code": "model_not_found"}
+    assert admin_error_from(ValueError("PROVIDER_X")).details == {}

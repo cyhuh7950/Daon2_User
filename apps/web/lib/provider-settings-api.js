@@ -15,6 +15,7 @@ async function request(path, { method = "GET", body, headers = {} } = {}) {
     error.code = payload?.error?.code ?? "RESOURCE_UNAVAILABLE";
     error.traceId = payload?.error?.trace_id ?? response.headers.get("x-trace-id");
     error.status = response.status;
+    error.details = payload?.error?.details && typeof payload.error.details === "object" ? payload.error.details : null;
     throw error;
   }
   return { payload, etag: response.headers.get("etag") };

@@ -660,6 +660,35 @@ class ProviderSettingsRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["error"]["details"]["references"],
                          {"user_credentials": 1, "workspace_defaults": 2})
 
+    async def test_connection_test_failure_reports_safe_provider_details(self) -> None:
+        class RejectingService:
+            def test_connection(self, context, **kwargs):
+                from daon2_user_api.runtime import ProviderConnectionAdminError
+                raise ProviderConnectionAdminError(
+                    "PROVIDER_CONNECTION_FAILED", 503,
+                    details={"model_id": "gpt-x", "upstream_status": 404, "upstream_code": "model_not_found"},
+                )
+
+        self.dependencies.provider_connection_service = RejectingService()
+        self.dependencies.settings = RuntimeSettings.for_test(
+            database_path=self.db_path, policy_version=POLICY_VERSION,
+            system_admin_user_ids=frozenset({self.credentials.user_id}),
+        )
+        await self.client.aclose()
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=create_app(self.dependencies)),
+            base_url="https://app.example.com",
+            cookies={WEB_SESSION_COOKIE: self.credentials.access_token},
+        )
+        response = await self.client.post(
+            "/api/v1/admin/provider-connections/test",
+            json={"connection_id": "openai-1", "model_ids": ["gpt-x"], "persist": False},
+        )
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["error"]["code"], "PROVIDER_CONNECTION_FAILED")
+        self.assertEqual(response.json()["error"]["details"],
+                         {"provider": {"model_id": "gpt-x", "upstream_status": 404, "upstream_code": "model_not_found"}})
+
     async def test_system_admin_replaces_only_provider_credential_without_endpoint_reentry(self) -> None:
         class ProviderAdminService:
             def __init__(self) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -18,11 +19,28 @@ _MAX_RESPONSE_BYTES = 1024 * 1024
 
 
 class AdapterError(ValueError):
-    def __init__(self, code: str, status: int = 400, *, retryable: bool = False) -> None:
+    def __init__(
+        self, code: str, status: int = 400, *, retryable: bool = False,
+        details: Mapping[str, object] | None = None,
+    ) -> None:
         self.code = code
         self.status = status
         self.retryable = retryable
+        # 진단용 안전 정보만(모델 ID, 상위 HTTP 상태, 상위 오류 code·type·param). 키·응답 문장은 넣지 않는다.
+        self.details: dict[str, object] = dict(details or {})
         super().__init__(code)
+
+
+_SAFE_UPSTREAM_TOKEN = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+
+
+def _safe_upstream_error(payload: object) -> dict[str, str]:
+    """상위 오류 본문에서 code·type·param만, 짧은 영문·숫자 토큰일 때만 남긴다(message는 버린다)."""
+    error = payload.get("error") if isinstance(payload, Mapping) else None
+    if not isinstance(error, Mapping):
+        return {}
+    return {key: value for key in ("code", "type", "param")
+            if isinstance(value := error.get(key), str) and _SAFE_UPSTREAM_TOKEN.fullmatch(value)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +126,15 @@ class UrllibAdapterTransport:
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
                 status_code = int(response.status)
         except urllib.error.HTTPError as error:
-            return TransportResponse(int(error.code), {})
+            # 오류 본문은 진단용 안전 항목(code·type·param)만 남긴다. 키가 섞일 수 있는 message는 버린다.
+            safe: dict[str, str] = {}
+            try:
+                raw_error = error.read(_MAX_RESPONSE_BYTES + 1)
+                if raw_error and len(raw_error) <= _MAX_RESPONSE_BYTES:
+                    safe = _safe_upstream_error(json.loads(raw_error.decode("utf-8")))
+            except Exception:
+                safe = {}
+            return TransportResponse(int(error.code), {"error": safe} if safe else {})
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise ValueError("PROVIDER_RESPONSE_TOO_LARGE")
         payload = json.loads(raw.decode("utf-8")) if raw else {}
@@ -196,7 +222,10 @@ class _BaseAdapter:
         if status >= 500:
             raise AdapterError("PROVIDER_CATALOG_UNAVAILABLE", 503, retryable=True)
         if status < 200 or status >= 300:
-            raise AdapterError("PROVIDER_CONNECTION_FAILED", 503)
+            upstream = _safe_upstream_error(response.payload)
+            raise AdapterError("PROVIDER_CONNECTION_FAILED", 503, details={
+                "upstream_status": status, **{f"upstream_{key}": value for key, value in upstream.items()},
+            })
         return response.payload
 
     def _ready(self, connection: ProviderConnection) -> VerificationResult:
@@ -337,15 +366,20 @@ class _CustomCompatibleAdapter(OpenRouterAdapter):
         headers = self._headers(_credential_text(credential) if credential is not None else None)
         url = _append_path(base, self._probe_path())
         for model in models:
-            payload = self._request(
-                "POST", url, headers,
-                {
-                    "model": model.model_id,
-                    "messages": [{"role": "user", "content": "connection test"}],
-                    "max_tokens": 16,
-                    "stream": False,
-                },
-            )
+            try:
+                payload = self._request(
+                    "POST", url, headers,
+                    {
+                        "model": model.model_id,
+                        "messages": [{"role": "user", "content": "connection test"}],
+                        "max_tokens": 16,
+                        "stream": False,
+                    },
+                )
+            except AdapterError as error:
+                # 어느 모델에서 실패했는지 남긴다(모델 ID는 카탈로그 검증을 거친 값).
+                error.details = {"model_id": model.model_id, **error.details}
+                raise
             if not self._has_text(payload):
                 raise AdapterError("PROVIDER_PROBE_RESPONSE_INVALID", 503)
         return models

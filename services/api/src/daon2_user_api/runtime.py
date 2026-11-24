@@ -3398,7 +3398,8 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         return _error_response(
             error.status, error.code if error.code in safe_codes else "INVALID_REQUEST",
             request.state.trace_id, retryable=error.retryable,
-            details={"references": error.references} if error.references else None,
+            details=({**({"references": error.references} if error.references else {}),
+                      **({"provider": error.details} if error.details else {})} or None),
         )
 
     @app.exception_handler(ProviderHealthSettingsError)
