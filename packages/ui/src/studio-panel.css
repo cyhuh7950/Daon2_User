@@ -164,3 +164,22 @@
 .studio-chat-edit__input { display: flex; gap: 8px; align-items: flex-end; }
 .studio-chat-edit__input textarea { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--studio-border); border-radius: 12px; background: var(--studio-surface); color: inherit; font: inherit; resize: vertical; }
 @media (max-width: 480px) { .studio-chat-edit__compare { grid-template-columns: minmax(0, 1fr); } }
+
+/* 생성 전 구성 확인(WO-N1 NB3-U1): 슬라이드 장·동영상 장면 검토 화면 */
+.studio-outline-review { display: flex; flex-direction: column; gap: 8px; }
+.studio-outline-review > .studio-chip { align-self: flex-start; margin: 0; }
+.studio-outline-review p { margin: 0; }
+.studio-outline-review input, .studio-outline-review textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--studio-border);
+  border-radius: 8px; background: var(--studio-surface); color: var(--studio-text); font: inherit; }
+.studio-outline-review textarea { resize: vertical; }
+.studio-outline-review__doc { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.studio-outline-review__list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.studio-outline-review__head { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.studio-outline-review__item { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--studio-border); border-radius: 12px; background: var(--studio-tile); }
+.studio-outline-review__title { font-weight: 600; }
+.studio-outline-review__points { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 16px; list-style: disc; }
+.studio-outline-review__points li { display: flex; align-items: center; gap: 6px; }
+.studio-outline-review__actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.studio-outline-review__spacer { flex: 1 1 auto; }
+.studio-outline-review .studio-outline-review__small { flex: none; min-height: 32px; padding: 0 10px; border-radius: 16px; font-size: 13px; }
+.studio-outline-review .studio-alert ul { margin: 0; padding-left: 18px; }

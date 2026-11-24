@@ -72,14 +72,15 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
     if (voiceA) settings.voice_a = voiceA;
     if (voiceB) settings.voice_b = voiceB;
     if (format === "custom" && custom.trim()) settings.custom_instruction = custom.trim();
-    if (confirmOutline) settings.confirm_outline = "yes";
+    // 구성 확인을 켜면 지난 확정 목록을 지운다(빈 값 = 지움). 남아 있으면 서버가 확정 목록을 먼저 써서 다시 멈추지 않는다.
+    if (confirmOutline) { settings.confirm_outline = "yes"; settings.confirmed_outline = ""; }
     onSubmit({ formatId: format || undefined, settings });
   };
   const countRule = properties.count;
   return <Modal labelledBy="studio-settings-title" onClose={onCancel}>
     <form onSubmit={submit}>
       <h2 id="studio-settings-title">{msg("studio.dialog.settings.title", { type: typeLabel })}</h2>
-      {properties.confirm_outline && <label><input type="checkbox" checked={confirmOutline} onChange={(event) => setConfirmOutline(event.target.checked)} /> {msg("studio.dialog.settings.confirm_outline")}</label>}
+      {properties.confirm_outline && <label><input type="checkbox" checked={confirmOutline} onChange={(event) => setConfirmOutline(event.target.checked)} /> {msg(type?.type_id === "report" ? "studio.dialog.settings.confirm_outline" : "studio.dialog.settings.confirm_outline_make")}</label>}
       {(type?.presets ?? []).length > 0 && <>
         <label htmlFor="studio-format">{msg("studio.dialog.settings.format")}</label>
         <select id="studio-format" value={format} onChange={(event) => setFormat(event.target.value)}>
