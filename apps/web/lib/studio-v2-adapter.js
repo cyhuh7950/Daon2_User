@@ -4,7 +4,8 @@ import {
   cancelStudioOutput, createStudioMemo, createMemoSource, reflectMemoSource, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
-  copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, getNotebookOverview, regenerateNotebookOverview, issueExportStepUp,
+  copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, getNotebookOverview, regenerateNotebookOverview,
+  listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, issueExportStepUp,
   listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
 import { localMemoTitle } from "./memo-title.js";
@@ -57,6 +58,12 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     // 노트북 개요·추천 질문(WO-N1 NB2-F2): 조회는 보기, 다시 만들기는 편집 권한. queued·working이면 3초 간격 폴링.
     getNotebookOverview: (options) => getNotebookOverview(workspaceId, scope(options)),
     regenerateNotebookOverview: (options) => regenerateNotebookOverview(workspaceId, scope(options)),
+    // 소스 묶음(WO-N1 NB3-F2): 조회는 보기, 변경은 편집 권한. 변경은 마지막 ETag(options.etag)를 보낸다.
+    listSourceGroups: (options) => listSourceGroups(workspaceId, scope(options)),
+    createSourceGroup: (name, options) => createSourceGroup(workspaceId, scope({ ...options, name })),
+    updateSourceGroup: (groupId, options) => updateSourceGroup(workspaceId, groupId, scope(options)),
+    deleteSourceGroup: (groupId, options) => deleteSourceGroup(workspaceId, groupId, scope(options)),
+    setSourceGroupMembers: (groupId, sourceIds, options) => setSourceGroupMembers(workspaceId, groupId, scope({ ...options, sourceIds })),
     getCustomization: (options) => getStudioCustomization(workspaceId, scope(options)),
     saveCustomization: (instruction, options) => saveStudioCustomization(workspaceId, instruction, scope(options)),
     authoring: Object.freeze({

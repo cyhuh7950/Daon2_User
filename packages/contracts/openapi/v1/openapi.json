@@ -721,6 +721,86 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups": {
+      "get": {
+        "operationId": "listNotebookSourceGroups", "tags": ["Workspace"],
+        "summary": "Notebook 소스 묶음 조회", "x-implementation-owner": "WO-N1-NB3-F2",
+        "description": "노트북을 보는 모두가 같은 묶음을 본다(결정 D-11). 묶음은 position·만든 순서대로이고 source_ids는 저장한 순서다. 노트북 소스 목록과 같은 규칙으로 노트북에서 뗀 소스, 삭제 요청된 소스, 조회하는 사용자가 볼 수 없는 소스는 source_ids에서 뺀다(묶음 행은 지우지 않는다). 묶음은 화면 편의이며 질문 범위 계산과 상한 8개는 바뀌지 않는다(정정 C-4). ETag를 수정·삭제·구성원 저장의 If-Match로 쓴다. 노트북 보기 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }],
+        "responses": {
+          "200": { "description": "Source groups", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "SOURCE_GROUP_INVALID or SOURCE_NOT_IN_NOTEBOOK", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      },
+      "post": {
+        "operationId": "createNotebookSourceGroup", "tags": ["Workspace"],
+        "summary": "Notebook 소스 묶음 만들기", "x-implementation-owner": "WO-N1-NB3-F2",
+        "description": "이름은 앞뒤 공백을 뺀 1~80자(제어 문자 불가)이며 맨 뒤 순서에 붙는다. 노트북당 50개까지이고 넘으면 409 SOURCE_GROUP_LIMIT. 같은 사용자·같은 Idempotency-Key·같은 이름의 재시도는 같은 group_id를 200 replayed=true로 돌려주고, 이름이 다르면 409 SOURCE_GROUP_IDEMPOTENCY_KEY_REUSED. 응답 ETag는 만든 뒤 묶음 목록의 ETag다. 감사 notebook.source_group.create(group_id만). 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupCreateRequest" } } } },
+        "responses": {
+          "201": { "description": "Source group created", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupCreatedEnvelope" } } } },
+          "200": { "description": "Source group creation replayed", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupCreatedEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "SOURCE_GROUP_INVALID or SOURCE_NOT_IN_NOTEBOOK", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}": {
+      "patch": {
+        "operationId": "updateNotebookSourceGroup", "tags": ["Workspace"],
+        "summary": "Notebook 소스 묶음 이름·순서 바꾸기", "x-implementation-owner": "WO-N1-NB3-F2",
+        "description": "name·position 중 하나 이상. position은 0부터이며 끝을 넘으면 맨 끝으로 가고 묶음 순서를 0부터 다시 매긴다. If-Match가 지금 목록 ETag와 다르면 412 SOURCE_GROUP_ETAG_MISMATCH. 응답은 바뀐 전체 묶음 목록이다. 감사 notebook.source_group.update(group_id·바뀐 항목 이름만). 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }, { "name": "group_id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^sg-[0-9a-f]{32}$" } }, { "$ref": "#/components/parameters/IfMatch" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupUpdateRequest" } } } },
+        "responses": {
+          "200": { "description": "Source group updated", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "SOURCE_GROUP_INVALID or SOURCE_NOT_IN_NOTEBOOK", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteNotebookSourceGroup", "tags": ["Workspace"],
+        "summary": "Notebook 소스 묶음 삭제", "x-implementation-owner": "WO-N1-NB3-F2",
+        "description": "묶음과 구성원 행을 지운다. 안의 소스는 묶음 밖으로 나가고 소스 자체·노트북 연결은 그대로다. If-Match가 지금 목록 ETag와 다르면 412 SOURCE_GROUP_ETAG_MISMATCH. 응답은 남은 전체 묶음 목록이다. 감사 notebook.source_group.delete(group_id·풀린 소스 수). 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }, { "name": "group_id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^sg-[0-9a-f]{32}$" } }, { "$ref": "#/components/parameters/IfMatch" }],
+        "responses": {
+          "200": { "description": "Source group deleted", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "SOURCE_GROUP_INVALID or SOURCE_NOT_IN_NOTEBOOK", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}/members": {
+      "put": {
+        "operationId": "setNotebookSourceGroupMembers", "tags": ["Workspace"],
+        "summary": "Notebook 소스 묶음 구성원 저장", "x-implementation-owner": "WO-N1-NB3-F2",
+        "description": "source_ids를 이 순서 그대로 묶음 구성원으로 저장한다(빈 목록은 묶음 비우기). 다른 묶음에 있던 소스는 옮겨 온다(소스 하나는 묶음 하나에만). 노트북 소스 목록 규칙으로 노트북에 없는 소스가 하나라도 있으면 422 SOURCE_NOT_IN_NOTEBOOK이고 아무것도 바꾸지 않는다. 중복 ID는 422 SOURCE_GROUP_INVALID. If-Match가 지금 목록 ETag와 다르면 412. 감사 notebook.source_group.members(group_id·소스 수·옮겨 온 수). 노트북 편집 권한.",
+        "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }, { "name": "group_id", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^sg-[0-9a-f]{32}$" } }, { "$ref": "#/components/parameters/IfMatch" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupMembersRequest" } } } },
+        "responses": {
+          "200": { "description": "Source group members saved", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" }, "ETag": { "$ref": "#/components/headers/ETag" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SourceGroupsEnvelope" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" }, "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }, "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "422": { "description": "SOURCE_GROUP_INVALID or SOURCE_NOT_IN_NOTEBOOK", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" }, "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-unbindings": {
       "post": {
         "operationId": "unbindWorkspaceNotebookSource", "tags": ["Workspace"],
@@ -7650,6 +7730,13 @@
           "OVERVIEW_IN_PROGRESS",
           "OVERVIEW_NO_READY_SOURCE",
           "OVERVIEW_UNAVAILABLE",
+          "SOURCE_GROUP_NOT_FOUND",
+          "SOURCE_GROUP_LIMIT",
+          "SOURCE_GROUP_INVALID",
+          "SOURCE_NOT_IN_NOTEBOOK",
+          "SOURCE_GROUP_ETAG_MISMATCH",
+          "SOURCE_GROUPS_UNAVAILABLE",
+          "SOURCE_GROUP_IDEMPOTENCY_KEY_REUSED",
           "AUTHENTICATION_REQUIRED",
           "FORBIDDEN",
           "RESOURCE_UNAVAILABLE",
@@ -9459,6 +9546,44 @@
       "QuestionToolsUpdateRequest": {
         "type": "object", "additionalProperties": false, "required": ["enabled"],
         "properties": { "enabled": { "type": "object", "maxProperties": 64, "propertyNames": { "type": "string", "maxLength": 256 }, "additionalProperties": { "type": "boolean" } } }
+      },
+      "SourceGroup": {
+        "description": "소스 묶음(WO-N1 N1-5). source_ids는 저장한 순서이며 소스 하나는 묶음 하나에만 있다.",
+        "type": "object", "additionalProperties": false, "required": ["group_id", "name", "position", "source_ids"],
+        "properties": {
+          "group_id": { "type": "string", "pattern": "^sg-[0-9a-f]{32}$" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "position": { "type": "integer", "minimum": 0 },
+          "source_ids": { "type": "array", "maxItems": 500, "items": { "$ref": "#/components/schemas/OpaqueId" } }
+        }
+      },
+      "SourceGroupList": {
+        "type": "object", "additionalProperties": false, "required": ["groups"],
+        "properties": { "groups": { "type": "array", "maxItems": 50, "items": { "$ref": "#/components/schemas/SourceGroup" } } }
+      },
+      "SourceGroupsEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/SourceGroupList" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
+      },
+      "SourceGroupCreated": {
+        "type": "object", "additionalProperties": false, "required": ["group_id"],
+        "properties": { "group_id": { "type": "string", "pattern": "^sg-[0-9a-f]{32}$" } }
+      },
+      "SourceGroupCreatedEnvelope": {
+        "type": "object", "additionalProperties": false, "required": ["data", "meta"],
+        "properties": { "data": { "$ref": "#/components/schemas/SourceGroupCreated" }, "meta": { "$ref": "#/components/schemas/NotebookMeta" } }
+      },
+      "SourceGroupCreateRequest": {
+        "type": "object", "additionalProperties": false, "required": ["name"],
+        "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 80 } }
+      },
+      "SourceGroupUpdateRequest": {
+        "type": "object", "additionalProperties": false, "minProperties": 1,
+        "properties": { "name": { "type": "string", "minLength": 1, "maxLength": 80 }, "position": { "type": "integer", "minimum": 0, "maximum": 49 } }
+      },
+      "SourceGroupMembersRequest": {
+        "type": "object", "additionalProperties": false, "required": ["source_ids"],
+        "properties": { "source_ids": { "type": "array", "maxItems": 500, "uniqueItems": true, "items": { "$ref": "#/components/schemas/OpaqueId" } } }
       },
       "NotebookOverviewCitation": {
         "type": "object", "additionalProperties": false, "required": ["label", "source_title", "page"],

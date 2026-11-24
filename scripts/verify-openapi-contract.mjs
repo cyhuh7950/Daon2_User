@@ -26,6 +26,9 @@ export const REQUIRED_PATHS = Object.freeze([
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/question-tools",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}/members",
   "/api/v1/organizations/{id}/license",
   "/api/v1/session",
   "/api/v1/session/logout",
@@ -1127,6 +1130,9 @@ export function validateOpenApiDocument(document) {
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/question-tools", ["get", "put"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview", ["get"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate", ["post"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups", ["get", "post"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}", ["delete", "patch"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}/members", ["put"]],
   ]);
   for (const [apiPath, expectedMethods] of notebookMethods) {
     const actualMethods = Object.keys(document.paths[apiPath]).filter((method) => HTTP_METHODS.has(method)).sort();

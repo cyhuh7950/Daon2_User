@@ -415,6 +415,81 @@ export async function regenerateNotebookOverview(workspaceId, { notebookId, sign
   return data;
 }
 
+// 소스 묶음(WO-N1 NB3-F2, 결정 D-11 노트북 공유). 묶음은 화면 편의이고 질문 범위 상한(8개)은 그대로다(정정 C-4).
+// 모든 응답은 ETag를 돌려준다. 수정·삭제·구성원 저장은 마지막으로 받은 ETag를 If-Match로 보내야 하고, 다르면 412 SOURCE_GROUP_ETAG_MISMATCH다.
+const SOURCE_GROUP_ID = /^sg-[0-9a-f]{32}$/u;
+const MAX_SOURCE_GROUPS = 50;
+const MAX_GROUP_MEMBERS = 500;
+const validGroupName = (name) => typeof name === "string" && name.trim().length >= 1 && name.trim().length <= 80 && !/[\u0000-\u001f\u007f]/u.test(name);
+const validSourceGroup = (g) => exact(g, ["group_id", "name", "position", "source_ids"]) && SOURCE_GROUP_ID.test(g.group_id)
+  && validGroupName(g.name) && Number.isSafeInteger(g.position) && g.position >= 0
+  && Array.isArray(g.source_ids) && g.source_ids.length <= MAX_GROUP_MEMBERS && g.source_ids.every((id) => typeof id === "string" && SAFE_ID.test(id));
+
+function validSourceGroups(d) {
+  if (!exact(d, ["groups"]) || !Array.isArray(d.groups) || d.groups.length > MAX_SOURCE_GROUPS || !d.groups.every(validSourceGroup)) return false;
+  const ids = d.groups.flatMap((g) => g.source_ids);
+  return new Set(ids).size === ids.length && new Set(d.groups.map((g) => g.group_id)).size === d.groups.length;
+}
+
+function sourceGroupPath(workspaceId, notebookId, groupId) {
+  if (groupId !== undefined && !SOURCE_GROUP_ID.test(groupId ?? "")) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  return `${notebookBase(workspaceId, notebookId)}/source-groups${groupId === undefined ? "" : `/${groupId}`}`;
+}
+
+function ifMatch(etag) {
+  if (typeof etag !== "string" || etag.length < 1 || etag.length > 256) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  return { "If-Match": etag };
+}
+
+/** 노트북의 소스 묶음(순서대로). 노트북에서 떼었거나 삭제 요청된 소스, 내가 볼 수 없는 소스는 source_ids에서 빠진다. */
+export async function listSourceGroups(workspaceId, { notebookId, signal, fetchImpl } = {}) {
+  const { data, etag } = await json(await request("GET", sourceGroupPath(workspaceId, notebookId), { signal, fetchImpl }), validSourceGroups);
+  return { groups: data.groups, etag };
+}
+
+/** 묶음 만들기(노트북 편집 권한). 이름 1~80자. 노트북당 50개(409 SOURCE_GROUP_LIMIT). 같은 Idempotency-Key 재시도는 같은 묶음(replayed). */
+export async function createSourceGroup(workspaceId, { notebookId, name, idempotencyKey, signal, fetchImpl } = {}) {
+  if (!validGroupName(name)) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const path = sourceGroupPath(workspaceId, notebookId);
+  const { data, etag, replayed } = await json(await request("POST", path, { body: { name }, idempotent: true, idempotencyKey, signal, fetchImpl }),
+    (d) => exact(d, ["group_id"]) && SOURCE_GROUP_ID.test(d.group_id));
+  return { groupId: data.group_id, etag, replayed };
+}
+
+/** 이름 바꾸기·순서 옮기기(position: 0부터, 끝을 넘으면 맨 끝). 둘 중 하나 이상. 바뀐 전체 묶음 목록과 새 ETag를 돌려준다. */
+export async function updateSourceGroup(workspaceId, groupId, { notebookId, name, position, etag, signal, fetchImpl } = {}) {
+  const body = {};
+  if (name !== undefined) {
+    if (!validGroupName(name)) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+    body.name = name;
+  }
+  if (position !== undefined) {
+    if (!Number.isSafeInteger(position) || position < 0 || position >= MAX_SOURCE_GROUPS) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+    body.position = position;
+  }
+  if (Object.keys(body).length === 0) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const path = sourceGroupPath(workspaceId, notebookId, groupId);
+  const { data, etag: next } = await json(await request("PATCH", path, { body, headers: ifMatch(etag), signal, fetchImpl }), validSourceGroups);
+  return { groups: data.groups, etag: next };
+}
+
+/** 묶음 삭제. 안의 소스는 묶음 밖으로 나가고 소스 자체는 그대로다. */
+export async function deleteSourceGroup(workspaceId, groupId, { notebookId, etag, signal, fetchImpl } = {}) {
+  const path = sourceGroupPath(workspaceId, notebookId, groupId);
+  const { data, etag: next } = await json(await request("DELETE", path, { headers: ifMatch(etag), signal, fetchImpl }), validSourceGroups);
+  return { groups: data.groups, etag: next };
+}
+
+/** 묶음 구성원을 이 순서 그대로 저장한다. 다른 묶음에 있던 소스는 옮겨 온다. 노트북에 없는 소스는 422 SOURCE_NOT_IN_NOTEBOOK. */
+export async function setSourceGroupMembers(workspaceId, groupId, { notebookId, sourceIds, etag, signal, fetchImpl } = {}) {
+  if (!Array.isArray(sourceIds) || sourceIds.length > MAX_GROUP_MEMBERS || new Set(sourceIds).size !== sourceIds.length
+    || !sourceIds.every((id) => typeof id === "string" && SAFE_ID.test(id))) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const path = `${sourceGroupPath(workspaceId, notebookId, groupId)}/members`;
+  const { data, etag: next } = await json(await request("PUT", path, { body: { source_ids: sourceIds }, headers: ifMatch(etag), signal, fetchImpl }),
+    validSourceGroups);
+  return { groups: data.groups, etag: next };
+}
+
 /** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다.
  * 각 답변의 process(답변 과정)는 질문 응답과 같은 규칙으로 검사해 열거되지 않는 `answer.process`로 붙인다(틀리면 null). */
 export async function listChatTurns(workspaceId, { notebookId, signal, fetchImpl } = {}) {
