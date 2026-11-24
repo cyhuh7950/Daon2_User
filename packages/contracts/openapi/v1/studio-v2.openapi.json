@@ -3144,6 +3144,35 @@
           },
           "stale": {
             "type": "boolean"
+          },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "pct",
+                  "note"
+                ],
+                "properties": {
+                  "pct": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "note": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 200
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -3524,6 +3553,146 @@
                 }
               }
             }
+          }
+        }
+      },
+      "StudioV2ResearchSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "research_query",
+          "research_scopes"
+        ],
+        "properties": {
+          "research_query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "research_scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "knowledge",
+                "documents"
+              ]
+            }
+          }
+        }
+      },
+      "StudioV2ResearchContent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query",
+          "sub_questions",
+          "candidates",
+          "unavailable",
+          "tool_calls"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sub_questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "candidate_id",
+                "kind",
+                "title",
+                "origin_label",
+                "reason",
+                "preview",
+                "action",
+                "ref"
+              ],
+              "properties": {
+                "candidate_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "knowledge_package",
+                    "document"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "origin_label": {
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "preview": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "add_scope",
+                    "add_source"
+                  ]
+                },
+                "ref": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "unavailable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "scope",
+                "reason"
+              ],
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "knowledge",
+                    "documents"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "tool_calls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12
           }
         }
       },

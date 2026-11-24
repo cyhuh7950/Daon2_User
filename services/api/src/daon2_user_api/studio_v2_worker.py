@@ -116,7 +116,8 @@ class StudioV2Worker:
             with self._cloud_store._transaction(CloudAccessContext(job.tenant_id, job.workspace_id, job.actor_id, "studio.v2.read")) as connection:
                 if versions:
                     self._repository.require_scope(connection, context, versions)
-            generator = self._registry.get(str(request.get("type_id")))
+            settings = dict(request.get("settings") or {})
+            generator = self._registry.resolve(str(request.get("type_id")), settings)  # 심층 조사 보고서는 조사 생성기(NB4-F2)
 
             def cancel_check() -> None:
                 if self._queue.heartbeat(job, worker, extend_seconds=self._lease_seconds):
@@ -127,7 +128,6 @@ class StudioV2Worker:
                                          progress_pct=max(0, min(int(pct), 99)), note=note):
                     raise StudioCancelled()
 
-            settings = dict(request.get("settings") or {})
             result = generator.generate(GenerationContext(
                 context=context, output_id=job.output_id, type_id=str(request.get("type_id")),
                 format_id=request.get("format_id") if isinstance(request.get("format_id"), str) else None,
@@ -256,6 +256,11 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
         registry.attach_knowledge(studio_knowledge)
     from .studio_chat_edit_runner import ChatEditRunner
     registry.attach_chat_editor(ChatEditRunner(llm, repository, reader=reader, knowledge=studio_knowledge))
+    # 심층 조사(WO-N1 NB4-F2): 빠른 찾기와 같은 검색 함수·같은 지식 연결(ConnectorEgressGate)과 같은 모델 어댑터(StudioEgressGate)를 쓴다.
+    from .source_discovery import DiscoverySearcher
+    from .studio_research import ResearchGenerator
+    shared_tenant = os.environ.get("DAON_SHARED_KNOWLEDGE_CONNECTOR_TENANT") or None
+    registry.attach_research(ResearchGenerator(llm, DiscoverySearcher(connectors, shared_tenant), KnowledgeScopeService(cloud_store, connectors, shared_tenant)))
     from .notebook_overview import NotebookOverviewGenerator
     registry.attach_overview(NotebookOverviewGenerator(reader, llm, context_chars=context_chars))
     registry.register(AuthoringGenerator(AuthoringPipeline(TemplateRegistry(org_provider=OrgTemplateProvider(OrgTemplateStore(cloud_store))), reader, llm, connectors, repository.latest_content,

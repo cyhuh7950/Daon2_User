@@ -72,7 +72,11 @@ async function json(response, validate) {
 
 const validType = (t) => isObject(t) && typeof t.type_id === "string" && typeof t.available === "boolean"
   && Array.isArray(t.export_formats) && Array.isArray(t.presets);
-export const validOutput = (o) => exact(o, LIST_KEYS) && OUTPUT_ID.test(o.output_id) && STATUSES.has(o.status)
+// 진행 중인 생성 작업의 진행률·진행 문구(WO-N1 NB4-F2). 진행 중이 아니면 null. 이전 서버 응답(키 없음)도 받는다.
+const validProgress = (p) => p === null || (exact(p, ["pct", "note"]) && Number.isSafeInteger(p.pct) && p.pct >= 0 && p.pct <= 100
+  && (p.note === null || (typeof p.note === "string" && p.note.length <= 200)));
+export const validOutput = (o) => (exact(o, LIST_KEYS) || (exact(o, [...LIST_KEYS, "progress"]) && validProgress(o.progress)))
+  && OUTPUT_ID.test(o.output_id) && STATUSES.has(o.status)
   && typeof o.title === "string" && (o.error_code === null || ERROR_CODE.test(o.error_code))
   && Number.isSafeInteger(o.source_count) && Number.isSafeInteger(o.current_revision) && typeof o.stale === "boolean";
 const validReceipt = (r) => exact(r, ["output_id", "job_id", "status"]) && OUTPUT_ID.test(r.output_id) && STATUSES.has(r.status);
@@ -112,6 +116,33 @@ export async function createStudioOutput(workspaceId, { notebookId, typeId, form
   const { data, replayed } = await json(await request("POST", `${base(workspaceId, notebookId)}/outputs`,
     { body, idempotent: true, idempotencyKey, signal, fetchImpl }), validReceipt);
   return { ...data, replayed };
+}
+
+// 심층 조사(WO-N1 NB4-F2, 결정 D-02 내부만): 스튜디오 보고서 산출물로 만든다(정정 C-5). 노트북 소스는 보내지 않는다(보내면 400).
+// 진행 문구는 목록·조회의 progress.note: "계획" → "찾기 n/m" → "작성". 실패 error_code: RESEARCH_TIMEOUT(10분 초과),
+// DISCOVERY_SCOPE_UNAVAILABLE(모든 범위 사용 불가), DISCOVERY_CONNECTOR_FAILED(모든 범위 연결 실패), RESEARCH_NO_EVIDENCE(찾은 자료 없음),
+// STUDIO_VALIDATION_FAILED(근거 있는 문장 없음). 완료 후 revision.content.research = {query, sub_questions, candidates, unavailable, tool_calls}.
+export const MAX_RESEARCH_QUERY = 500;
+export async function createStudioResearch(workspaceId, { notebookId, query, scopes, formatId, focus, idempotencyKey, signal, fetchImpl } = {}) {
+  if (typeof query !== "string" || !query.trim() || query.length > MAX_RESEARCH_QUERY || !Array.isArray(scopes) || scopes.length < 1
+    || new Set(scopes).size !== scopes.length || !scopes.every((scope) => DISCOVERY_SCOPES.has(scope))) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const settings = { research_query: query, research_scopes: [...scopes] };
+  if (typeof focus === "string" && focus.trim()) settings.focus = focus;
+  return createStudioOutput(workspaceId, { notebookId, typeId: "report", formatId, settings, idempotencyKey, signal, fetchImpl });
+}
+
+/** 보고서 조회 결과(getStudioOutput)에서 심층 조사 정보를 꺼낸다. 심층 조사가 아니거나 모양이 틀리면 null.
+ * candidates는 빠른 찾기 후보와 같은 모양이며 candidates[i]가 보고서 근거 라벨 S{i+1}이다. 추가는 addSourceDiscovery(ref)로 한다. */
+export function studioResearchOf(output) {
+  const research = output?.revision?.content?.research;
+  if (!exact(research, ["query", "sub_questions", "candidates", "unavailable", "tool_calls"])) return null;
+  const ok = typeof research.query === "string" && Array.isArray(research.sub_questions) && research.sub_questions.length >= 1
+    && research.sub_questions.length <= 5 && research.sub_questions.every((q) => typeof q === "string")
+    && Array.isArray(research.candidates) && research.candidates.length <= 40 && research.candidates.every(validDiscoveryCandidate)
+    && new Set(research.candidates.map((c) => c.candidate_id)).size === research.candidates.length
+    && Array.isArray(research.unavailable) && research.unavailable.every((u) => exact(u, ["scope", "reason"]) && DISCOVERY_SCOPES.has(u.scope) && ERROR_CODE.test(u.reason))
+    && Number.isSafeInteger(research.tool_calls) && research.tool_calls >= 0 && research.tool_calls <= 12;
+  return ok ? { query: research.query, subQuestions: [...research.sub_questions], candidates: research.candidates, unavailable: research.unavailable, toolCalls: research.tool_calls } : null;
 }
 
 export async function renameStudioOutput(workspaceId, outputId, title, { notebookId, etag, signal, fetchImpl } = {}) {

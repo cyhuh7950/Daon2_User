@@ -11,6 +11,11 @@ _FOCUS = {"type": "string", "maxLength": 500}
 _CONFIRM_OUTLINE = {"type": "string", "enum": ["no", "yes"]}
 # 슬라이드·동영상 확정 목록(WO-N1 NB3-F1)은 JSON 문자열이다. 장 30개·장면 20개를 담을 수 있게 보고서보다 길게 둔다.
 _CONFIRMED_LIST = {"type": "string", "maxLength": 40000, "hidden": True}
+# 심층 조사(WO-N1 NB4-F2): 보고서 설정에 둘이 함께 있으면 조사 생성기(studio_research.py)가 처리한다. 화면 설정 창에는 보이지 않는다.
+RESEARCH_SCOPES = ("knowledge", "documents")
+_RESEARCH_QUERY = {"type": "string", "maxLength": 500, "hidden": True}
+_RESEARCH_SCOPES = {"type": "array", "items": {"type": "string", "enum": list(RESEARCH_SCOPES)}, "minItems": 1,
+                    "maxItems": len(RESEARCH_SCOPES), "uniqueItems": True, "hidden": True}
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +44,8 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
     t.type_id: t for t in (
         _t("report", ("docx", "pdf", "md"), presets=("summary", "briefing", "blog", "study_guide", "custom"),
            default_format="summary", schema={"custom_instruction": {"type": "string", "maxLength": 1000}, "confirm_outline": _CONFIRM_OUTLINE,
-                   "confirmed_outline": {"type": "string", "maxLength": 4000, "hidden": True}}),
+                   "confirmed_outline": {"type": "string", "maxLength": 4000, "hidden": True},
+                   "research_query": _RESEARCH_QUERY, "research_scopes": _RESEARCH_SCOPES}),
         _t("data_table", ("xlsx", "csv", "pdf")),
         _t("mind_map", ("svg", "png", "json")),
         _t("flashcards", ("csv", "json", "pdf"),
@@ -223,7 +229,17 @@ def validate_settings(type_id: str, format_id: str | None, settings: Mapping[str
         elif kind == "integer":
             if type(value) is not int or not int(rule["minimum"]) <= value <= int(rule["maximum"]):  # type: ignore[arg-type]
                 raise ValueError("STUDIO_INPUT_INVALID")
+        elif kind == "array":
+            allowed = rule["items"]["enum"]  # type: ignore[index]
+            if (not isinstance(value, list) or not int(rule["minItems"]) <= len(value) <= int(rule["maxItems"])  # type: ignore[arg-type]
+                    or len(set(map(str, value))) != len(value) or any(not isinstance(item, str) or item not in allowed for item in value)):
+                raise ValueError("STUDIO_INPUT_INVALID")
+            value = list(value)
         clean[key] = value
     if format_id == "custom" and not str(clean.get("custom_instruction", "")).strip():
         raise ValueError("STUDIO_INPUT_INVALID")
+    if ("research_query" in clean) != ("research_scopes" in clean):
+        raise ValueError("STUDIO_INPUT_INVALID")  # 심층 조사는 질문과 범위를 함께 보낸다
+    if "research_query" in clean and (clean.get("confirm_outline") == "yes" or clean.get("confirmed_outline")):
+        raise ValueError("STUDIO_INPUT_INVALID")  # 심층 조사에서는 구성 확인을 쓰지 않는다(NB4-F2 Ruling)
     return format_id, clean

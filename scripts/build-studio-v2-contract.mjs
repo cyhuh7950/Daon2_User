@@ -48,7 +48,9 @@ const schemas = {
     title: { type: "string", minLength: 1, maxLength: 160 }, status: { type: "string", enum: STATUS },
     error_code: nullable({ type: "string" }), source_count: { type: "integer", minimum: 0 },
     current_revision: { type: "integer", minimum: 0 }, created_at: time, updated_at: time, stale: { type: "boolean" },
-  }),
+    // 진행 중(leased·generating) 생성 작업의 진행률·진행 문구(WO-N1 NB4-F2). 진행 중이 아니면 null. 심층 조사: "계획" → "찾기 n/m" → "작성".
+    progress: { oneOf: [exact({ pct: { type: "integer", minimum: 0, maximum: 100 }, note: nullable({ type: "string", maxLength: 200 }) }), { type: "null" }] },
+  }, ["output_id", "type_id", "format_id", "title", "status", "error_code", "source_count", "current_revision", "created_at", "updated_at", "stale"]),
   StudioV2OutputPage: exact({ items: { type: "array", maxItems: 50, items: ref("StudioV2Output") }, next_cursor: nullable({ type: "string" }) }),
   StudioV2Evidence: exact({
     ref_id: id, source_version_id: nullable(id), evidence_span_id: nullable(id), locator_kind: nullable({ type: "string" }),
@@ -86,6 +88,26 @@ const schemas = {
       bullets: { type: "array", maxItems: 5, items: { type: "string", maxLength: 120 } },
     }, ["title"]) },
   }, ["scenes"]),
+  // 심층 조사(WO-N1 NB4-F2, 정정 C-5): type_id "report" 생성·재생성 settings에 아래 두 값을 함께 넣는다(소스 source_version_ids는 보내지 않음, 보내면 400).
+  // confirm_outline "yes"·confirmed_outline과 함께 쓰면 400 STUDIO_INPUT_INVALID. 실패 산출물 error_code: RESEARCH_TIMEOUT(10분), DISCOVERY_SCOPE_UNAVAILABLE,
+  // DISCOVERY_CONNECTOR_FAILED, DISCOVERY_UNAVAILABLE, RESEARCH_NO_EVIDENCE, STUDIO_VALIDATION_FAILED(근거 있는 문장 없음), STUDIO_TYPE_UNAVAILABLE(조사 생성기 없음).
+  StudioV2ResearchSettings: exact({
+    research_query: { type: "string", minLength: 1, maxLength: 500 },
+    research_scopes: { type: "array", minItems: 1, maxItems: 2, uniqueItems: true, items: { type: "string", enum: ["knowledge", "documents"] } },
+  }),
+  // 완료된 심층 조사 보고서의 revision.content.research. candidates는 자료 찾기(source-discovery) 후보와 같은 모양이며 candidates[i]가 근거 라벨 S{i+1}이다.
+  // 근거 없는 문장은 본문 블록 refs=[]와 글 앞 "근거 부족: "으로 저장되고 warnings에 UNSUPPORTED_CLAIM이 남는다.
+  StudioV2ResearchContent: exact({
+    query: { type: "string", minLength: 1, maxLength: 500 },
+    sub_questions: { type: "array", minItems: 1, maxItems: 5, items: { type: "string", maxLength: 200 } },
+    candidates: { type: "array", maxItems: 40, items: exact({
+      candidate_id: id, kind: { type: "string", enum: ["knowledge_package", "document"] }, title: { type: "string", maxLength: 200 },
+      origin_label: { type: "string", maxLength: 120 }, reason: { type: "string", maxLength: 200 }, preview: { type: "string", maxLength: 300 },
+      action: { type: "string", enum: ["add_scope", "add_source"] }, ref: { type: "object" },
+    }) },
+    unavailable: { type: "array", items: exact({ scope: { type: "string", enum: ["knowledge", "documents"] }, reason: { type: "string" } }) },
+    tool_calls: { type: "integer", minimum: 0, maximum: 12 },
+  }),
   StudioV2EditTurnRequest: exact({ instruction: { type: "string", minLength: 1, maxLength: 2000 } }),
   StudioV2EditTurnReceipt: exact({ turn_id: id, job_id: id, state: { type: "string", enum: ["queued", "working", "ready", "no_change", "failed", "applied", "discarded"] } }),
   StudioV2EditTurnApplyReceipt: exact({ output_id: id, turn_id: id, revision_no: { type: "integer", minimum: 1 } }),
