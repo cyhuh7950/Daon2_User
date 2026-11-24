@@ -70,6 +70,35 @@ def strip_citation_labels(answer: str, chunk_ids: Iterable[str]) -> str:
     return re.sub(r"[ \t]{2,}", " ", cleaned).strip()
 
 
+_INTERNAL_ID = re.compile(r"(?<![\w-])(?:ext|chunk)-[0-9a-f]{8,}(?![\w-])", re.I)
+
+
+def reconcile_citations(answer: str, cited: tuple[str, ...], allowed: set[str]) -> tuple[str, tuple[str, ...]]:
+    """N1-B14: 모델이 잘못 옮겨 적은 근거 ID를 바로잡고, 본문에 섞인 내부 근거 ID를 지운다.
+
+    목록에 없는 인용은 대소문자·괄호·앞부분(12자 이상)으로 실제 ID 하나가 정해질 때만 그 ID로 바꾸고, 아니면 버린다.
+    근거 검증(숫자·고유값은 인용한 실제 근거에 있어야 함)은 바뀌지 않는다. 남은 인용이 없으면 기존대로 실패한다.
+    """
+    folded = {item.casefold(): item for item in allowed}
+    fixed: list[str] = []
+    for item in cited:
+        if item in allowed:
+            match: str | None = item
+        else:
+            key = item.strip().strip("[](){}【】（）<>\"'").strip().casefold()
+            candidates = {real for low, real in folded.items() if low == key or (len(key) >= 12 and low.startswith(key))}
+            match = candidates.pop() if len(candidates) == 1 else None
+        if match is not None and match not in fixed:
+            fixed.append(match)
+    cleaned = _INTERNAL_ID.sub("", answer)
+    for item in sorted(allowed, key=len, reverse=True):
+        cleaned = re.sub(rf"(?<![\w-]){re.escape(item)}(?![\w-])", "", cleaned)
+    if cleaned != answer:
+        cleaned = re.sub(r"[(\[（【][\s,，]*[)\]）】]", "", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
+    return cleaned, tuple(fixed)
+
+
 @dataclass(frozen=True, slots=True)
 class TextModelSelection:
     provider_code: str
@@ -163,6 +192,8 @@ class OpenAICompatibleTextGenerationAdapter:
     """Grounded JSON adapter for approved OpenAI-compatible external providers."""
     # 미디어 정확 질의 경로(S18)는 답·인용을 보정하지 않는 엄격 거부 계약을 유지한다.
     _repair_insufficient_with_citation = True
+    # N1-B14: 잘못 옮겨 적은 근거 ID 바로잡기·본문의 내부 ID 지우기. S18 미디어 정확 질의는 엄격 계약 유지.
+    _reconcile_citations = True
 
     _BASE_URLS = {
         "GROQ": "https://api.groq.com/openai/v1",
@@ -283,6 +314,8 @@ class OpenAICompatibleTextGenerationAdapter:
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
         answer = strip_citation_labels(answer, allowed)
+        if self._reconcile_citations:
+            answer, cited = reconcile_citations(answer, cited, allowed)
         cited_text = "\n".join(
             item.text for item in request.evidence if item.chunk_id in set(cited)
         )
@@ -318,9 +351,8 @@ class OpenAICompatibleTextGenerationAdapter:
                 missing = _evidence_anchors(answer) - _evidence_anchors(cited_text)
                 everywhere = _evidence_anchors("\n".join(item.text for item in request.evidence))
                 kinds = {kind: sum(1 for anchor in missing if anchor.startswith(kind + ":")) for kind in ("date", "identifier", "quantity")}
-                chunk_ids = {f"identifier:{chunk_id.casefold()}" for chunk_id in allowed}
                 detail = (" " + " ".join(f"missing_{kind}={count}" for kind, count in kinds.items())
-                          + f" missing_in_uncited={len(missing & everywhere)} missing_chunk_id={len(missing & chunk_ids)}")
+                          + f" missing_in_uncited={len(missing & everywhere)}")
             logging.getLogger(__name__).warning(
                 "text_grounding_failure reason=%s cited_count=%d evidence_count=%d%s", reason, len(cited), len(request.evidence), detail)
             raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
