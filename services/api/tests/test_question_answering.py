@@ -1401,3 +1401,18 @@ class InsufficientAnswerAnchorTests(unittest.TestCase):
     def test_sufficient_answer_with_unsupported_number_still_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
             self._generate({"answer": "한도는 100만 원입니다.", "cited_chunk_ids": ["chunk-1"], "insufficient": False})
+
+    # N1-B08 실서버: 일부만 답하면서 insufficient=true와 인용을 함께 보내면 질문 전체가 근거 검증 오류로 실패했다.
+    def test_insufficient_answer_with_supported_citation_is_kept_as_cited_partial_answer(self) -> None:
+        result = self._generate({"answer": "청구 기한은 3년입니다. 도난 보상 한도는 근거에서 확인되지 않습니다.",
+                                 "cited_chunk_ids": ["chunk-1"], "insufficient": True})
+        self.assertFalse(result.insufficient)
+        self.assertEqual(result.cited_chunk_ids, ("chunk-1",))
+        self.assertEqual(result.answer, "청구 기한은 3년입니다. 도난 보상 한도는 근거에서 확인되지 않습니다.")
+
+    def test_insufficient_answer_with_citation_but_unsupported_number_becomes_the_standard_notice(self) -> None:
+        result = self._generate({"answer": "도난 보상 한도는 100만 원으로 보입니다.",
+                                 "cited_chunk_ids": ["chunk-1"], "insufficient": True})
+        self.assertTrue(result.insufficient)
+        self.assertEqual(result.cited_chunk_ids, ())
+        self.assertEqual(result.answer, "선택한 원문 근거에 질문에 답할 정보가 없습니다.")

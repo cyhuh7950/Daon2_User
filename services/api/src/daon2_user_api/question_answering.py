@@ -161,6 +161,8 @@ def resolve_text_model_selection(snapshot: ProviderSettingsSnapshot) -> TextMode
 
 class OpenAICompatibleTextGenerationAdapter:
     """Grounded JSON adapter for approved OpenAI-compatible external providers."""
+    # 미디어 정확 질의 경로(S18)는 답·인용을 보정하지 않는 엄격 거부 계약을 유지한다.
+    _repair_insufficient_with_citation = True
 
     _BASE_URLS = {
         "GROQ": "https://api.groq.com/openai/v1",
@@ -292,6 +294,14 @@ class OpenAICompatibleTextGenerationAdapter:
             # 실패시키지 않고, 근거에 없는 값을 버린 표준 안내로 바꾼다(NB1-I1).
             answer = INSUFFICIENT_ANSWER_NOTICE
             material_anchors_supported = True
+        if (insufficient and cited and answer and self._repair_insufficient_with_citation
+                and len(cited) == len(set(cited)) and set(cited).issubset(allowed)):
+            # N1-B08: 일부만 답하며 insufficient=true와 인용을 함께 보낸 응답. 인용한 근거가 답의 값을 모두
+            # 뒷받침하면 인용 답변으로 돌려주고, 아니면 인용을 버린 표준 안내로 바꾼다(질문 전체 실패 대신).
+            if material_anchors_supported:
+                insufficient = False
+            else:
+                answer, cited, material_anchors_supported = INSUFFICIENT_ANSWER_NOTICE, (), True
         reason = (
             "answer_empty" if not answer else "answer_too_long" if len(answer) > 8_000
             else "citation_duplicated" if len(cited) != len(set(cited))
