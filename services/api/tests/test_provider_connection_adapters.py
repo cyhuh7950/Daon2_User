@@ -886,3 +886,86 @@ def test_migrated_custom_adapter_type_keeps_openai_probe(fake_transport: FakeTra
     assert [(item.method, item.url) for item in fake_transport.requests] == [
         ("POST", "https://models.example/v1/chat/completions"),
     ]
+
+
+# 모델 확인이 거부되면 어느 모델이 무슨 이유로 거부됐는지 남긴다(키·응답 문장은 남기지 않는다).
+class _RejectSecondModel(FakeTransport):
+    def __init__(self, status: int, error: object) -> None:
+        super().__init__()
+        self._status = status
+        self._error = error
+
+    def request(self, method, url, headers, body, timeout_seconds, *, follow_redirects):
+        self.requests.append(RequestRecord(method, url, dict(headers), dict(body) if body else None,
+                                           timeout_seconds, follow_redirects))
+        if body and body["model"] == "second":
+            return TransportResponse(self._status, {"error": self._error})
+        return TransportResponse(200, {"choices": [{"message": {"content": "ready"}}]})
+
+
+def test_rejected_model_probe_reports_model_and_safe_upstream_code() -> None:
+    transport = _RejectSecondModel(404, {
+        "message": f"The model `second` does not exist or you do not have access to it. {TEST_CREDENTIAL}",
+        "type": "invalid_request_error", "code": "model_not_found", "param": None,
+    })
+    adapter = AdapterRegistry(transport).adapter("CUSTOM", "openai_compatible")
+
+    with pytest.raises(AdapterError, match="^PROVIDER_CONNECTION_FAILED$") as captured:
+        adapter.verify_models(connection("CUSTOM", base_url="https://models.example/v1"), TEST_CREDENTIAL,
+                              ("first", "second"))
+
+    assert captured.value.details == {
+        "model_id": "second", "upstream_status": 404,
+        "upstream_code": "model_not_found", "upstream_type": "invalid_request_error",
+    }
+    assert TEST_CREDENTIAL not in repr(captured.value.details)
+    assert "does not exist" not in repr(captured.value.details)
+
+
+def test_rejected_model_probe_drops_unsafe_upstream_values() -> None:
+    transport = _RejectSecondModel(400, {"code": "bad code <script>", "type": "x" * 65, "param": "max_tokens"})
+    adapter = AdapterRegistry(transport).adapter("CUSTOM", "openai_compatible")
+
+    with pytest.raises(AdapterError, match="^PROVIDER_CONNECTION_FAILED$") as captured:
+        adapter.verify_models(connection("CUSTOM", base_url="https://models.example/v1"), TEST_CREDENTIAL,
+                              ("first", "second"))
+
+    assert captured.value.details == {"model_id": "second", "upstream_status": 400, "upstream_param": "max_tokens"}
+
+
+def test_auth_failure_on_a_model_also_names_the_model() -> None:
+    transport = _RejectSecondModel(401, {"code": "invalid_api_key"})
+    adapter = AdapterRegistry(transport).adapter("CUSTOM", "openai_compatible")
+
+    with pytest.raises(AdapterError, match="^PROVIDER_AUTHENTICATION_FAILED$") as captured:
+        adapter.verify_models(connection("CUSTOM", base_url="https://models.example/v1"), TEST_CREDENTIAL,
+                              ("first", "second"))
+
+    assert captured.value.details["model_id"] == "second"
+
+
+def test_urllib_transport_keeps_only_safe_error_fields_from_http_error_body() -> None:
+    import io
+    import json as _json
+    import urllib.error
+
+    from daon2_user_api.provider_connection_adapters import UrllibAdapterTransport
+
+    body = _json.dumps({"error": {
+        "message": f"Unsupported parameter: 'max_tokens'. {TEST_CREDENTIAL}",
+        "type": "invalid_request_error", "param": "max_tokens", "code": "unsupported_parameter",
+    }}).encode("utf-8")
+
+    class _Opener:
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(body))
+
+    with patch("urllib.request.build_opener", return_value=_Opener()):
+        response = UrllibAdapterTransport().request(
+            "POST", "https://models.example/v1/chat/completions", {}, {"model": "m"}, 5, follow_redirects=False)
+
+    assert response.status_code == 400
+    assert response.payload == {"error": {
+        "type": "invalid_request_error", "param": "max_tokens", "code": "unsupported_parameter",
+    }}
+    assert TEST_CREDENTIAL not in repr(response.payload)

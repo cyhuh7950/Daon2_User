@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { requestCredential } from "../lib/provider-credential.js";
+import { providerDiagnosticText } from "../lib/provider-diagnostic.js";
 
 import { providerSettingsApi } from "../lib/provider-settings-api.js";
 import { summarizeConnectionUsage } from "./provider-settings-usage.js";
@@ -181,7 +183,7 @@ export function safeProviderErrorMessage(action, error) {
     return "API Key가 유효하지 않거나 Provider에 연결할 수 없습니다. Endpoint와 API Key를 확인하세요.";
   }
   const cause = providerErrorCause(error);
-  if (cause) return `${prefix}을 저장하지 못했습니다. ${cause.text} 기존 정상 설정은 바뀌지 않았습니다. (오류 코드: ${cause.code})`;
+  if (cause) return `${prefix}을 저장하지 못했습니다. ${cause.text}${providerDiagnosticText(error)} 기존 정상 설정은 바뀌지 않았습니다. (오류 코드: ${cause.code})`;
   return `${prefix}을 저장하지 못했습니다. 다시 시도해 주세요.`;
 }
 
@@ -472,7 +474,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
         connection_id: connectionId,
         ...(isNewDraftNow() ? { provider_code: draft.provider_code, adapter_type: draft.adapter_type } : {}),
         ...(isNewDraftNow() || draft.base_url.trim() !== (selectedConnection?.base_url ?? "") ? { base_url: draft.base_url.trim() } : {}),
-        ...(credential.trim() ? { credential } : {}),
+        ...(credential.trim() ? { credential: requestCredential(credential) } : {}),
         model_ids: normalizedLogicalModels(draft.logical_model_ids).slice(0, 8),
         persist: savedAsIs,
       };
@@ -490,7 +492,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     } catch (error) {
       const cause = providerErrorCause(error);
       setTestResult({ kind: "failed" });
-      setStatus({ kind: "error", message: `연결 시험에 실패했습니다. ${cause?.text ?? "Provider에 연결하지 못했습니다. Endpoint와 Key를 확인하세요."}${cause ? ` (오류 코드: ${cause.code})` : ""} 시험은 설정을 바꾸지 않았습니다.` });
+      setStatus({ kind: "error", message: `연결 시험에 실패했습니다. ${cause?.text ?? "Provider에 연결하지 못했습니다. Endpoint와 Key를 확인하세요."}${providerDiagnosticText(error)}${cause ? ` (오류 코드: ${cause.code})` : ""} 시험은 설정을 바꾸지 않았습니다.` });
     } finally {
       saveLockRef.current = false;
     }
@@ -572,8 +574,8 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
           expected_version: draft.version,
           ...(plain ? { skip_verification: true } : {}),
           ...(compatible && credential.trim()
-            ? draft.access_mode === "personal" ? { test_credential: credential } : { credential }
-            : (includeCredential || (draft.access_mode === "public" && draft.credential_requirement === "required" && credential.trim())) ? { credential } : {})
+            ? draft.access_mode === "personal" ? { test_credential: requestCredential(credential) } : { credential: requestCredential(credential) }
+            : (includeCredential || (draft.access_mode === "public" && draft.credential_requirement === "required" && credential.trim())) ? { credential: requestCredential(credential) } : {})
         };
         result = draft.version === 0
           ? await providerSettingsApi.createConnection({ connection_id: connectionId, provider_code: draft.provider_code, ...body }, operationKey("provider-create"))
@@ -601,7 +603,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     setStatus({ kind: "saving", message: "내 개인 Provider 키를 다시 검증하는 중입니다." });
     try {
       const result = await providerSettingsApi.replaceUserCredential(connectionId, {
-        credential: ownPersonalCredential,
+        credential: requestCredential(ownPersonalCredential),
         expected_version: current.credential_version,
       });
       setUserCredentials((items) => ({ ...items, [connectionId]: result.payload.data }));
@@ -625,7 +627,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       const result = await providerSettingsApi.previewModels({
         connection_id: draft.connection_id.trim(), provider_code: "CUSTOM",
         adapter_type: draft.adapter_type, base_url: draft.base_url.trim(),
-        ...(credential.trim() ? { credential } : {}),
+        ...(credential.trim() ? { credential: requestCredential(credential) } : {}),
       });
       if (!ownsPreview()) return;
       const ids = Array.isArray(result.payload?.data?.model_ids)
