@@ -29,6 +29,8 @@ export const REQUIRED_PATHS = Object.freeze([
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}",
   "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}/members",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/search",
+  "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/add",
   "/api/v1/organizations/{id}/license",
   "/api/v1/session",
   "/api/v1/session/logout",
@@ -1133,6 +1135,8 @@ export function validateOpenApiDocument(document) {
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups", ["get", "post"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}", ["delete", "patch"]],
     ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-groups/{group_id}/members", ["put"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/search", ["post"]],
+    ["/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/add", ["post"]],
   ]);
   for (const [apiPath, expectedMethods] of notebookMethods) {
     const actualMethods = Object.keys(document.paths[apiPath]).filter((method) => HTTP_METHODS.has(method)).sort();
@@ -1238,7 +1242,9 @@ export function validateOpenApiDocument(document) {
         "/api/v1/session/logout",
         "/api/v1/session/native/logout",
         // 노트북 개요 다시 만들기(WO-N1 NB2-F2): 상태로 막는 쓰기다. 진행 중 반복 요청은 409 OVERVIEW_IN_PROGRESS이고 새 작업을 만들지 않는다.
-        "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate"
+        "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate",
+        // 자료 찾기 검색(WO-N1 NB4-F1): 저장하지 않는 조회다(감사 기록만). 법령 검색과 같다.
+        "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-discovery/search"
       ]);
       if (method === "post" && !idempotencyExemptPosts.has(apiPath) && !ANDROID_BROWSER_AUTH_POST_PATHS.has(apiPath) && !refs.has("#/components/parameters/IdempotencyKey")) fail(`${operationId} missing Idempotency-Key`);
       if ((method === "patch" || method === "delete") && !refs.has("#/components/parameters/IfMatch")) {

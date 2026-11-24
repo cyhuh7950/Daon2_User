@@ -591,6 +591,16 @@ function routeFor(method, segments) {
       : { methodRejected: true };
   }
   if (
+    segments.length === 6 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
+    && SAFE_SEGMENT.test(segments[3]) && segments[4] === "source-discovery" && (segments[5] === "search" || segments[5] === "add")
+  ) {
+    // 자료 찾기·빠른 찾기(WO-N1 NB4-F1): POST .../source-discovery/search(보기), POST .../source-discovery/add(편집).
+    return method === "POST"
+      ? { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/notebooks/${encodeURIComponent(segments[3])}/source-discovery/${segments[5]}`,
+          query: new Set(), strictQuery: true, csrfProvenanceRequired: true, maxRequestBytes: 8 * 1024 }
+      : { methodRejected: true };
+  }
+  if (
     (segments.length === 5 || (segments.length === 6 && segments[5] === "regenerate")) && segments[0] === "workspaces"
     && SAFE_SEGMENT.test(segments[1]) && segments[2] === "notebooks"
     && SAFE_SEGMENT.test(segments[3]) && segments[4] === "overview"

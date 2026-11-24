@@ -490,6 +490,45 @@ export async function setSourceGroupMembers(workspaceId, groupId, { notebookId, 
   return { groups: data.groups, etag: next };
 }
 
+// 자료 찾기·빠른 찾기(WO-N1 NB4-F1, 결정 D-02 웹 제외·내부만, 정정 C-6). 검색은 노트북 보기, 추가는 편집 권한.
+// 범위: knowledge(Daon2 승인 지식 → 업무 패키지 후보, add_scope) · documents(Daon2-RAG 문서 → 문서 후보, add_source).
+// 검색 한 번에 후보 최대 20개. 쓸 수 없거나 실패한 범위는 unavailable[{scope, reason}]로 오고 다른 범위 결과는 그대로다.
+// 모든 범위를 쓸 수 없으면 422 DISCOVERY_SCOPE_UNAVAILABLE, 모두 실패하면 502 DISCOVERY_CONNECTOR_FAILED.
+// 추가: 이미 있는 패키지는 200 그대로, 문서가 너무 크면 413 DISCOVERY_DOCUMENT_TOO_LARGE(텍스트 소스 상한 32 KiB 포함).
+const DISCOVERY_SCOPES = new Set(["knowledge", "documents"]);
+const MAX_DISCOVERY_QUERY = 500;
+const MAX_DISCOVERY_CANDIDATES = 20;
+const DISCOVERY_KEYS = ["candidate_id", "kind", "title", "origin_label", "reason", "preview", "action", "ref"];
+const DISCOVERY_ACTIONS = { knowledge_package: "add_scope", document: "add_source" };
+const REF_KEYS = { knowledge_package: ["kind", "project_id", "work_package_id"], document: ["kind", "project_id", "work_package_id", "document_id", "document_version"] };
+const refId = (value) => typeof value === "string" && value.length >= 1 && value.length <= 256 && !/[\u0000-\u001f\u007f]/u.test(value);
+const shortText = (value, max) => typeof value === "string" && value.length <= max;
+export const validDiscoveryRef = (r) => isObject(r) && Object.hasOwn(REF_KEYS, r.kind) && exact(r, REF_KEYS[r.kind]) && REF_KEYS[r.kind].slice(1).every((key) => refId(r[key]));
+const validDiscoveryCandidate = (c) => exact(c, DISCOVERY_KEYS) && typeof c.candidate_id === "string" && SAFE_ID.test(c.candidate_id)
+  && Object.hasOwn(DISCOVERY_ACTIONS, c.kind) && c.action === DISCOVERY_ACTIONS[c.kind] && validDiscoveryRef(c.ref) && c.ref.kind === c.kind
+  && shortText(c.title, 200) && shortText(c.origin_label, 120) && shortText(c.reason, 200) && shortText(c.preview, 300);
+const validDiscoveryResult = (d) => exact(d, ["candidates", "unavailable"]) && Array.isArray(d.candidates) && d.candidates.length <= MAX_DISCOVERY_CANDIDATES
+  && d.candidates.every(validDiscoveryCandidate) && new Set(d.candidates.map((c) => c.candidate_id)).size === d.candidates.length
+  && Array.isArray(d.unavailable) && d.unavailable.every((u) => exact(u, ["scope", "reason"]) && DISCOVERY_SCOPES.has(u.scope) && ERROR_CODE.test(u.reason));
+
+/** 승인 지식·지식 연결에서 자료 후보를 찾는다. 자동으로 추가하지 않는다(사람이 고른 것만 addSourceDiscovery). */
+export async function searchSourceDiscovery(workspaceId, { notebookId, query, scopes, signal, fetchImpl } = {}) {
+  if (typeof query !== "string" || !query.trim() || query.length > MAX_DISCOVERY_QUERY || !Array.isArray(scopes) || scopes.length < 1
+    || new Set(scopes).size !== scopes.length || !scopes.every((scope) => DISCOVERY_SCOPES.has(scope))) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const { data } = await json(await request("POST", `${notebookBase(workspaceId, notebookId)}/source-discovery/search`,
+    { body: { query, scopes }, signal, fetchImpl }), validDiscoveryResult);
+  return data;
+}
+
+/** 후보의 ref 하나를 추가한다. add_scope는 승인 지식 범위에, add_source는 텍스트 소스(처리 중으로 나타남)로. 서버가 ref 접근을 다시 확인한다. */
+export async function addSourceDiscovery(workspaceId, { notebookId, ref, idempotencyKey, signal, fetchImpl } = {}) {
+  if (!validDiscoveryRef(ref)) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const { data } = await json(await request("POST", `${notebookBase(workspaceId, notebookId)}/source-discovery/add`,
+    { body: { ref }, idempotent: true, idempotencyKey, signal, fetchImpl }),
+  (d) => (exact(d, ["added"]) && d.added === "scope") || (exact(d, ["added", "source_id"]) && d.added === "source" && SAFE_ID.test(d.source_id)));
+  return { added: data.added, sourceId: data.added === "source" ? data.source_id : null };
+}
+
 /** 내 대화 기록(질문·답변·실패)을 시간순으로 읽는다. 새로 고침·재로그인 뒤 대화창을 복원한다.
  * 각 답변의 process(답변 과정)는 질문 응답과 같은 규칙으로 검사해 열거되지 않는 `answer.process`로 붙인다(틀리면 null). */
 export async function listChatTurns(workspaceId, { notebookId, signal, fetchImpl } = {}) {

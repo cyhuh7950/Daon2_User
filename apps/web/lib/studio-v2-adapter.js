@@ -5,7 +5,7 @@ import {
   getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, getNotebookOverview, regenerateNotebookOverview,
-  listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, issueExportStepUp,
+  listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, searchSourceDiscovery, addSourceDiscovery, issueExportStepUp,
   listAuthoringTemplates, createAuthoringSession, getAuthoringSession, answerAuthoringSession, reviewAuthoringSession, controlAuthoringSession, editAuthoringUnit, updateAuthoringOutline, listKnowledgeConnectors, listConnectorDocuments,
 } from "./studio-v2-api.js";
 import { localMemoTitle } from "./memo-title.js";
@@ -64,6 +64,9 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     updateSourceGroup: (groupId, options) => updateSourceGroup(workspaceId, groupId, scope(options)),
     deleteSourceGroup: (groupId, options) => deleteSourceGroup(workspaceId, groupId, scope(options)),
     setSourceGroupMembers: (groupId, sourceIds, options) => setSourceGroupMembers(workspaceId, groupId, scope({ ...options, sourceIds })),
+    // 자료 찾기·빠른 찾기(WO-N1 NB4-F1): 검색은 보기, 추가는 편집 권한. 추가는 사람이 고른 ref 하나씩(자동 추가 없음).
+    searchSourceDiscovery: (query, scopes, options) => searchSourceDiscovery(workspaceId, scope({ ...options, query, scopes })),
+    addSourceDiscovery: (ref, options) => addSourceDiscovery(workspaceId, scope({ ...options, ref })),
     getCustomization: (options) => getStudioCustomization(workspaceId, scope(options)),
     saveCustomization: (instruction, options) => saveStudioCustomization(workspaceId, instruction, scope(options)),
     authoring: Object.freeze({
