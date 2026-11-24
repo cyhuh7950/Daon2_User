@@ -13,6 +13,7 @@ from .document_understanding_adapter import (
 )
 from .question_answering import OllamaTextGenerationAdapter, TextModelSelection
 from .workspace_model_defaults import ResolvedModel
+from .openai_chat import openai_chat_payload
 
 
 _MAX_TEXT_BYTES = 32 * 1024
@@ -247,10 +248,12 @@ class OpenAICompatibleTextDocumentAdapter:
             "response_format": {"type": "json_schema", "json_schema": {"name": "source_understanding", "strict": False, "schema": _SCHEMA}},
         }
         key = selection.credential_text(required=False) if hasattr(selection, "credential_text") else None
+        url = f"{base}/chat/completions"
+        payload = openai_chat_payload(url, payload)
         if key:
-            response = self._transport.post_json(url=f"{base}/chat/completions", api_key=key, payload=payload, timeout_seconds=120.0)
+            response = self._transport.post_json(url=url, api_key=key, payload=payload, timeout_seconds=120.0)
         else:
-            response = self._transport.post_json_no_auth(url=f"{base}/chat/completions", payload=payload, timeout_seconds=120.0)
+            response = self._transport.post_json_no_auth(url=url, payload=payload, timeout_seconds=120.0)
         try:
             choices = cast(list[object], response["choices"])
             content = cast(Mapping[str, object], cast(Mapping[str, object], choices[0])["message"])["content"]

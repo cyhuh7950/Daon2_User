@@ -36,3 +36,15 @@ test("API 클라이언트는 오류 details를 넘기고, 시험·저장 실패 
   const uses = workspace.match(/providerDiagnosticText\(error\)/gu) ?? [];
   assert.ok(uses.length >= 2, `진단 사용 ${uses.length}곳`);
 });
+
+test("code와 param이 함께 있으면 거부된 매개변수 이름을 괄호로 덧붙인다", () => {
+  assert.equal(providerDiagnosticText({ details: { provider: {
+    model_id: "gpt-6.1-sol", upstream_status: 400, upstream_code: "unsupported_parameter", upstream_param: "max_tokens",
+  } } }), " 실패한 모델: gpt-6.1-sol · Provider 응답: HTTP 400 unsupported_parameter (max_tokens)");
+});
+
+test("연결 시험 결과는 입력(Key·모델·설정)이 바뀌거나 저장을 시도하면 지운다", () => {
+  assert.match(workspace, /const testInputKey = JSON\.stringify\(\[draft, credential\]\);/u);
+  assert.match(workspace, /useEffect\(\(\) => \{ setTestResult\(null\); \}, \[testInputKey\]\)/u);
+  assert.match(workspace, /async function saveConnection\(includeCredential, options = \{\}\) \{\r?\n\s+setTestResult\(null\);/u);
+});

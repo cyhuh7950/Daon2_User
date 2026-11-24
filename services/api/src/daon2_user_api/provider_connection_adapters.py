@@ -12,6 +12,7 @@ import urllib.request
 from .provider_catalog import DiscoveredModel, ProviderCatalog, ProviderCatalogError
 from .provider_credentials import ProviderConnection
 from .provider_settings import ProviderSettingsError, validate_provider_base_url
+from .openai_chat import openai_chat_payload
 
 
 _TIMEOUT_SECONDS = 5.0
@@ -369,12 +370,12 @@ class _CustomCompatibleAdapter(OpenRouterAdapter):
             try:
                 payload = self._request(
                     "POST", url, headers,
-                    {
+                    openai_chat_payload(url, {
                         "model": model.model_id,
                         "messages": [{"role": "user", "content": "connection test"}],
                         "max_tokens": 16,
                         "stream": False,
-                    },
+                    }, min_completion_tokens=1024),
                 )
             except AdapterError as error:
                 # 어느 모델에서 실패했는지 남긴다(모델 ID는 카탈로그 검증을 거친 값).

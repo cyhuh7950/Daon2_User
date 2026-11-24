@@ -22,6 +22,7 @@ from .question_answering import OllamaTextGenerationAdapter, TextModelSelection
 from .studio_egress import mask_text
 from .text_document_understanding import _SCHEMA, _json_text
 from .workspace_model_defaults import ResolvedModel
+from .openai_chat import openai_chat_payload
 
 
 _MAX_PAGES = 2000
@@ -164,8 +165,10 @@ class PdfTextDocumentAdapter:
         }
         base = selection.base_url.rstrip("/")
         key = selection.credential_text(required=False)
-        response = (self._transport.post_json(url=f"{base}/chat/completions", api_key=key, payload=payload, timeout_seconds=120.0)
-                    if key else self._transport.post_json_no_auth(url=f"{base}/chat/completions", payload=payload, timeout_seconds=120.0))
+        url = f"{base}/chat/completions"
+        payload = openai_chat_payload(url, payload)
+        response = (self._transport.post_json(url=url, api_key=key, payload=payload, timeout_seconds=120.0)
+                    if key else self._transport.post_json_no_auth(url=url, payload=payload, timeout_seconds=120.0))
         choices = cast(list[object], response["choices"])
         return cast(Mapping[str, object], cast(Mapping[str, object], choices[0])["message"])["content"]
 

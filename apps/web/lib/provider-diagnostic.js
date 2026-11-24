@@ -10,8 +10,11 @@ export function providerDiagnosticText(error) {
   if (typeof provider.model_id === "string" && MODEL_ID.test(provider.model_id)) parts.push(`실패한 모델: ${provider.model_id}`);
   const status = Number.isInteger(provider.upstream_status) && provider.upstream_status >= 400 && provider.upstream_status < 600
     ? provider.upstream_status : null;
-  const reason = [provider.upstream_code, provider.upstream_param, provider.upstream_type]
-    .find((value) => typeof value === "string" && TOKEN.test(value));
+  const safe = (value) => (typeof value === "string" && TOKEN.test(value) ? value : null);
+  const code = safe(provider.upstream_code);
+  const param = safe(provider.upstream_param);
+  // code가 있으면 code(거부된 매개변수 이름은 괄호), 없으면 param, 그다음 type
+  const reason = code ? `${code}${param ? ` (${param})` : ""}` : param ?? safe(provider.upstream_type);
   if (status !== null) parts.push(`Provider 응답: HTTP ${status}${reason ? ` ${reason}` : ""}`);
   return parts.length ? ` ${parts.join(" · ")}` : "";
 }
