@@ -18,6 +18,7 @@ export const ERROR_CODES = [
   "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
   "FORBIDDEN", "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
   "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
+  "OUTLINE_INVALID",
 ];
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const exact = (properties, required = Object.keys(properties)) => ({ type: "object", additionalProperties: false, required, properties });
@@ -70,6 +71,21 @@ const schemas = {
   StudioV2RevisionRequest: exact({ content: { type: "object" }, change_reason: { type: "string", maxLength: 200 } }, ["content"]),
   StudioV2RevisionReceipt: exact({ output_id: id, revision_no: { type: "integer", minimum: 1 } }),
   StudioV2RegenerateRequest: exact({ settings: { type: "object" } }, []),
+  // 슬라이드·동영상 생성 전 구성 확인(WO-N1 NB3-F1). settings.confirmed_outline은 아래 객체를 JSON 문자열로 담는다.
+  // confirm_outline="yes"이면 revision.content.body.outline_review(같은 항목 모양)에서 멈추고, 확정은 regenerate {confirm_outline:"no", confirmed_outline}.
+  StudioV2SlidesConfirmedOutline: exact({
+    title: { type: "string", maxLength: 160 },
+    slides: { type: "array", minItems: 1, maxItems: 30, items: exact({
+      title: { type: "string", minLength: 1, maxLength: 100 }, points: { type: "array", maxItems: 5, items: { type: "string", maxLength: 120 } },
+    }, ["title"]) },
+  }, ["slides"]),
+  StudioV2VideoConfirmedOutline: exact({
+    title: { type: "string", maxLength: 160 },
+    scenes: { type: "array", minItems: 1, maxItems: 20, items: exact({
+      title: { type: "string", minLength: 1, maxLength: 100 }, narration_summary: { type: "string", maxLength: 600 },
+      bullets: { type: "array", maxItems: 5, items: { type: "string", maxLength: 120 } },
+    }, ["title"]) },
+  }, ["scenes"]),
   StudioV2EditTurnRequest: exact({ instruction: { type: "string", minLength: 1, maxLength: 2000 } }),
   StudioV2EditTurnReceipt: exact({ turn_id: id, job_id: id, state: { type: "string", enum: ["queued", "working", "ready", "no_change", "failed", "applied", "discarded"] } }),
   StudioV2EditTurnApplyReceipt: exact({ output_id: id, turn_id: id, revision_no: { type: "integer", minimum: 1 } }),
@@ -151,6 +167,10 @@ const memoErrors = {
   "413": { description: "Memo is larger than the text source limit", content: { "application/json": { schema: ref("StudioV2Error") } } },
   "422": { description: "Not a memo or empty memo", content: { "application/json": { schema: ref("StudioV2Error") } } },
 };
+// 슬라이드·동영상 확정 목록(settings.confirmed_outline) 검증 실패: 빈 목록·상한(30장/20장면) 초과·빈 제목·형식 오류.
+const outlineErrors = {
+  "422": { description: "Confirmed outline is invalid (OUTLINE_INVALID)", content: { "application/json": { schema: ref("StudioV2Error") } } },
+};
 schemas.StudioV2EmptyRequest = exact({}, []);
 const op = (operationId, parameters, responses, requestBody) => ({
   operationId, parameters, ...(requestBody ? { requestBody } : {}), responses: { ...responses, ...errorResponses },
@@ -163,7 +183,7 @@ const paths = {
   [`${S}/types`]: { get: op("listStudioV2Types", base, { "200": okJson("StudioV2TypesEnvelope") }) },
   [`${S}/outputs`]: {
     get: op("listStudioV2Outputs", [...base, P("Cursor"), P("Limit")], { "200": okJson("StudioV2OutputPageEnvelope") }),
-    post: op("createStudioV2Output", [...base, P("IdempotencyKey")], { "200": okJson("StudioV2CreateReceiptEnvelope", "Replayed"), "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted") }, json("StudioV2CreateRequest")),
+    post: op("createStudioV2Output", [...base, P("IdempotencyKey")], { "200": okJson("StudioV2CreateReceiptEnvelope", "Replayed"), "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted"), ...outlineErrors }, json("StudioV2CreateRequest")),
   },
   [`${S}/outputs/{output_id}`]: {
     get: op("getStudioV2Output", [...out, P("Revision")], { "200": okJson("StudioV2OutputDetailEnvelope") }),
@@ -171,7 +191,7 @@ const paths = {
     delete: op("deleteStudioV2Output", out, { "204": { description: "Deleted" } }),
   },
   [`${S}/outputs/{output_id}/revisions`]: { post: op("createStudioV2Revision", [...out, P("IdempotencyKey")], { "201": okJson("StudioV2RevisionReceiptEnvelope", "Created") }, json("StudioV2RevisionRequest")) },
-  [`${S}/outputs/{output_id}/regenerate`]: { post: op("regenerateStudioV2Output", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted") }, json("StudioV2RegenerateRequest")) },
+  [`${S}/outputs/{output_id}/regenerate`]: { post: op("regenerateStudioV2Output", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted"), ...outlineErrors }, json("StudioV2RegenerateRequest")) },
   [`${S}/outputs/{output_id}/edit-turns`]: {
     get: op("listStudioV2EditTurns", out, { "200": okJson("StudioV2EditTurnListEnvelope") }),
     post: op("createStudioV2EditTurn", [...out, P("IdempotencyKey")], { "202": okJson("StudioV2EditTurnReceiptEnvelope", "Accepted") }, json("StudioV2EditTurnRequest")),

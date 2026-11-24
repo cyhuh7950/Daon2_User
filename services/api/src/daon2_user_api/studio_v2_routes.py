@@ -30,6 +30,8 @@ STUDIO_V2_PUBLIC_CODES = frozenset({
     # 메모를 소스로(WO-N1 NB1-F2)
     "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
     "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
+    # 슬라이드·동영상 생성 전 구성 확인(WO-N1 NB3-F1)
+    "OUTLINE_INVALID",
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TURN_ID = re.compile(r"^svt-[0-9a-f]{32}$")
