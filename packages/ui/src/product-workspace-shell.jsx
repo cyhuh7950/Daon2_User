@@ -21,6 +21,7 @@ import { ManualMarkdown } from "./manual-markdown.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
 import { SourceGroupsList } from "./source-groups.jsx";
+import { SourceDiscoveryPanel } from "./source-discovery.jsx";
 import "./workspace.css";
 import "./workspace-polish.css";
 import { parseDocxBlock, isDocxBlockContent } from "./shared-docx-block.js";
@@ -869,6 +870,18 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
       setMemoSourceFocusId(sourceId);
       setMemoSourceWatch({ sourceId, until: Date.now() + MEMO_SOURCE_POLL_LIMIT_MS });
     }
+    setLoadRevision((current) => current + 1);
+  };
+  // 빠른 찾기(NB4-U1): 문서를 추가하면 메모-소스와 같은 방식으로 새 소스 줄로 이동하고 처리가 끝날 때까지 목록을 다시 읽는다.
+  // 승인 지식 패키지를 추가하면 승인 지식 칸을 다시 읽는다. 질문 도구 메뉴는 열 때마다 다시 읽으므로 따로 알리지 않는다.
+  const [knowledgeScopeRevision, setKnowledgeScopeRevision] = useState(0);
+  const handleDiscoveryAdded = ({ sourceIds = [], scopeAdded = false } = {}) => {
+    const sourceId = sourceIds.at(-1);
+    if (typeof sourceId === "string") {
+      setMemoSourceFocusId(sourceId);
+      setMemoSourceWatch({ sourceId, until: Date.now() + MEMO_SOURCE_POLL_LIMIT_MS });
+    }
+    if (scopeAdded) setKnowledgeScopeRevision((current) => current + 1);
     setLoadRevision((current) => current + 1);
   };
   useEffect(() => {
@@ -2158,8 +2171,10 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {sourceAddPending ? <p className="source-inline-state" role="status">Source 등록·처리 중입니다.</p> : null}
             {sourceAddError ? <div className="inline-alert compact" role="alert">Source를 등록하지 못했습니다.{sourceErrorHint(sourceAddError)} ({sourceAddError})</div> : null}
           </section> : null}
+          {/* 자료 찾기·빠른 찾기(NB4-U1): 소스 칸 위쪽. 결과 목록은 정해진 높이 안에서만 스크롤한다. */}
+          <SourceDiscoveryPanel studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} onAdded={handleDiscoveryAdded} />
           {processing ? <p className="source-inline-state" role="status">처리 중 · 잠시만 기다려 주세요.</p> : null}
-          {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} onCountChange={setKnowledgeCount} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
+          {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} onCountChange={setKnowledgeCount} refreshKey={knowledgeScopeRevision} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
             <div className="source-group-heading"><h3 id="approved-knowledge-title">Daon 승인 지식</h3><span>{knowledgePackages.length}</span></div>
             <ul className="source-list knowledge-list" aria-label="Daon 승인 지식 목록">
               {knowledgePackages.map((item) => (

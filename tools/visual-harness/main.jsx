@@ -314,6 +314,55 @@ function SourceGroupsHarness({ state }) {
   return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
 }
 
+// 빠른 찾기(NB4-U1): 실제 셸 소스 칸 위쪽에 띄운다. 검색창에 글자를 넣고 "찾기"를 누르면 상태별 가짜 응답이 온다.
+// 문서 후보를 추가하면 소스 목록에 처리 중 소스가, 패키지 후보를 추가하면 승인 지식 칸에 패키지가 나타난다.
+const sdRef = (i, kind) => (kind === "document" ? { kind, project_id: "project-1", work_package_id: "wp-1", document_id: `doc-${i}`, document_version: "v1" } : { kind, project_id: "project-1", work_package_id: `wp-${i}` });
+const sdCandidate = (i, kind) => ({ candidate_id: `cand-${kind === "document" ? "d" : "k"}${i}`, kind,
+  title: kind === "document" ? ["보험금 청구 절차 안내서.pdf", "특약 약관 해설서.docx", "지급 기준 개정 공지.txt"][i % 3] + (i > 2 ? ` (${i + 1})` : "") : ["보험 청구 업무", "약관 검토 업무", "고객 상담 업무"][i % 3] + (i > 2 ? ` ${i + 1}` : ""),
+  origin_label: kind === "document" ? "Daon2-RAG 문서 · 보험 업무" : "Daon2 승인 지식 · 보험 프로젝트",
+  reason: kind === "document" ? "본문에 '청구 절차'와 '서류'가 함께 나옵니다" : "업무 이름과 설명이 검색어와 맞습니다",
+  preview: kind === "document" ? "보험금을 청구하려면 청구서, 신분증 사본, 진단서를 준비해 고객센터 또는 앱으로 제출합니다. 접수 후 3영업일 안에 심사 결과를 알려 드리며, 추가 서류가 필요하면 담당자가 연락합니다." : "청구 접수부터 심사·지급까지의 업무 기준과 승인된 규칙을 묶은 업무 패키지입니다.",
+  action: kind === "document" ? "add_source" : "add_scope", ref: sdRef(i, kind) });
+const SD_BASE = [sdCandidate(0, "knowledge_package"), sdCandidate(0, "document"), sdCandidate(1, "document"), sdCandidate(1, "knowledge_package")];
+const SD_MANY = Array.from({ length: 20 }, (_, i) => sdCandidate(i, i % 2 ? "document" : "knowledge_package"));
+const sdFail = (code, status) => Object.assign(new Error(code), { code, status });
+const SD_STATES = {
+  "discovery-default": { label: "빠른 찾기: 기본(찾기·추가 눌러 보기)" },
+  "discovery-searching": { label: "빠른 찾기: 찾는 중", search: () => new Promise(() => {}) },
+  "discovery-many": { label: "빠른 찾기: 후보 20개(목록 창 안 스크롤)", search: async () => ({ candidates: SD_MANY, unavailable: [] }) },
+  "discovery-empty": { label: "빠른 찾기: 결과 없음", search: async () => ({ candidates: [], unavailable: [] }) },
+  "discovery-unavailable": { label: "빠른 찾기: 문서 범위 사용 불가", search: async () => ({ candidates: SD_BASE.filter((c) => c.kind !== "document"), unavailable: [{ scope: "documents", reason: "CONNECTOR_NOT_CONFIGURED" }] }) },
+  "discovery-partial": { label: "빠른 찾기: 일부 범위 실패", search: async () => ({ candidates: SD_BASE.filter((c) => c.kind !== "document"), unavailable: [{ scope: "documents", reason: "DISCOVERY_CONNECTOR_FAILED" }] }) },
+  "discovery-all-unavailable": { label: "빠른 찾기: 모든 범위 사용 불가(422)", search: async () => { throw sdFail("DISCOVERY_SCOPE_UNAVAILABLE", 422); } },
+  "discovery-adding": { label: "빠른 찾기: 추가 중", add: () => new Promise(() => {}) },
+  "discovery-add-failed": { label: "빠른 찾기: 추가 실패(문서 너무 큼)", add: async (ref) => { if (ref.kind === "document") throw sdFail("DISCOVERY_DOCUMENT_TOO_LARGE", 413); return { added: "scope", sourceId: null }; } },
+  "discovery-forbidden": { label: "빠른 찾기: 보기 권한(추가 403)", add: async () => { throw sdFail("FORBIDDEN", 403); } },
+};
+function DiscoveryHarness({ state }) {
+  const view = SD_STATES[state];
+  const store = useMemo(() => ({ sources: [sgSource(1, "보험약관.pdf"), sgSource(2, "청구 안내.docx")], scopes: [] }), [view]);
+  const adapter = useMemo(() => {
+    const studio = { listTypes: async () => [], listOutputs: async () => ({ items: [], nextCursor: null }), exportFormats: () => [],
+      searchSourceDiscovery: async (query, scopes) => (view.search ? view.search(query, scopes) : { candidates: SD_BASE, unavailable: [] }),
+      addSourceDiscovery: async (ref) => {
+        if (view.add) return view.add(ref);
+        if (ref.kind === "document") {
+          const id = `source-${ref.document_id}`;
+          store.sources = [...store.sources, { source_id: id, source_version_id: `version-${ref.document_id}`, filename: SD_BASE.find((c) => c.ref.document_id === ref.document_id)?.title ?? id, source_state: "processing", processing_state: "running", job_state: "running" }];
+          return { added: "source", sourceId: id };
+        }
+        store.scopes = [...store.scopes, { project_id: ref.project_id, work_package_id: ref.work_package_id, project_name: "보험 프로젝트", work_package_name: SD_BASE.find((c) => c.ref.work_package_id === ref.work_package_id && c.kind === "knowledge_package")?.title ?? ref.work_package_id }];
+        return { added: "scope", sourceId: null };
+      } };
+    return { listSources: async () => store.sources, uploadPdf() {}, getProcessingStatus() {}, citationUrl: () => null, createReport() {},
+      askQuestion: async () => ({ run_id: "run-h", run_result_id: "result-h", answer: "응답", insufficient: false, citations: [] }),
+      listStudioOutputs: async () => [], listConnectors: async () => [], listKnowledgePackages: async () => [],
+      getNotebookKnowledgeScopes: async () => ({ items: store.scopes }), listDaonKnowledgeScopes: async () => ({ projects: [] }),
+      notebookContext: { notebook_id: `notebook-${state}`, sources: [] }, studioV2: studio };
+  }, [view, store, state]);
+  return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -326,7 +375,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SG_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SG_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SD_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -372,6 +421,7 @@ function App() {
     OV_STATES[view] ? h(OverviewHarness, { key: view, state: view }) : null,
     OL_STATES[view] ? h(OutlineHarness, { key: view, state: view }) : null,
     SG_STATES[view] ? h(SourceGroupsHarness, { key: view, state: view }) : null,
+    SD_STATES[view] ? h(DiscoveryHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 

@@ -29,7 +29,8 @@ export function knowledgeKindsText(status) {
   return parts.join(" · ");
 }
 
-export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
+// refreshKey가 바뀌면 노트북 승인 지식 범위를 다시 읽는다(빠른 찾기로 패키지를 추가한 뒤, NB4-U1). 넘기지 않으면 예전과 같다.
+export function DaonKnowledgeScopeSection({ adapter, onCountChange, refreshKey = null }) {
   const [items, setItems] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [statusByKey, setStatusByKey] = useState({});
@@ -43,7 +44,7 @@ export function DaonKnowledgeScopeSection({ adapter, onCountChange }) {
       if (!controller.signal.aborted) setLoadError(safeMessage(error));
     });
     return () => controller.abort();
-  }, [adapter]);
+  }, [adapter, refreshKey]);
 
   useEffect(() => { onCountChange?.(items.length); }, [items.length, onCountChange]);
 
