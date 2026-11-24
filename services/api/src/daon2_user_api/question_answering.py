@@ -312,8 +312,15 @@ class OpenAICompatibleTextGenerationAdapter:
         )
         if reason is not None:
             # 이유 종류와 개수만 남긴다. 질문·답변·근거 글은 남기지 않는다.
+            detail = ""
+            if reason == "anchors_unsupported":
+                # N1-B14: 막힌 값의 종류별 개수와, 그 값이 인용하지 않은 다른 근거에 있는지(인용 누락)만 남긴다. 값은 남기지 않는다.
+                missing = _evidence_anchors(answer) - _evidence_anchors(cited_text)
+                everywhere = _evidence_anchors("\n".join(item.text for item in request.evidence))
+                kinds = {kind: sum(1 for anchor in missing if anchor.startswith(kind + ":")) for kind in ("date", "identifier", "quantity")}
+                detail = " " + " ".join(f"missing_{kind}={count}" for kind, count in kinds.items()) + f" missing_in_uncited={len(missing & everywhere)}"
             logging.getLogger(__name__).warning(
-                "text_grounding_failure reason=%s cited_count=%d evidence_count=%d", reason, len(cited), len(request.evidence))
+                "text_grounding_failure reason=%s cited_count=%d evidence_count=%d%s", reason, len(cited), len(request.evidence), detail)
             raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
         return GroundedTextResult(answer, cited, insufficient, usage,reported_cost_from_usage(response.get("usage")))
 
