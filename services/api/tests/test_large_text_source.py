@@ -316,9 +316,11 @@ class InvalidResponseReasonTests(unittest.TestCase):
         out = self.run_with({"message": {"content": json.dumps({"title": "t", "summary": "s"})}, "finish_reason": "stop"})
         self.assertIn("reason=shape", out)
 
-    def test_too_many_facts_is_logged_as_limits(self):
-        out = self.run_with({"message": {"content": answer([FIRST] * 6)}, "finish_reason": "stop"})
-        self.assertIn("reason=limits", out)
+    def test_no_usable_facts_is_logged_as_limits_facts(self):
+        # N1-B13: 사실이 5개를 넘는 것은 이제 앞의 5개만 쓰고 처리를 계속한다(넘친 부분만 버림).
+        # 쓸 수 있는 사실이 하나도 없을 때만 실패하며, 어느 제한인지 이유에 남긴다.
+        out = self.run_with({"message": {"content": answer(["", " "])}, "finish_reason": "stop"})
+        self.assertIn("reason=limits_facts", out)
 
     def test_non_json_is_logged_as_not_json(self):
         out = self.run_with({"message": {"content": "요약할 수 없습니다"}, "finish_reason": "stop"})
