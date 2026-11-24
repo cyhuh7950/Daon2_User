@@ -267,6 +267,53 @@ function OutlineHarness({ state }) {
       openOutputRequest: view.open ? { outputId: view.open, nonce: 1 } : null }));
 }
 
+// 소스 묶음(NB3-U2): 실제 셸 소스 칸에 묶음을 띄운다. 일부·없음 체크 상태는 소스·묶음 체크칸을 눌러 만든다.
+// 저장 실패·권한 없음·다른 곳에서 바뀜은 소스 줄 "묶음으로 이동"을 눌러 만든다(가짜 어댑터가 503·403·412로 답한다).
+const sgId = (c) => `sg-${c.repeat(32)}`;
+const sgSource = (n, filename, over = {}) => ({ source_id: `source-g${n}`, source_version_id: `version-g${n}`, filename, source_state: "ready", processing_state: "completed", job_state: "completed", ...over });
+const SG_SOURCES = [sgSource(1, "보험약관.pdf"), sgSource(2, "특약 약관.pdf"), sgSource(3, "청구 안내.docx"), sgSource(4, "지급 기준표.xlsx"), sgSource(5, "회의 메모.txt"), sgSource(6, "상담 기록.txt", { source_state: "processing", processing_state: "running", job_state: "running" })];
+const SG_GROUPS = [
+  { group_id: sgId("a"), name: "약관", position: 0, source_ids: ["source-g1", "source-g2", "source-g4"] },
+  { group_id: sgId("b"), name: "청구 서류", position: 1, source_ids: [] },
+];
+const SG_TEN = Array.from({ length: 10 }, (_, i) => sgSource(i + 1, `약관 ${i + 1}장.pdf`));
+const SG_STATES = {
+  "groups-default": { label: "소스 묶음: 기본(체크·접기·이동 눌러 보기)" },
+  "groups-none": { label: "소스 묶음: 묶음 없음(묶음 만들기)", groups: [] },
+  "groups-save-failed": { label: "소스 묶음: 저장 실패 되돌림(이동 누르기)", fail: () => Object.assign(new Error("STUDIO_UNAVAILABLE"), { code: "STUDIO_UNAVAILABLE", status: 503 }) },
+  "groups-conflict": { label: "소스 묶음: 412 다시 조회(이동 누르기)", conflict: true },
+  "groups-forbidden": { label: "소스 묶음: 보기 권한 403(이동 누르기)", fail: () => Object.assign(new Error("FORBIDDEN"), { code: "FORBIDDEN", status: 403 }) },
+  "groups-limit8": { label: "소스 묶음: 묶음 체크 8개 초과 안내(질문하기)", sources: SG_TEN, groups: [{ group_id: sgId("c"), name: "약관 전체", position: 0, source_ids: SG_TEN.map((s) => s.source_id) }] },
+};
+function makeGroupStudio(view) {
+  let groups = JSON.parse(JSON.stringify(view.groups ?? SG_GROUPS));
+  let version = 1;
+  let conflictPending = Boolean(view.conflict);
+  const etag = () => `"source-groups:${version}"`;
+  const result = () => ({ groups: JSON.parse(JSON.stringify(groups)), etag: etag() });
+  const check = (given) => {
+    if (view.fail) throw view.fail();
+    if (conflictPending) { conflictPending = false; groups[0].name = "약관(다른 사용자가 수정)"; groups[1].source_ids = ["source-g5"]; version += 1; }
+    if (given !== etag()) throw Object.assign(new Error("SOURCE_GROUP_ETAG_MISMATCH"), { code: "SOURCE_GROUP_ETAG_MISMATCH", status: 412 });
+  };
+  return {
+    listTypes: async () => [], listOutputs: async () => ({ items: [], nextCursor: null }), exportFormats: () => [],
+    listSourceGroups: async () => result(),
+    createSourceGroup: async (name) => { groups.push({ group_id: sgId(String.fromCharCode(100 + groups.length)), name, position: groups.length, source_ids: [] }); version += 1; return { groupId: groups.at(-1).group_id, etag: etag(), replayed: false }; },
+    updateSourceGroup: async (gid, { name, etag: given }) => { check(given); groups = groups.map((g) => (g.group_id === gid ? { ...g, name } : g)); version += 1; return result(); },
+    deleteSourceGroup: async (gid, { etag: given }) => { check(given); groups = groups.filter((g) => g.group_id !== gid).map((g, i) => ({ ...g, position: i })); version += 1; return result(); },
+    setSourceGroupMembers: async (gid, ids, { etag: given }) => { check(given); groups = groups.map((g) => ({ ...g, source_ids: g.group_id === gid ? [...ids] : g.source_ids.filter((id) => !ids.includes(id)) })); version += 1; return result(); },
+  };
+}
+function SourceGroupsHarness({ state }) {
+  const view = SG_STATES[state];
+  const studio = useMemo(() => makeGroupStudio(view), [view]);
+  const adapter = useMemo(() => ({ listSources: async () => view.sources ?? SG_SOURCES, uploadPdf() {}, getProcessingStatus() {}, citationUrl: () => null, createReport() {},
+    askQuestion: async () => ({ run_id: "run-h", run_result_id: "result-h", answer: "약관 전체를 요약했습니다.", insufficient: false, citations: [] }),
+    listStudioOutputs: async () => [], listConnectors: async () => [], listKnowledgePackages: async () => [], notebookContext: { notebook_id: `notebook-${state}`, sources: [] }, studioV2: studio }), [studio, view, state]);
+  return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -279,7 +326,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SG_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -324,6 +371,7 @@ function App() {
     QT_STATES[view] ? h(QuestionToolsHarness, { key: view, state: view }) : null,
     OV_STATES[view] ? h(OverviewHarness, { key: view, state: view }) : null,
     OL_STATES[view] ? h(OutlineHarness, { key: view, state: view }) : null,
+    SG_STATES[view] ? h(SourceGroupsHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 
