@@ -69,6 +69,15 @@ function fakeDiscovery({ search, add } = {}) {
   };
   return { studio, calls, searches: () => calls.filter((c) => c[0] === "search"), adds: () => calls.filter((c) => c[0] === "add") };
 }
+// 심층 조사(NB4-U2)까지 되는 가짜 어댑터. createResearch는 스튜디오 보고서 산출물 접수 응답을 돌려준다.
+function fakeResearch({ create, ...rest } = {}) {
+  const fake = fakeDiscovery(rest);
+  fake.studio.createResearch = async (...args) => {
+    fake.calls.push(["research", ...args]);
+    return create ? create(...args) : { output_id: `sv2-${"r".repeat(32)}`, job_id: "svj-r", status: "queued" };
+  };
+  return { ...fake, researches: () => fake.calls.filter((c) => c[0] === "research") };
+}
 
 async function mountPanel(options) {
   const { SourceDiscoveryPanel } = await bundle("source-discovery", "packages/ui/src/source-discovery.jsx");
@@ -79,15 +88,16 @@ async function mountPanel(options) {
   dom.document.body.appendChild(container);
   const reactRoot = createRoot(container);
   const added = [];
-  let current = { notebookId: "notebook-1", onAdded: (event) => added.push(event), ...options };
+  const started = [];
+  let current = { notebookId: "notebook-1", onAdded: (event) => added.push(event), onResearchStarted: (event) => started.push(event), ...options };
   const render = async (next = {}) => { current = { ...current, ...next }; await act(async () => { reactRoot.render(createElement(SourceDiscoveryPanel, current)); await flush(); }); };
   await render();
   const find = (predicate) => findElements(container, predicate);
   const byLabel = (tag, label) => find((node) => node.tagName === tag && node.getAttribute("aria-label") === label)[0];
   const button = (text) => find((node) => node.tagName === "BUTTON" && node.textContent.trim() === text)[0];
   const click = async (node) => { assert.ok(node, "누를 대상이 있어야 한다"); await act(async () => { node.dispatchEvent(new MinimalEvent("click")); await flush(); }); };
-  const type = async (text) => {
-    const input = byLabel("INPUT", "찾을 자료");
+  const type = async (text, label = "찾을 자료") => {
+    const input = byLabel("INPUT", label);
     input.value = text;
     await act(async () => { props(input).onChange({ target: input, currentTarget: input }); });
   };
@@ -99,7 +109,7 @@ async function mountPanel(options) {
   const row = (candidateId) => find((node) => node.tagName === "LI" && node.getAttribute("data-candidate-id") === candidateId)[0];
   const check = (title) => byLabel("INPUT", `${title} 선택`);
   const status = () => find((node) => node.getAttribute("role") === "status" && node.getAttribute("data-discovery-status") !== null)[0]?.textContent ?? "";
-  return { container, act, render, find, byLabel, button, click, type, submit, search, row, check, status, added,
+  return { container, act, render, find, byLabel, button, click, type, submit, search, row, check, status, added, started,
     text: () => container.textContent,
     cleanup: async () => { await act(async () => reactRoot.unmount()); dom.restore(); } };
 }
@@ -113,8 +123,8 @@ test("빠른 찾기 기능이 없는 어댑터에서는 아무것도 그리지 �
   } finally { await view.cleanup(); }
 });
 
-test("처음 화면: 검색창 안내 문구, 범위 칩 둘 다 켬, 방식은 빠른 찾기(심층 조사는 준비 중으로 누를 수 없음)", async () => {
-  const fake = fakeDiscovery();
+test("처음 화면: 검색창 안내 문구, 범위 칩 둘 다 켬, 방식은 빠른 찾기(심층 조사도 고를 수 있음)", async () => {
+  const fake = fakeResearch();
   const view = await mountPanel({ studio: fake.studio });
   try {
     const input = view.byLabel("INPUT", "찾을 자료");
@@ -124,7 +134,9 @@ test("처음 화면: 검색창 안내 문구, 범위 칩 둘 다 켬, 방식은 
     assert.equal(scopeChip(view, "승인 지식").getAttribute("aria-pressed"), "true");
     assert.equal(scopeChip(view, "문서").getAttribute("aria-pressed"), "true");
     assert.equal(view.button("빠른 찾기").getAttribute("aria-pressed"), "true");
-    assert.equal(view.button("심층 조사").disabled, true, "심층 조사는 NB4-U2에서 연결");
+    // NB4-U2: 심층 조사 방식이 연결되어 누를 수 있다(처음 방식은 빠른 찾기).
+    assert.equal(view.button("심층 조사").disabled, false);
+    assert.equal(view.button("심층 조사").getAttribute("aria-pressed"), "false");
     assert.equal(view.button("찾기").disabled, true, "검색어가 없으면 찾기 버튼을 누를 수 없다");
     assert.equal(view.byLabel("UL", "찾은 자료 목록"), undefined, "검색 전에는 결과 목록이 없다");
     assert.equal(view.button("선택한 자료 추가"), undefined);
@@ -408,6 +420,180 @@ test("늦게 온 이전 검색 응답은 버린다", async () => {
   } finally { await view.cleanup(); }
 });
 
+// ---- NB4-U2 심층 조사: 방식 전환 → 질문 입력 → "조사 시작" → 스튜디오 보고서 카드 ----
+test("심층 조사: 어댑터에 조사 기능이 없으면 방식 단추를 누를 수 없다", async () => {
+  const fake = fakeDiscovery();
+  const view = await mountPanel({ studio: fake.studio });
+  try {
+    assert.equal(view.button("심층 조사").disabled, true);
+  } finally { await view.cleanup(); }
+});
+
+test("심층 조사: 방식을 바꾸면 질문 입력·안내·'조사 시작'이 보이고, 고른 범위로 한 번 시작해 새 산출물 id를 셸에 알린다", async () => {
+  const fake = fakeResearch();
+  const view = await mountPanel({ studio: fake.studio });
+  try {
+    await view.click(view.button("심층 조사"));
+    assert.equal(view.button("심층 조사").getAttribute("aria-pressed"), "true");
+    assert.equal(view.button("빠른 찾기").getAttribute("aria-pressed"), "false");
+    const input = view.byLabel("INPUT", "조사할 질문");
+    assert.ok(input, "질문 입력칸");
+    assert.equal(input.getAttribute("placeholder"), "조사할 질문을 적어 주세요");
+    assert.match(view.text(), /인용이 달린 조사 보고서를 스튜디오에 만듭니다/u);
+    assert.equal(view.button("조사 시작").disabled, true, "질문이 없으면 시작할 수 없다");
+    await view.click(scopeChip(view, "승인 지식"));
+    await view.type("보험금 청구 서류와 심사 기준", "조사할 질문");
+    await view.submit();
+    assert.equal(fake.researches().length, 1);
+    const [, query, scopes, options] = fake.researches()[0];
+    assert.equal(query, "보험금 청구 서류와 심사 기준");
+    assert.deepEqual(scopes, ["documents"], "끈 범위는 보내지 않는다");
+    assert.equal(options, undefined, "소스 버전·구성 확인 설정은 보내지 않는다");
+    assert.equal(fake.searches().length, 0, "심층 조사는 빠른 찾기 검색을 부르지 않는다");
+    assert.deepEqual(view.started, [{ outputId: `sv2-${"r".repeat(32)}` }]);
+    assert.match(view.status(), /조사를 시작했습니다/u);
+    assert.equal(view.byLabel("UL", "찾은 자료 목록"), undefined, "후보 목록은 없다");
+  } finally { await view.cleanup(); }
+});
+
+test("심층 조사: 시작하는 동안 단추가 '시작하는 중'으로 잠기고 두 번 시작하지 않는다", async () => {
+  const pending = deferred();
+  const fake = fakeResearch({ create: () => pending.promise });
+  const view = await mountPanel({ studio: fake.studio });
+  try {
+    await view.click(view.button("심층 조사"));
+    await view.type("청구 절차", "조사할 질문");
+    await view.submit();
+    assert.equal(view.button("시작하는 중").disabled, true);
+    assert.equal(view.button("빠른 찾기").disabled, true, "시작 중에는 방식을 바꾸지 않는다");
+    await view.submit();
+    assert.equal(fake.researches().length, 1);
+    await view.act(async () => { pending.resolve({ output_id: `sv2-${"s".repeat(32)}`, job_id: "svj-s", status: "queued" }); await flush(); });
+    assert.deepEqual(view.started, [{ outputId: `sv2-${"s".repeat(32)}` }]);
+  } finally { await view.cleanup(); }
+});
+
+test("심층 조사: 시작 실패는 안전한 문구, 403이면 보기 권한 안내와 함께 시작 단추를 잠근다", async () => {
+  for (const [code, status, pattern] of [["STUDIO_TYPE_UNAVAILABLE", 409, /심층 조사를 지금 쓸 수 없습니다/u], ["STUDIO_INPUT_INVALID", 400, /질문을 확인해 주세요/u], ["SOMETHING_ELSE", 500, /조사를 시작하지 못했습니다/u]]) {
+    const fake = fakeResearch({ create: async () => { throw failure(code, status); } });
+    const view = await mountPanel({ studio: fake.studio });
+    try {
+      await view.click(view.button("심층 조사"));
+      await view.type("청구 절차", "조사할 질문");
+      await view.submit();
+      const alert = view.find((node) => node.getAttribute("role") === "alert")[0];
+      assert.match(alert.textContent, pattern, code);
+      assert.doesNotMatch(view.text(), new RegExp(code, "u"), "코드 원문은 보이지 않는다");
+      assert.deepEqual(view.started, []);
+    } finally { await view.cleanup(); }
+  }
+  const fake = fakeResearch({ create: async () => { throw failure("FORBIDDEN", 403); } });
+  const view = await mountPanel({ studio: fake.studio });
+  try {
+    await view.click(view.button("심층 조사"));
+    await view.type("청구 절차", "조사할 질문");
+    await view.submit();
+    assert.match(view.text(), /보기 권한으로는 심층 조사를 시작할 수 없습니다/u);
+    assert.equal(view.button("조사 시작").disabled, true);
+  } finally { await view.cleanup(); }
+});
+
+test("심층 조사: 보기 권한(canEdit 거짓)이면 시작 단추를 잠그고 안내한다. 빠른 찾기로 돌아가면 검색어는 그대로다", async () => {
+  const fake = fakeResearch();
+  const view = await mountPanel({ studio: fake.studio, canEdit: false });
+  try {
+    await view.click(view.button("심층 조사"));
+    await view.type("청구 절차", "조사할 질문");
+    assert.equal(view.button("조사 시작").disabled, true);
+    assert.match(view.text(), /보기 권한으로는 심층 조사를 시작할 수 없습니다/u);
+    await view.click(view.button("빠른 찾기"));
+    assert.equal(view.byLabel("INPUT", "찾을 자료").value, "청구 절차");
+    assert.equal(view.button("찾기").disabled, false);
+  } finally { await view.cleanup(); }
+});
+
+// ---- NB4-U2 보고서 아래 "사용한 자료": 골라서 빠른 찾기와 같은 방식으로 추가 ----
+const RESEARCH = Object.freeze({ query: "보험금 청구", subQuestions: ["청구 서류", "심사 기준"], candidates: [doc(1), pkg(1), doc(2)],
+  unavailable: [{ scope: "knowledge", reason: "CONNECTOR_NOT_READY" }], toolCalls: 4 });
+async function mountSources(options) {
+  const { ResearchSourcesPanel } = await bundle("source-discovery", "packages/ui/src/source-discovery.jsx");
+  const dom = installMinimalDom();
+  const { createElement, act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const container = dom.document.createElement("div");
+  dom.document.body.appendChild(container);
+  const reactRoot = createRoot(container);
+  const added = [];
+  await act(async () => { reactRoot.render(createElement(ResearchSourcesPanel, { research: RESEARCH, citedRefs: ["S1", "S3"], onAdded: (event) => added.push(event), ...options })); await flush(); });
+  const find = (predicate) => findElements(container, predicate);
+  const byLabel = (tag, label) => find((node) => node.tagName === tag && node.getAttribute("aria-label") === label)[0];
+  const button = (text) => find((node) => node.tagName === "BUTTON" && node.textContent.trim() === text)[0];
+  const click = async (node) => { assert.ok(node); await act(async () => { node.dispatchEvent(new MinimalEvent("click")); await flush(); }); };
+  const row = (candidateId) => find((node) => node.tagName === "LI" && node.getAttribute("data-candidate-id") === candidateId)[0];
+  return { container, find, byLabel, button, click, row, added, text: () => container.textContent,
+    cleanup: async () => { await act(async () => reactRoot.unmount()); dom.restore(); } };
+}
+
+test("사용한 자료: 근거 라벨(S1…)·출처·인용 여부·사용 못 한 범위가 보이고, 고른 것만 하나씩 추가한 뒤 셸에 알린다", async () => {
+  const fake = fakeDiscovery();
+  const view = await mountSources({ studio: fake.studio });
+  try {
+    const section = view.find((node) => node.tagName === "SECTION" && node.getAttribute("aria-label") === "사용한 자료")[0];
+    assert.ok(section);
+    assert.match(section.textContent, /사용한 자료 3개/u);
+    assert.match(view.row("cand-d1").textContent, /S1/u);
+    assert.match(view.row("cand-k1").textContent, /S2/u);
+    assert.match(view.row("cand-d2").textContent, /S3/u);
+    assert.match(view.row("cand-d1").textContent, /보고서에서 인용/u);
+    assert.doesNotMatch(view.row("cand-k1").textContent, /보고서에서 인용/u);
+    assert.match(view.text(), /승인 지식 범위는 조사에 쓰지 못했습니다: 지식 연결이 아직 준비되지 않았습니다/u);
+    assert.equal(view.button("선택한 자료 추가").disabled, true);
+    await view.click(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"));
+    await view.click(view.byLabel("INPUT", "보험 업무 패키지 1 선택"));
+    assert.match(view.text(), /2개 선택/u);
+    await view.click(view.button("선택한 자료 추가"));
+    assert.deepEqual(fake.adds().map((c) => c[1]), [docRef(1), pkgRef(1)]);
+    assert.deepEqual(view.added, [{ sourceIds: ["source-new-doc-1"], scopeAdded: true }]);
+    assert.match(view.row("cand-d1").textContent, /추가됨/u);
+    assert.equal(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"), undefined, "추가된 자료는 다시 고를 수 없다");
+  } finally { await view.cleanup(); }
+});
+
+test("사용한 자료: 추가 실패는 줄에 문구, 403이면 멈추고 체크칸을 숨긴다. 보기 권한이면 처음부터 숨긴다", async () => {
+  const failing = fakeDiscovery({ add: async (ref) => { if (ref.document_id === "doc-1") throw failure("DISCOVERY_DOCUMENT_TOO_LARGE", 413); return { added: "source", sourceId: "s-2" }; } });
+  let view = await mountSources({ studio: failing.studio });
+  try {
+    await view.click(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"));
+    await view.click(view.byLabel("INPUT", "약관 해설서 2.pdf 선택"));
+    await view.click(view.button("선택한 자료 추가"));
+    assert.match(view.row("cand-d1").textContent, /문서가 너무 커서/u);
+    assert.match(view.row("cand-d2").textContent, /추가됨/u);
+    assert.deepEqual(view.added, [{ sourceIds: ["s-2"], scopeAdded: false }]);
+  } finally { await view.cleanup(); }
+  const forbidden = fakeDiscovery({ add: async () => { throw failure("FORBIDDEN", 403); } });
+  view = await mountSources({ studio: forbidden.studio });
+  try {
+    await view.click(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"));
+    await view.click(view.button("선택한 자료 추가"));
+    assert.equal(view.byLabel("INPUT", "약관 해설서 2.pdf 선택"), undefined);
+    assert.equal(view.button("선택한 자료 추가"), undefined);
+    assert.match(view.text(), /보기 권한으로는 자료를 추가할 수 없습니다/u);
+  } finally { await view.cleanup(); }
+  view = await mountSources({ studio: fakeDiscovery().studio, canEdit: false });
+  try {
+    assert.equal(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"), undefined);
+    assert.equal(view.button("선택한 자료 추가"), undefined);
+    assert.ok(view.row("cand-d1"), "목록은 보인다");
+  } finally { await view.cleanup(); }
+});
+
+test("노트북 어댑터는 화면용 studioResearchOf를 researchOf로 넘긴다(보고서 보기의 사용한 자료)", async () => {
+  const { createStudioV2Adapter } = await import(pathToFileURL(path.join(root, "apps/web/lib/studio-v2-adapter.js")).href);
+  const { studioResearchOf } = await import(pathToFileURL(path.join(root, "apps/web/lib/studio-v2-api.js")).href);
+  const adapter = createStudioV2Adapter("ws-1", "nb-1", { fetchImpl: async () => { throw new Error("호출하지 않는다"); } });
+  assert.equal(adapter.researchOf, studioResearchOf);
+});
+
 test("문구는 메시지 파일에서만 온다: 컴포넌트 코드(주석 제외)에 한글 문자열이 없다", async () => {
   const sourceCode = await readFile(path.join(root, "packages/ui/src/source-discovery.jsx"), "utf8");
   const code = sourceCode.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/(^|[^:])\/\/.*$/gmu, "$1");
@@ -514,6 +700,80 @@ test("셸: 승인 지식 범위 조회가 없는(이전 방식) 어댑터에서�
     await view.click(view.byLabel("INPUT", "보험 업무 패키지 1 선택"));
     await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent.trim() === "선택한 자료 추가")[0]);
     assert.ok(calls.filter((c) => c === "listSources").length > before);
+  } finally { await view.cleanup(); }
+});
+
+// ---- NB4-U2 셸 연결: 조사 시작 → 스튜디오 새 카드로 이동·스크롤, 카드 → 보고서 보기 → 사용한 자료 추가 ----
+const RESEARCH_OID = `sv2-${"r".repeat(32)}`;
+const researchItem = (over = {}) => ({ output_id: RESEARCH_OID, type_id: "report", format_id: "summary", title: "심층 조사 보고서", status: "completed", error_code: null,
+  source_count: 0, current_revision: 1, created_at: "2026-11-24T00:00:00Z", updated_at: "2026-11-24T00:00:00Z", stale: false, progress: null, ...over });
+const researchContent = () => ({ schema: "studio.report.v1", warnings: [{ code: "UNSUPPORTED_CLAIM", path: "sections[0].blocks[1]" }],
+  body: { title: "보험금 청구 조사", summary: "", sections: [{ heading: "청구 서류", blocks: [
+    { type: "paragraph", text: "청구서와 진단서를 함께 제출합니다.", refs: ["S1"] },
+    { type: "paragraph", text: "근거 부족: 접수 후 바로 지급됩니다.", refs: [] }] }] },
+  research: { query: "보험금 청구", sub_questions: ["청구 서류"], candidates: [doc(1), pkg(1)], unavailable: [], tool_calls: 3 } });
+async function researchShellAdapter({ calls, initial = [] }) {
+  const { studioResearchOf } = await import(pathToFileURL(path.join(root, "apps/web/lib/studio-v2-api.js")).href);
+  let outputs = [...initial];
+  let sources = [apiSource("source-a")];
+  const fake = fakeResearch({
+    create: async () => { outputs = [researchItem({ status: "queued", current_revision: 0, progress: { pct: 5, note: "계획" } }), ...outputs]; return { output_id: RESEARCH_OID, job_id: "svj-r", status: "queued" }; },
+    add: async (ref) => { sources = [...sources, apiSource("source-new-1", "processing")]; return ref.kind === "document" ? { added: "source", sourceId: "source-new-1" } : { added: "scope", sourceId: null }; },
+  });
+  const studioV2 = { listTypes: async () => [], listOutputs: async () => { calls.push("listOutputs"); return { items: outputs.slice(), nextCursor: null }; },
+    getOutput: async (id) => ({ ...outputs.find((o) => o.output_id === id), settings: {}, assets: [], evidence: [{ ref_id: "S1", source_version_id: null, locator_kind: "research", locator_value: "cand-d1", origin: "connector:daon2_rag" }],
+      revision: { content: researchContent() } }),
+    exportFormats: () => [], researchOf: studioResearchOf, cancelOutput: async (id) => { calls.push(["cancel", id]); return { output_id: id, cancel_requested: true }; }, ...fake.studio };
+  const adapter = { ...baseAdapter, notebookContext: { notebook_id: "notebook-r", sources: [] },
+    listSources: async () => { calls.push("listSources"); return sources; }, listConnectors: async () => [], listStudioOutputs: async () => [],
+    listKnowledgePackages: async () => [], askQuestion: async () => ({ run_id: "r", run_result_id: "rr", answer: "응답", insufficient: false, citations: [] }), studioV2 };
+  return { adapter, fake };
+}
+
+test("셸: 심층 조사를 시작하면 스튜디오 목록을 다시 읽어 새 보고서 카드가 진행 문구와 함께 보이고 그 카드로 스크롤된다", async () => {
+  const calls = [];
+  const { adapter, fake } = await researchShellAdapter({ calls });
+  const scrolled = [];
+  const view = await mountShell(adapter);
+  const proto = Object.getPrototypeOf(view.container);
+  proto.scrollIntoView = function scrollIntoView() { scrolled.push(this.getAttribute("data-output-id")); };
+  try {
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent.trim() === "심층 조사")[0]);
+    const input = view.byLabel("INPUT", "조사할 질문");
+    input.value = "보험금 청구 서류";
+    const { act } = await import("react");
+    await act(async () => { props(input).onChange({ target: input, currentTarget: input }); });
+    const listBefore = calls.filter((c) => c === "listOutputs").length;
+    const form = view.find((node) => node.tagName === "FORM" && node.getAttribute("aria-label") === "자료 찾기 검색")[0];
+    await act(async () => { void props(form).onSubmit({ preventDefault() {} }); await flush(); });
+    await act(async () => { await flush(); });
+    await act(async () => { await flush(); });
+    assert.equal(fake.researches().length, 1);
+    assert.ok(calls.filter((c) => c === "listOutputs").length > listBefore, "스튜디오 목록을 다시 읽는다");
+    const studioPane = view.find((node) => node.getAttribute("id") === "product-pane-studio")[0];
+    const card = findElements(studioPane, (node) => node.tagName === "LI" && node.getAttribute("data-output-id") === RESEARCH_OID)[0];
+    assert.ok(card, "스튜디오에 새 보고서 카드가 있다");
+    assert.match(card.textContent, /조사 계획 세우는 중/u);
+    assert.equal(card.getAttribute("data-focused"), "true", "새 카드가 강조된다");
+    assert.ok(scrolled.includes(RESEARCH_OID), "새 카드로 스크롤한다");
+  } finally { delete proto.scrollIntoView; await view.cleanup(); }
+});
+
+test("셸: 조사 보고서 카드를 열면 보고서 아래 사용한 자료가 보이고, 고른 자료를 추가하면 소스 목록을 다시 읽는다", async () => {
+  const calls = [];
+  const { adapter, fake } = await researchShellAdapter({ calls, initial: [researchItem()] });
+  const view = await mountShell(adapter);
+  try {
+    await view.click(view.byLabel("BUTTON", "열기: 심층 조사 보고서"));
+    const sources = view.find((node) => node.tagName === "SECTION" && node.getAttribute("aria-label") === "사용한 자료")[0];
+    assert.ok(sources, "보고서 보기 아래 사용한 자료");
+    assert.match(view.container.textContent, /청구서와 진단서를 함께 제출합니다/u);
+    const before = calls.filter((c) => c === "listSources").length;
+    await view.click(view.byLabel("INPUT", "약관 해설서 1.pdf 선택"));
+    await view.click(findElements(sources, (node) => node.tagName === "BUTTON" && node.textContent.trim() === "선택한 자료 추가")[0]);
+    assert.deepEqual(fake.adds().map((c) => c[1]), [docRef(1)]);
+    assert.ok(calls.filter((c) => c === "listSources").length > before, "소스 목록을 다시 읽는다");
+    assert.ok(view.find((node) => node.tagName === "LI" && node.getAttribute("data-source-id") === "source-new-1")[0], "새 소스 줄이 처리 중으로 보인다");
   } finally { await view.cleanup(); }
 });
 
@@ -660,6 +920,98 @@ const measure = () => {
           // 결과가 아무리 많아도 늘어나는 높이는 결과 목록 창 하나 크기(+안내·버튼 줄)를 넘지 않는다.
           assert.ok(r.after.pageHeight - r.before.pageHeight <= r.after.listHeight + 120, `${label}: 결과 수만큼 페이지가 늘어나지 않는다`);
         }
+      }
+    });
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
+// ---- NB4-U2 실제 브라우저 배치: 긴 조사 보고서와 사용한 자료 40개도 스튜디오 창 안에서만 스크롤한다 ----
+test("실제 브라우저: 긴 조사 보고서·사용한 자료 40개는 스튜디오 보기 창 안에서 스크롤되고, 페이지·스튜디오 칸 높이는 그대로다(1920·1440·1280)", { skip: !browser, timeout: 180_000 }, async () => {
+  const work = await mkdtemp(path.join(root, ".research-layout-"));
+  try {
+    const entry = path.join(work, "entry.jsx");
+    const shellPath = path.join(root, "packages/ui/src/product-workspace-shell.jsx").replaceAll("\\", "/");
+    const apiPath = path.join(root, "apps/web/lib/studio-v2-api.js").replaceAll("\\", "/");
+    const tokensPath = path.join(root, "packages/design-tokens/tokens.css").replaceAll("\\", "/");
+    const globalsPath = path.join(root, "apps/web/app/globals.css").replaceAll("\\", "/");
+    writeFileSync(entry, `
+import { createElement as h } from "react";
+import { createRoot } from "react-dom/client";
+import { ProductWorkspaceShell } from "${shellPath}";
+import { studioResearchOf } from "${apiPath}";
+import "${tokensPath}";
+import "${globalsPath}";
+const OID = "sv2-" + "r".repeat(32);
+const candidates = Array.from({ length: 40 }, (_, i) => ({ candidate_id: "cand-" + i, kind: i % 2 ? "document" : "knowledge_package",
+  title: "사용한 자료 " + (i + 1) + " — 보험 약관과 청구 절차를 설명하는 긴 제목", origin_label: i % 2 ? "Daon2-RAG 문서" : "Daon2 승인 지식",
+  reason: "하위 질문과 제목·본문이 맞습니다", preview: "미리보기 ".repeat(30), action: i % 2 ? "add_source" : "add_scope",
+  ref: i % 2 ? { kind: "document", project_id: "p", work_package_id: "w", document_id: "d" + i, document_version: "v1" } : { kind: "knowledge_package", project_id: "p", work_package_id: "w" + i } }));
+const sections = Array.from({ length: 6 }, (_, s) => ({ heading: "조사 항목 " + (s + 1), blocks: Array.from({ length: 6 }, (_, b) => (b === 5
+  ? { type: "paragraph", text: "근거 부족: 확인되지 않은 내용이 들어 있는 문장입니다.", refs: [] }
+  : { type: "paragraph", text: "보험금 청구 절차와 서류에 관한 조사 문장 " + (s + 1) + "-" + (b + 1) + "입니다. 접수 뒤 심사를 거쳐 지급합니다.", refs: ["S" + (b + 1)] })) }));
+const content = { schema: "studio.report.v1", warnings: [], body: { title: "긴 조사 보고서", summary: "", sections },
+  research: { query: "보험금 청구", sub_questions: ["청구 서류", "심사 기준"], candidates, unavailable: [], tool_calls: 8 } };
+const item = { output_id: OID, type_id: "report", format_id: "summary", title: "긴 조사 보고서", status: "completed", error_code: null, source_count: 0, current_revision: 1,
+  created_at: "2026-11-24T00:00:00Z", updated_at: "2026-11-24T00:00:00Z", stale: false, progress: null };
+const sources = Array.from({ length: 3 }, (_, i) => ({ source_id: "s" + i, source_version_id: "v" + i, filename: "소스 " + i + ".txt", source_state: "ready", processing_state: "completed", job_state: "completed" }));
+const studioV2 = { listTypes: async () => [], listOutputs: async () => ({ items: [item], nextCursor: null }), exportFormats: () => [],
+  getOutput: async () => ({ ...item, settings: {}, assets: [], evidence: [], revision: { content } }), researchOf: studioResearchOf,
+  searchSourceDiscovery: async () => ({ candidates: [], unavailable: [] }), addSourceDiscovery: async () => ({ added: "scope", sourceId: null }), createResearch: async () => ({ output_id: OID, job_id: "j", status: "queued" }) };
+const adapter = { listSources: async () => sources, uploadPdf() {}, getProcessingStatus() {}, askQuestion: async () => ({}), citationUrl: () => null, createReport() {},
+  listStudioOutputs: async () => [], listConnectors: async () => [], listKnowledgePackages: async () => [], notebookContext: { notebook_id: "notebook-layout", sources: [] }, studioV2 };
+createRoot(document.getElementById("root")).render(h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "배치 시험", adapter }));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const measure = () => {
+  const pane = document.getElementById("product-pane-studio");
+  const body = document.querySelector(".studio-detail__body");
+  const used = document.querySelector('[aria-label="사용한 자료"]');
+  const add = used ? [...used.querySelectorAll("button")].find((b) => b.textContent.trim() === "선택한 자료 추가") : null;
+  const r = (el) => (el ? el.getBoundingClientRect() : null);
+  return { pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth, viewportHeight: innerHeight, viewportWidth: innerWidth,
+    paneHeight: pane ? r(pane).height : -1, paneTop: pane ? r(pane).top : -1, paneBottom: pane ? r(pane).bottom : -1,
+    bodyHeight: body ? body.clientHeight : -1, bodyContentHeight: body ? body.scrollHeight : -1, bodyScrollTop: body ? body.scrollTop : -1,
+    usedCount: used ? used.querySelectorAll("li[data-candidate-id]").length : -1,
+    addTop: add ? r(add).top : -1, addBottom: add ? r(add).bottom : -1 };
+};
+(async () => {
+  for (let i = 0; i < 100 && !document.querySelector('[aria-label="열기: 긴 조사 보고서"]'); i += 1) await wait(50);
+  await wait(200);
+  const before = measure();
+  document.querySelector('[aria-label="열기: 긴 조사 보고서"]').click();
+  for (let i = 0; i < 100 && !document.querySelector('[aria-label="사용한 자료"]'); i += 1) await wait(50);
+  await wait(200);
+  const opened = measure();
+  const firstUsed = document.querySelector('[aria-label="사용한 자료"] li[data-candidate-id]');
+  if (firstUsed) firstUsed.scrollIntoView({ block: "start" });
+  await wait(100);
+  const midList = measure();
+  const body = document.querySelector(".studio-detail__body");
+  if (body) body.scrollTop = body.scrollHeight;
+  await wait(100);
+  document.getElementById("result").textContent = JSON.stringify({ before, opened, midList, after: measure() });
+})();
+`);
+    const { build } = await import("vite");
+    const out = path.join(work, "out");
+    await build({ configFile: false, logLevel: "silent", root, define: { "process.env.NODE_ENV": JSON.stringify("production") },
+      build: { outDir: out, emptyOutDir: true, cssCodeSplit: false, lib: { entry, formats: ["iife"], name: "ResearchLayout", fileName: () => "app.js", cssFileName: "app" } } });
+    const cssFile = (await readdir(out)).find((item) => item.endsWith(".css"));
+    assert.ok(cssFile, "묶은 CSS가 있어야 한다");
+    writeFileSync(path.join(out, "index.html"), `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="./${cssFile}"><style>html,body{margin:0}</style></head><body><div id="root"></div><output id="result" hidden></output><script src="./app.js"></script></body></html>`);
+    await withBrowserPage(pathToFileURL(path.join(out, "index.html")).href, [[1920, 1080], [1440, 900], [1280, 720]], (results) => {
+      for (const r of results) {
+        const label = `${r.width}×${r.height} ${JSON.stringify(r)}`;
+        assert.equal(r.after.usedCount, 40, `${label}: 사용한 자료 40개가 모두 그려진다`);
+        assert.ok(r.after.bodyContentHeight > r.after.bodyHeight, `${label}: 긴 보고서는 보기 창 안에 넘친다`);
+        assert.ok(r.after.bodyScrollTop > 0, `${label}: 보기 창 자체가 스크롤된다`);
+        assert.ok(r.after.pageHeight <= r.after.viewportHeight, `${label}: 페이지 전체 스크롤이 없다`);
+        assert.equal(r.after.pageHeight, r.before.pageHeight, `${label}: 보고서를 열어도 페이지 높이가 그대로다`);
+        assert.ok(r.after.pageWidth <= r.after.viewportWidth, `${label}: 가로 스크롤이 생기지 않는다`);
+        assert.equal(Math.round(r.after.paneHeight), Math.round(r.before.paneHeight), `${label}: 스튜디오 칸 높이가 그대로다`);
+        assert.ok(r.after.addTop >= r.after.paneTop && r.after.addBottom <= r.after.paneBottom, `${label}: 맨 아래까지 내리면 '선택한 자료 추가'가 스튜디오 칸 안에 보인다`);
+        assert.ok(r.midList.addTop >= r.midList.paneTop && r.midList.addBottom <= r.midList.paneBottom, `${label}: 사용한 자료 목록 중간을 볼 때도 '선택한 자료 추가'가 칸 아래에 붙어 보인다`);
+        assert.equal(Math.round(r.opened.paneHeight), Math.round(r.before.paneHeight), `${label}: 열자마자 스튜디오 칸 높이가 그대로다`);
       }
     });
   } finally { await rm(work, { recursive: true, force: true }); }

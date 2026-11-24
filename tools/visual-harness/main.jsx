@@ -10,6 +10,7 @@ import { TtsEnginesPane } from "../../packages/ui/src/tts-engines-pane.jsx";
 import { OrganizationJoinForm } from "../../apps/web/components/organization-join-form.jsx";
 import OrganizationAdminConsole from "../../apps/web/components/organization-admin-console.jsx";
 import { AuthPane } from "../../apps/web/lib/auth-pane.jsx";
+import { studioResearchOf } from "../../apps/web/lib/studio-v2-api.js";
 import { AnswerProcess } from "../../packages/ui/src/answer-process.jsx";
 import { ProductWorkspaceShell } from "../../packages/ui/src/product-workspace-shell.jsx";
 import { QuestionToolsMenu } from "../../packages/ui/src/question-tools-menu.jsx";
@@ -363,6 +364,94 @@ function DiscoveryHarness({ state }) {
   return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
 }
 
+// 심층 조사(NB4-U2): 실제 셸에 띄운다. 소스 칸 자료 찾기에서 "심층 조사"로 바꿔 질문을 넣고 "조사 시작"을 누르면 스튜디오에 새 보고서 카드가 생겨
+// 계획 → 찾기 1/3 → 2/3 → 3/3 → 작성 → 완료로 진행한다(가짜 시계). 완료 카드를 열면 보고서와 "사용한 자료"가 보이고, 골라서 소스로 추가할 수 있다.
+const DR_OID = (c) => `sv2-${c.repeat(32)}`;
+const drItem = (c, title, over = {}) => ({ output_id: DR_OID(c), type_id: "report", format_id: "briefing", title, status: "completed", error_code: null, source_count: 0, current_revision: 1,
+  created_at: "2026-11-24T00:00:00Z", updated_at: "2026-11-24T00:00:00Z", stale: false, progress: null, ...over });
+const drCandidates = (count) => Array.from({ length: count }, (_, i) => sdCandidate(i, i % 3 === 1 ? "knowledge_package" : "document"))
+  .map((c, i) => ({ ...c, candidate_id: `${c.candidate_id}-${i}` }));
+const drSections = (long) => {
+  const base = [
+    { heading: "청구에 필요한 서류", blocks: [{ type: "paragraph", text: "보험금을 청구하려면 청구서, 신분증 사본, 진단서를 준비합니다.", refs: ["S1"] },
+      { type: "paragraph", text: "청구 접수는 고객센터나 앱으로 할 수 있습니다.", refs: ["S1", "S3"] },
+      { type: "paragraph", text: "근거 부족: 서류가 갖춰지면 당일 지급됩니다.", refs: [] }] },
+    { heading: "심사와 지급 기준", blocks: [{ type: "paragraph", text: "접수 후 3영업일 안에 심사 결과를 알려 드립니다.", refs: ["S1"] },
+      { type: "paragraph", text: "지급 기준은 청구 업무 패키지의 승인 규칙을 따릅니다.", refs: ["S2"] }] },
+  ];
+  if (!long) return base;
+  return [...base, ...Array.from({ length: 5 }, (_, s) => ({ heading: `추가 조사 항목 ${s + 1}`, blocks: Array.from({ length: 6 }, (_, b) => (b === 5
+    ? { type: "paragraph", text: "근거 부족: 찾은 자료로 확인되지 않은 내용입니다.", refs: [] }
+    : { type: "paragraph", text: `조사 항목 ${s + 1}의 ${b + 1}번째 문장입니다. 청구 절차와 지급 기준을 자료에 따라 정리했습니다.`, refs: [`S${(b % 6) + 1}`] })) }))];
+};
+const drContent = (long, unavailable = []) => ({ schema: "studio.report.v1", warnings: [], body: { title: "보험금 청구 절차 조사", summary: "", sections: drSections(long) },
+  research: { query: "보험금 청구 서류와 심사 기준", sub_questions: ["청구 서류", "심사 기간", "지급 기준"], candidates: drCandidates(long ? 40 : 6), unavailable, tool_calls: long ? 12 : 6 } });
+const drEvidence = (count) => Array.from({ length: Math.min(count, 6) }, (_, i) => ({ ref_id: `S${i + 1}`, source_version_id: null, source_name: `자료 ${i + 1}`, locator_kind: "research", locator_value: `cand-${i}`, origin: "connector:daon2_rag" }));
+// 가짜 시계로 진행하는 조사: 시작 후 경과 시간에 따라 진행 메모가 바뀐다.
+const DR_STEPS = [[0, 5, "계획"], [2500, 10, "찾기 1/3"], [5000, 28, "찾기 2/3"], [7500, 46, "찾기 3/3"], [10000, 70, "작성"]];
+const DR_STATES = {
+  "research-start": { label: "심층 조사: 시작(조사 시작 눌러 보기)", outputs: () => [drItem("a", "지난 조사 보고서")], live: true },
+  "research-progress": { label: "심층 조사: 카드 진행 문구 3단계", outputs: () => [
+    drItem("p", "조사: 계획", { status: "generating", current_revision: 0, progress: { pct: 5, note: "계획" } }),
+    drItem("f", "조사: 찾기", { status: "generating", current_revision: 0, progress: { pct: 28, note: "찾기 2/3" } }),
+    drItem("w", "조사: 작성", { status: "generating", current_revision: 0, progress: { pct: 70, note: "작성" } }),
+    drItem("a", "보험금 청구 절차 조사")] },
+  "research-failed": { label: "심층 조사: 시간 초과·실패·취소·범위 사용 불가", outputs: () => [
+    drItem("t", "조사: 시간 초과", { status: "failed", error_code: "RESEARCH_TIMEOUT", current_revision: 0 }),
+    drItem("u", "조사: 범위 사용 불가", { status: "failed", error_code: "DISCOVERY_SCOPE_UNAVAILABLE", current_revision: 0 }),
+    drItem("n", "조사: 자료 없음", { status: "failed", error_code: "RESEARCH_NO_EVIDENCE", current_revision: 0 }),
+    drItem("c", "조사: 연결 실패", { status: "failed", error_code: "DISCOVERY_CONNECTOR_FAILED", current_revision: 0 }),
+    drItem("x", "조사: 취소함", { status: "cancelled", current_revision: 0 })] },
+  "research-report": { label: "심층 조사: 보고서·사용한 자료(카드 열기)", outputs: () => [drItem("a", "보험금 청구 절차 조사")], content: () => drContent(false, [{ scope: "knowledge", reason: "CONNECTOR_NOT_READY" }]) },
+  "research-long": { label: "심층 조사: 긴 보고서·사용한 자료 40개(창 안 스크롤)", outputs: () => [drItem("a", "보험금 청구 절차 조사")], content: () => drContent(true) },
+};
+function ResearchHarness({ state }) {
+  const view = DR_STATES[state];
+  const store = useMemo(() => ({ sources: [sgSource(1, "보험약관.pdf"), sgSource(2, "청구 안내.docx")], scopes: [], outputs: view.outputs(), startedAt: null }), [view]);
+  const adapter = useMemo(() => {
+    const live = () => {
+      if (!store.startedAt) return;
+      const elapsed = Date.now() - store.startedAt;
+      const target = store.outputs.find((o) => o.output_id === DR_OID("r"));
+      if (!target) return;
+      if (elapsed >= 12500) Object.assign(target, { status: "completed", current_revision: 1, progress: null, updated_at: new Date().toISOString() });
+      else { const [, pct, note] = [...DR_STEPS].reverse().find(([at]) => elapsed >= at); Object.assign(target, { status: elapsed < 1200 ? "queued" : "generating", progress: { pct, note } }); }
+    };
+    const studio = { ...makeStudio(), listTypes: async () => STUDIO_TYPES_FOR_RESEARCH, exportFormats: () => ["docx", "pdf", "md"],
+      listOutputs: async () => { live(); return { items: store.outputs.map((o) => ({ ...o })), nextCursor: null }; },
+      getOutput: async (id) => {
+        const base = store.outputs.find((o) => o.output_id === id) ?? store.outputs[0];
+        const content = view.content ? view.content() : drContent(false);
+        return { ...base, settings: {}, assets: [], evidence: drEvidence(content.research.candidates.length), revision: { revision_no: 1, content } };
+      },
+      cancelOutput: async (id) => { const target = store.outputs.find((o) => o.output_id === id); if (target) Object.assign(target, { status: "cancelled", progress: null }); store.startedAt = null; return { output_id: id, cancel_requested: true }; },
+      researchOf: studioResearchOf,
+      createResearch: async () => {
+        store.outputs = [drItem("r", "보험금 청구 서류와 심사 기준", { status: "queued", current_revision: 0, progress: { pct: 5, note: "계획" } }), ...store.outputs.filter((o) => o.output_id !== DR_OID("r"))];
+        store.startedAt = Date.now();
+        return { output_id: DR_OID("r"), job_id: "svj-r", status: "queued" };
+      },
+      searchSourceDiscovery: async () => ({ candidates: SD_BASE, unavailable: [] }),
+      addSourceDiscovery: async (ref) => {
+        if (ref.kind === "document") {
+          const id = `source-${ref.document_id}`;
+          store.sources = [...store.sources, { source_id: id, source_version_id: `version-${ref.document_id}`, filename: `${ref.document_id}.txt`, source_state: "processing", processing_state: "running", job_state: "running" }];
+          return { added: "source", sourceId: id };
+        }
+        store.scopes = [...store.scopes, { project_id: ref.project_id, work_package_id: ref.work_package_id, project_name: "보험 프로젝트", work_package_name: ref.work_package_id }];
+        return { added: "scope", sourceId: null };
+      } };
+    return { listSources: async () => store.sources, uploadPdf() {}, getProcessingStatus() {}, citationUrl: () => null, createReport() {},
+      askQuestion: async () => ({ run_id: "run-h", run_result_id: "result-h", answer: "응답", insufficient: false, citations: [] }),
+      listStudioOutputs: async () => [], listConnectors: async () => [], listKnowledgePackages: async () => [],
+      getNotebookKnowledgeScopes: async () => ({ items: store.scopes }), listDaonKnowledgeScopes: async () => ({ projects: [] }),
+      notebookContext: { notebook_id: `notebook-${state}`, sources: [] }, studioV2: studio };
+  }, [view, store, state]);
+  return h("div", { "data-harness-state": state }, h(ProductWorkspaceShell, { workspaceId: "workspace-1", notebookTitle: "보험약관 검토", adapter }));
+}
+const STUDIO_TYPES_FOR_RESEARCH = ["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "memo"]
+  .map((type_id) => ({ type_id, available: true, formats: [], presets: type_id === "report" ? ["summary", "briefing"] : [], export_formats: ["docx"], default_format: null, settings_schema: null }));
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -375,7 +464,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SG_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SD_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SG_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(SD_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(DR_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -422,6 +511,7 @@ function App() {
     OL_STATES[view] ? h(OutlineHarness, { key: view, state: view }) : null,
     SG_STATES[view] ? h(SourceGroupsHarness, { key: view, state: view }) : null,
     SD_STATES[view] ? h(DiscoveryHarness, { key: view, state: view }) : null,
+    DR_STATES[view] ? h(ResearchHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 

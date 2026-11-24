@@ -53,3 +53,12 @@
 .source-discovery__count { margin-right: auto; color: var(--daon-color-text-secondary); font-size: 12px; }
 .source-discovery__clear { min-height: 32px; padding: 0 10px; border: 1px solid var(--daon-color-border); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
 .source-discovery__clear:disabled { cursor: not-allowed; opacity: .55; }
+
+/* 심층 조사(NB4-U2): 방식 안내와 조사 보고서 아래 "사용한 자료". 사용한 자료는 스튜디오 보기 창(.studio-detail__body) 하나에서만 스크롤한다
+   (목록에 따로 높이를 주지 않아 스크롤 창이 겹치지 않는다). 추가 줄은 목록을 보는 동안 보기 창 아래에 붙는다(sticky). */
+.source-discovery__heading { margin: 0; font-size: 14px; font-weight: 800; }
+.source-discovery__label { padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--daon-color-accent) 12%, var(--daon-color-surface)); color: var(--daon-color-accent); font-size: 12px; font-weight: 800; }
+.source-discovery__cited { color: var(--daon-color-accent); font-size: 12px; font-weight: 700; }
+.source-discovery--used { margin-top: 16px; }
+.source-discovery__results--used { max-height: none; overflow: visible; }
+.source-discovery__footer--sticky { position: sticky; bottom: 0; z-index: 1; margin: 0 -8px -8px; padding: 8px; border-top: 1px solid var(--daon-color-border); border-radius: 0 0 10px 10px; background: var(--daon-color-surface); }

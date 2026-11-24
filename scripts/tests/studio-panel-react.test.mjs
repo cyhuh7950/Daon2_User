@@ -62,8 +62,10 @@ async function mount(studio, props = {}) {
   const container = dom.document.createElement("div");
   dom.document.body.appendChild(container);
   const reactRoot = createRoot(container);
-  await act(async () => { reactRoot.render(createElement(StudioPanel, { studio, sourceStats: { sourceCount: 3, checkedCount: 2, readySourceCount: 2, processingCount: 0 }, checkedSourceVersionIds: ["sv-1", "sv-2"], ...props })); });
-  return { container, act, click: async (node) => act(async () => { node.dispatchEvent(new MinimalEvent("click")); }),
+  let current = { studio, sourceStats: { sourceCount: 3, checkedCount: 2, readySourceCount: 2, processingCount: 0 }, checkedSourceVersionIds: ["sv-1", "sv-2"], ...props };
+  await act(async () => { reactRoot.render(createElement(StudioPanel, current)); });
+  const rerender = async (next = {}) => { current = { ...current, ...next }; await act(async () => { reactRoot.render(createElement(StudioPanel, current)); }); };
+  return { container, act, rerender, click: async (node) => act(async () => { node.dispatchEvent(new MinimalEvent("click")); }),
     close: async () => { await act(async () => reactRoot.unmount()); dom.restore(); await rm(output, { recursive: true, force: true }); } };
 }
 
@@ -634,5 +636,158 @@ test("보고서 구성 확인(NB3-U1 공통 경로): 멈춘 카드는 '구성 �
     assert.deepEqual(JSON.parse(options.settings.confirmed_outline).sections.map((s) => s.heading), ["배경", "결론"]);
     assert.equal(card().getAttribute("data-state"), "generating");
     assert.ok(card().textContent.includes("확정한 구성으로 생성 중"));
+  } finally { await view.close(); }
+});
+
+// ---- 심층 조사(WO-N1 NB4-U2): 카드 진행 문구·실패·취소, 새 카드로 이동, 보고서의 근거 부족 문장·사용한 자료 ----
+const wait = (view, ms = 20) => view.act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+const cardOf = (container, title) => findElements(container, (n) => n.tagName === "LI" && n.getAttribute?.("class") === "studio-card" && n.textContent.includes(title))[0];
+const bar = (card) => findElements(card, (n) => n.getAttribute?.("class") === "studio-progress")[0]?.childNodes[0];
+
+test("심층 조사 카드 진행 문구 3단계: 계획 → 찾기 n/m → 작성, 진행 막대는 서버 진행률을 따른다", async () => {
+  const studio = fakeStudio([
+    item({ output_id: OID("1"), title: "조사 계획", status: "generating", progress: { pct: 5, note: "계획" } }),
+    item({ output_id: OID("2"), title: "조사 찾기", status: "generating", progress: { pct: 37, note: "찾기 2/5" } }),
+    item({ output_id: OID("3"), title: "조사 작성", status: "generating", progress: { pct: 70, note: "작성" } })]);
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    const plan = cardOf(view.container, "조사 계획");
+    const find = cardOf(view.container, "조사 찾기");
+    const write = cardOf(view.container, "조사 작성");
+    assert.match(plan.textContent, /조사 계획 세우는 중/u);
+    assert.match(find.textContent, /자료 찾는 중 \(2\/5\)/u);
+    assert.match(write.textContent, /보고서 작성 중/u);
+    assert.equal(plan.getAttribute("data-research-step"), "plan");
+    assert.equal(find.getAttribute("data-research-step"), "find");
+    assert.equal(write.getAttribute("data-research-step"), "write");
+    assert.equal(bar(find).style.width, "37%");
+    assert.equal(bar(write).style.width, "70%");
+    for (const card of [plan, find, write]) assert.ok(buttonByText(card, "취소"), "진행 중 조사는 취소할 수 있다");
+  } finally { await view.close(); }
+});
+
+test("진행 문구가 없거나 조사 형식이 아니면 기존 문구를 그대로 쓰고, 폴링으로 단계가 바뀌면 문구도 바뀐다", async () => {
+  const studio = fakeStudio([
+    item({ output_id: OID("1"), title: "일반 보고서", status: "generating", progress: null }),
+    item({ output_id: OID("2"), title: "다른 진행", status: "generating", progress: { pct: 40, note: "소목차 작성 1/3: 개요" } }),
+    item({ output_id: OID("3"), title: "슬라이드", type_id: "slides", status: "generating", progress: { pct: 10, note: "계획" } })]);
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    assert.match(cardOf(view.container, "일반 보고서").textContent, /생성 중…/u);
+    assert.match(cardOf(view.container, "다른 진행").textContent, /생성 중…/u);
+    assert.doesNotMatch(cardOf(view.container, "다른 진행").textContent, /소목차/u, "알 수 없는 진행 메모 원문은 보이지 않는다");
+    assert.match(cardOf(view.container, "슬라이드").textContent, /생성 중…/u, "보고서가 아니면 조사 문구를 쓰지 않는다");
+    assert.equal(cardOf(view.container, "일반 보고서").getAttribute("data-research-step"), null);
+    studio.outputs[0] = { ...studio.outputs[0], progress: { pct: 21, note: "찾기 1/4" } };
+    await wait(view, 1700);
+    assert.match(cardOf(view.container, "일반 보고서").textContent, /자료 찾는 중 \(1\/4\)/u);
+  } finally { await view.close(); }
+});
+
+test("심층 조사 실패 문구: 시간 초과·범위 사용 불가·연결 실패·찾기 불가·자료 없음·검증 실패·유형 불가, 코드 원문은 보이지 않는다", async () => {
+  const cases = [["RESEARCH_TIMEOUT", /제한 시간 안에 끝나지 않아/u], ["DISCOVERY_SCOPE_UNAVAILABLE", /고른 범위를 지금 쓸 수 없어 조사하지 못했습니다/u],
+    ["DISCOVERY_CONNECTOR_FAILED", /지식 연결이 응답하지 않아 조사하지 못했습니다/u], ["DISCOVERY_UNAVAILABLE", /자료 찾기를 지금 쓸 수 없어 조사하지 못했습니다/u],
+    ["RESEARCH_NO_EVIDENCE", /조사에 쓸 자료를 찾지 못했습니다/u], ["STUDIO_VALIDATION_FAILED", /결과를 검증하지 못했습니다/u], ["STUDIO_TYPE_UNAVAILABLE", /아직 제공하지 않는 유형입니다/u]];
+  const studio = fakeStudio(cases.map(([code], i) => item({ output_id: OID(String(i)), title: `조사 ${i}`, status: "failed", error_code: code })));
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    cases.forEach(([code, pattern], i) => {
+      const card = cardOf(view.container, `조사 ${i}`);
+      assert.match(card.textContent, pattern, code);
+      assert.doesNotMatch(card.textContent, new RegExp(code, "u"));
+      assert.ok(buttonByText(card, "다시 시도"), "실패한 조사는 다시 시도할 수 있다");
+    });
+  } finally { await view.close(); }
+});
+
+test("심층 조사 취소: 취소를 누르면 기존 취소 경로를 부르고, 취소된 카드는 '취소됨'이다", async () => {
+  const studio = fakeStudio([item({ output_id: OID("1"), title: "조사 중", status: "generating", progress: { pct: 37, note: "찾기 2/5" } }),
+    item({ output_id: OID("2"), title: "취소한 조사", status: "cancelled" })]);
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    await view.click(buttonByText(cardOf(view.container, "조사 중"), "취소"));
+    assert.deepEqual(studio.calls.at(-1), ["cancel", OID("1")]);
+    assert.match(cardOf(view.container, "취소한 조사").textContent, /취소됨/u);
+  } finally { await view.close(); }
+});
+
+test("새 카드로 이동: focusOutputRequest를 받으면 보기를 닫고 목록을 다시 읽어 그 카드로 스크롤하고 강조한다", async () => {
+  const studio = fakeStudio([item()]);
+  const scrolled = [];
+  const view = await mount(studio);
+  const proto = Object.getPrototypeOf(view.container);
+  proto.scrollIntoView = function scrollIntoView() { scrolled.push(this.getAttribute("data-output-id")); };
+  try {
+    await wait(view);
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await wait(view);
+    assert.ok(findElements(view.container, (n) => n.getAttribute?.("class") === "studio-detail")[0], "보기가 열려 있다");
+    studio.outputs.unshift(item({ output_id: OID("r"), title: "새 조사", status: "queued", current_revision: 0, progress: null }));
+    await view.rerender({ focusOutputRequest: { outputId: OID("r"), nonce: 1 } });
+    await wait(view);
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("class") === "studio-detail")[0], undefined, "보기를 닫고 목록으로");
+    const card = cardOf(view.container, "새 조사");
+    assert.ok(card, "다시 읽은 목록에 새 카드가 있다");
+    assert.equal(card.getAttribute("data-output-id"), OID("r"));
+    assert.equal(card.getAttribute("data-focused"), "true");
+    assert.equal(cardOf(view.container, "보고서 1").getAttribute("data-focused"), null);
+    assert.deepEqual(scrolled.filter(Boolean), [OID("r")]);
+  } finally { delete proto.scrollIntoView; await view.close(); }
+});
+
+test("조사 보고서 보기: 근거 있는 문장은 S 라벨 근거 번호로, 근거 부족 문장은 표시를 붙여 구분하고 그 아래 사용한 자료가 보인다", async () => {
+  const candidate = (n, kind = "document") => ({ candidate_id: `cand-${n}`, kind, title: `자료 ${n}`, origin_label: "Daon2-RAG 문서", reason: "관련", preview: "미리보기",
+    action: kind === "document" ? "add_source" : "add_scope", ref: kind === "document" ? { kind, project_id: "p", work_package_id: "w", document_id: `d${n}`, document_version: "v" } : { kind, project_id: "p", work_package_id: `w${n}` } });
+  const research = { query: "청구", sub_questions: ["서류"], candidates: [candidate(1), candidate(2), candidate(3, "knowledge_package")], unavailable: [], tool_calls: 2 };
+  const studio = fakeStudio();
+  studio.getOutput = async (id) => ({ ...item({ output_id: id }), settings: {}, assets: [],
+    evidence: [{ ref_id: "S1", source_version_id: null, source_name: "자료 1", locator_kind: "research", locator_value: "cand-1", origin: "connector:daon2_rag" },
+      { ref_id: "S3", source_version_id: null, source_name: "자료 3", locator_kind: "research", locator_value: "cand-3", origin: "daon_knowledge" }],
+    revision: { content: { schema: "studio.report.v1", warnings: [{ code: "UNSUPPORTED_CLAIM", path: "sections[0].blocks[1]" }],
+      body: { title: "조사", summary: "", sections: [{ heading: "서류", blocks: [{ type: "paragraph", text: "청구서를 냅니다.", refs: ["S1", "S3"] },
+        { type: "paragraph", text: "근거 부족: 바로 지급됩니다.", refs: [] }] }] }, research } } });
+  studio.researchOf = (output) => { const r = output?.revision?.content?.research; return r ? { query: r.query, subQuestions: r.sub_questions, candidates: r.candidates, unavailable: r.unavailable, toolCalls: r.tool_calls } : null; };
+  studio.addSourceDiscovery = async (ref) => { studio.calls.push(["add", ref]); return { added: "source", sourceId: "src-new" }; };
+  const discovered = [];
+  const view = await mount(studio, { onDiscoveryAdded: (event) => discovered.push(event) });
+  try {
+    await wait(view);
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await wait(view);
+    const refs = findElements(view.container, (n) => n.tagName === "BUTTON" && n.getAttribute?.("class") === "studio-ref").map((n) => n.textContent);
+    assert.deepEqual(refs, ["[S1]", "[S3]"], "조사 보고서 근거 번호는 사용한 자료 라벨과 같다");
+    const unsupported = findElements(view.container, (n) => n.tagName === "P" && n.getAttribute?.("data-unsupported") === "true")[0];
+    assert.ok(unsupported, "근거 부족 문장은 따로 표시된다");
+    assert.match(unsupported.textContent, /근거 부족/u);
+    assert.match(unsupported.textContent, /바로 지급됩니다/u);
+    const grounded = findElements(view.container, (n) => n.tagName === "P" && n.textContent.includes("청구서를 냅니다."))[0];
+    assert.equal(grounded.getAttribute("data-unsupported"), null);
+    const section = findElements(view.container, (n) => n.tagName === "SECTION" && n.getAttribute?.("aria-label") === "사용한 자료")[0];
+    assert.ok(section, "보고서 아래 사용한 자료");
+    assert.match(section.textContent, /사용한 자료 3개/u);
+    await view.click(findElements(section, (n) => n.tagName === "INPUT" && n.getAttribute?.("aria-label") === "자료 2 선택")[0]);
+    await view.click(buttonByText(section, "선택한 자료 추가"));
+    await wait(view);
+    assert.deepEqual(studio.calls.filter((c) => c[0] === "add").map((c) => c[1].document_id), ["d2"]);
+    assert.deepEqual(discovered, [{ sourceIds: ["src-new"], scopeAdded: false }]);
+  } finally { await view.close(); }
+});
+
+test("조사 보고서가 아니면(research 없음) 사용한 자료를 그리지 않고 근거 번호는 기존처럼 순번이다", async () => {
+  const studio = fakeStudio();
+  studio.getOutput = async (id) => ({ ...item({ output_id: id }), settings: {}, assets: [], evidence: [{ ref_id: "S1", source_version_id: "sv-1", source_name: "a.pdf", locator_kind: "page", locator_value: "1" }],
+    revision: { content: { ...REPORT_CONTENT } } });
+  studio.researchOf = () => null;
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await wait(view);
+    assert.equal(findElements(view.container, (n) => n.tagName === "SECTION" && n.getAttribute?.("aria-label") === "사용한 자료")[0], undefined);
+    assert.deepEqual(findElements(view.container, (n) => n.getAttribute?.("class") === "studio-ref").map((n) => n.textContent), ["[1]"]);
   } finally { await view.close(); }
 });

@@ -884,6 +884,13 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     if (scopeAdded) setKnowledgeScopeRevision((current) => current + 1);
     setLoadRevision((current) => current + 1);
   };
+  // 심층 조사(NB4-U2): 조사를 시작하면 스튜디오가 목록을 다시 읽고 새 보고서 카드로 스크롤한다(좁은 화면은 스튜디오 탭으로).
+  const [studioFocusRequest, setStudioFocusRequest] = useState(null);
+  const handleResearchStarted = ({ outputId } = {}) => {
+    if (typeof outputId !== "string") return;
+    setStudioFocusRequest((current) => ({ outputId, nonce: (current?.nonce ?? 0) + 1 }));
+    setNarrowTab("studio");
+  };
   useEffect(() => {
     if (!memoSourceWatch) return undefined;
     const source = viewState.sources.find((item) => item.sourceId === memoSourceWatch.sourceId);
@@ -2172,7 +2179,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {sourceAddError ? <div className="inline-alert compact" role="alert">Source를 등록하지 못했습니다.{sourceErrorHint(sourceAddError)} ({sourceAddError})</div> : null}
           </section> : null}
           {/* 자료 찾기·빠른 찾기(NB4-U1): 소스 칸 위쪽. 결과 목록은 정해진 높이 안에서만 스크롤한다. */}
-          <SourceDiscoveryPanel studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} onAdded={handleDiscoveryAdded} />
+          <SourceDiscoveryPanel studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} onAdded={handleDiscoveryAdded} onResearchStarted={handleResearchStarted} />
           {processing ? <p className="source-inline-state" role="status">처리 중 · 잠시만 기다려 주세요.</p> : null}
           {typeof adapter?.getNotebookKnowledgeScopes === "function" ? <DaonKnowledgeScopeSection adapter={adapter} onCountChange={setKnowledgeCount} refreshKey={knowledgeScopeRevision} /> : <section className="source-group" aria-labelledby="approved-knowledge-title">
             <div className="source-group-heading"><h3 id="approved-knowledge-title">Daon 승인 지식</h3><span>{knowledgePackages.length}</span></div>
@@ -2480,7 +2487,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
         </SafePane>
         <SafePane id="product-pane-studio" title={adapter?.studioV2 && !desktopStudio ? "스튜디오" : "업무 Studio"} description="근거가 확인된 답변으로 보고서를 생성하고 저장 결과를 확인합니다.">
           {desktopStudio ? desktopStudio : <StudioFallbackGate adapter={adapter} sources={viewState.sources} unchecked={uncheckedSourceVersionIds} knowledgeCount={knowledgeCount} refreshToken={studioRefresh} onAskAboutNode={askAboutNode}
-            onMemoSourceChanged={handleMemoSourceChanged} openOutputRequest={studioOpenRequest}
+            onMemoSourceChanged={handleMemoSourceChanged} openOutputRequest={studioOpenRequest} focusOutputRequest={studioFocusRequest} onDiscoveryAdded={handleDiscoveryAdded}
             fallback={<><ProductStudioPane
             key={`${viewState.answer?.run_id ?? "no-run"}:${viewState.selectedSource?.sourceVersionId ?? "no-source"}`}
             adapter={adapter}

@@ -142,3 +142,22 @@ export function menuItems(output) {
   }
   return items;
 }
+
+// 심층 조사 진행(WO-N1 NB4-F2 계약): 보고서 생성 작업의 progress.note는 "계획" → "찾기 n/m" → "작성" 세 가지 코드성 문구다.
+// 진행 중 보고서가 이 문구일 때만 단계로 바꾸고, 그 밖의 메모(작성 마법사 등)나 다른 유형은 null(기존 문구 그대로)이다. 원문 메모는 화면에 쓰지 않는다.
+const RESEARCH_FIND = /^찾기 (\d{1,2})\/(\d{1,2})$/u;
+export function researchProgress(output) {
+  if (output?.type_id !== "report" || !ACTIVE.has(output.status)) return null;
+  const note = output.progress?.note;
+  if (note === "계획") return { step: "plan" };
+  if (note === "작성") return { step: "write" };
+  const find = typeof note === "string" ? RESEARCH_FIND.exec(note) : null;
+  if (find && Number(find[1]) >= 1 && Number(find[1]) <= Number(find[2])) return { step: "find", n: Number(find[1]), m: Number(find[2]) };
+  return null;
+}
+
+/** 진행 막대 너비(%): 서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */
+export function progressPercent(output) {
+  const pct = output?.progress?.pct ?? output?.progress_pct;
+  return Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 20;
+}

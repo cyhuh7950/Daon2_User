@@ -183,3 +183,8 @@
 .studio-outline-review__spacer { flex: 1 1 auto; }
 .studio-outline-review .studio-outline-review__small { flex: none; min-height: 32px; padding: 0 10px; border-radius: 16px; font-size: 13px; }
 .studio-outline-review .studio-alert ul { margin: 0; padding-left: 18px; }
+
+/* 심층 조사(WO-N1 NB4-U2): 방금 시작한 카드 강조, 조사 보고서의 근거 부족 문장(근거 있는 문장과 구분 — 색만이 아니라 표시 글자와 점선). */
+.studio-card[data-focused="true"] { box-shadow: inset 0 0 0 2px var(--studio-focus); background: var(--studio-tile); }
+.studio-report__unsupported { padding: 4px 8px; border-left: 3px dashed var(--studio-danger); border-radius: 4px; background: var(--studio-tile); color: var(--studio-muted); }
+.studio-report__unsupported .studio-chip { margin-right: 6px; color: var(--studio-danger); font-weight: 600; }
