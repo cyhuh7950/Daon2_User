@@ -80,6 +80,20 @@ class GeneratorRegistry:
         """노트북 개요 생성기(NB2-F2). 스텁 레지스트리에는 없다(개요 작업을 처리하지 않는다)."""
         self._overview = generator
 
+    def attach_research(self, generator: object) -> None:
+        """심층 조사 생성기(WO-N1 NB4-F2). 보고서 설정에 research_query가 있으면 resolve가 이것을 고른다."""
+        self._research = generator
+
+    def resolve(self, type_id: str, settings: Mapping[str, object]) -> StudioGenerator:
+        """작업 요청에 맞는 생성기. 심층 조사 보고서인데 조사 생성기가 없으면 STUDIO_TYPE_UNAVAILABLE."""
+        from .studio_research import is_research
+        if type_id == "report" and is_research(settings):
+            research = getattr(self, "_research", None)
+            if research is None:
+                raise StudioError("STUDIO_TYPE_UNAVAILABLE", 409)
+            return research  # type: ignore[no-any-return]
+        return self.get(type_id)
+
     def overview(self) -> Any:
         return getattr(self, "_overview", None)
 

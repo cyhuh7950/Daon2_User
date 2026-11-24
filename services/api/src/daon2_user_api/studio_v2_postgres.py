@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 from psycopg.types.json import Jsonb
 
 from .cloud_storage import CloudAccessContext
+from .studio_research import is_research
 from .studio_v2_edit_turns import StudioV2EditTurnsMixin
 from .studio_v2_types import STUDIO_V2_TYPES, checked_settings, is_available
 from .studio_workspace import StudioContext, StudioError
@@ -74,10 +75,26 @@ _OUTPUT_COLUMNS = ("o.output_id,o.type_id,o.format_id,o.title,o.status,o.error_c
                    "o.current_revision,o.created_at,o.updated_at,")
 
 
+# 진행 중(leased·generating)인 생성 작업의 진행률·진행 문구(WO-N1 NB4-F2, 심층 조사 "계획"·"찾기 2/5"·"작성"). 대화 수정 작업은 제외한다.
+_PROGRESS_SQL = """(SELECT jsonb_build_object('pct',j.progress_pct,'note',j.progress_note) FROM studio_v2_jobs j
+  WHERE j.tenant_id=o.tenant_id AND j.workspace_id=o.workspace_id AND j.output_id=o.output_id
+    AND j.state IN ('leased','generating') AND COALESCE(j.request_json->>'mode','create')<>'chat_edit'
+  ORDER BY j.updated_at DESC LIMIT 1)"""
+
+
+def _progress(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    pct, note = value.get("pct"), value.get("note")
+    return {"pct": int(pct) if isinstance(pct, int) and not isinstance(pct, bool) else 0,
+            "note": str(note)[:200] if isinstance(note, str) and note else None}
+
+
 def _item(row: Sequence[object]) -> dict[str, object]:
     return {"output_id": row[0], "type_id": row[1], "format_id": row[2], "title": row[3], "status": row[4],
             "error_code": row[5], "source_count": int(row[6]), "current_revision": int(row[7]),
-            "created_at": _iso(row[8]), "updated_at": _iso(row[9]), "stale": bool(row[10])}
+            "created_at": _iso(row[8]), "updated_at": _iso(row[9]), "stale": bool(row[10]),
+            "progress": _progress(row[11]) if len(row) > 11 else None}
 
 
 # 노트북의 준비된 소스 버전: 연결된 버전이 최신이고 떼어지지 않았으며 삭제되지 않았고 이해 결과나 근거 구간이 있다.
@@ -166,6 +183,10 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         if requested is not None and (not isinstance(requested, (list, tuple)) or len(requested) > 64
                                       or any(not isinstance(v, str) for v in requested)):
             raise StudioError("STUDIO_INPUT_INVALID", 400)
+        # 심층 조사(NB4-F2)는 노트북 소스가 아니라 찾은 자료로 쓴다. 소스 없는 노트북에서도 시작하고, 소스를 함께 보내면 400.
+        research = is_research(settings)
+        if research and requested:
+            raise StudioError("STUDIO_INPUT_INVALID", 400)
         key_sha = sha256_hex(idempotency_key)
         output_id = opaque("sv2", context.tenant_id, context.workspace_id, context.actor_id, key_sha)
         job_id = opaque("svj", output_id, key_sha)
@@ -183,7 +204,9 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                 if str(existing[2]) != fingerprint:
                     raise StudioError("IDEMPOTENCY_CONFLICT", 409)
                 return {"output_id": existing[0], "job_id": existing[3], "status": existing[1], "replayed": True}
-            if spec.requires_llm or requested:
+            if research:
+                versions = []
+            elif spec.requires_llm or requested:
                 has_knowledge = self._has_selected_knowledge(connection, context, notebook_id)
                 # 소스를 하나도 고르지 않고 승인 지식만 고른 경우도 생성할 수 있다(WO-K4 4단계).
                 versions = list(dict.fromkeys(requested)) if requested else ([] if requested is not None and has_knowledge else self.ready_source_versions(connection, context))
@@ -255,7 +278,7 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         params.append(limit + 1)
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:
             rows = connection.execute(
-                f"SELECT {_OUTPUT_COLUMNS}{_STALE_SQL} AS stale FROM studio_v2_outputs o "
+                f"SELECT {_OUTPUT_COLUMNS}{_STALE_SQL} AS stale,{_PROGRESS_SQL} AS progress FROM studio_v2_outputs o "
                 "WHERE o.tenant_id=%s AND o.workspace_id=%s AND o.notebook_id=%s AND o.deleted_at IS NULL"
                 f"{keyset} ORDER BY o.created_at DESC,o.output_id DESC LIMIT %s", tuple(params)).fetchall()
         page = rows[:limit]
@@ -267,7 +290,7 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.read")) as connection:
             head = self._owned_output(connection, context, output_id)
             stale = connection.execute(
-                f"SELECT {_STALE_SQL} FROM studio_v2_outputs o WHERE o.tenant_id=%s AND o.workspace_id=%s AND o.output_id=%s",
+                f"SELECT {_STALE_SQL},{_PROGRESS_SQL} FROM studio_v2_outputs o WHERE o.tenant_id=%s AND o.workspace_id=%s AND o.output_id=%s",
                 (context.tenant_id, context.workspace_id, output_id)).fetchone()
             number = int(head[8]) if revision is None else revision
             body = None
@@ -295,7 +318,7 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                 "SELECT kind,bytes,revision_no FROM studio_v2_assets WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s "
                 "AND cleaned_at IS NULL ORDER BY revision_no,kind", (context.tenant_id, context.workspace_id, output_id)).fetchall()]
         item = _item((head[0], head[1], head[2], head[3], head[4], head[5], len(head[7] or []), head[8], head[11], head[10],
-                      bool(stale[0]) if stale else False))
+                      bool(stale[0]) if stale else False, stale[1] if stale and len(stale) > 1 else None))
         item.update({"settings": head[6], "revision": body, "evidence": evidence, "assets": assets})
         return item
 
