@@ -33,3 +33,12 @@ test("설정 화면은 Key를 공백을 지운 값으로만 보낸다", () => {
   assert.doesNotMatch(source, /\{ test_credential: credential \}/u, "원래 입력값을 test_credential로 그대로 보냄");
   assert.doesNotMatch(source, /credential: ownPersonalCredential,/u, "원래 개인 Key 입력값을 그대로 보냄");
 });
+
+test("Key 교체 요청도 공백을 지운 Key만 보낸다(속성 줄임표기 credential, 금지)", () => {
+  assert.doesNotMatch(source, /^\s+credential,\s*$/mu, "Key 원래 입력값을 줄임표기로 그대로 보냄");
+});
+
+test("개인 연결이 모델 확인을 통과해 저장되면 '시험 통과하지 않음'이 아니라 통과·Key 미저장을 알린다", () => {
+  assert.match(source, /const personalProbed = /u);
+  assert.match(source, /모델 확인을 통과했고 연결을 저장했습니다\. 개인 연결이라 시험 Key는 저장하지 않았습니다/u);
+});

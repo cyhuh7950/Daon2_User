@@ -555,9 +555,11 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       // Key만 바꾸는 경우에만 Key 교체 API를 쓴다. 공용 전환 등 다른 변경이 함께 있으면 연결 수정 한 번에 담아
       // (개인→공용 전환 전에 Key만 먼저 저장하려다 PROVIDER_PERSONAL_SYSTEM_KEY_FORBIDDEN으로 막히던 문제).
       const otherChanges = providerDraftChanges(draft, selectedConnection, "").length > 0;
+      // 개인 연결은 시험 Key로 모델 확인을 통과해야 저장되지만 Key는 저장하지 않아 서버 상태가 늘 '사용 대기'다.
+      const personalProbed = compatible && !plain && draft.access_mode === "personal" && Boolean(credential.trim());
       if (includeCredential && draft.version > 0 && !otherChanges && !plain) {
         result = await providerSettingsApi.replaceCredential(connectionId, {
-          credential,
+          credential: requestCredential(credential),
           expected_version: draft.version
         }, operationKey("provider-credential-replace"));
       } else {
@@ -590,7 +592,9 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       setCredential("");
       if(nativeAsr)await load();
       setSaveResult({ kind: "done", plain });
-      setStatus({ kind: "ready", message: plain ? (item.verification_status === "verified" ? "설정을 저장했습니다. 연결 시험은 하지 않았습니다." : "설정을 저장했습니다. 연결 시험은 하지 않았습니다. '연결 시험'으로 확인해야 사용할 수 있습니다.") : nativeAsr ? "ASR ready/metadata를 확인하고 등록했습니다. 실제 전사는 WAV 처리 결과에서 확인하세요." : item.verification_status === "verified" ? "연결 시험에 성공했고 Provider 연결을 저장했습니다." : "시험은 통과하지 않았습니다. Provider 연결을 사용 대기 상태로 저장했습니다." });
+      setStatus({ kind: "ready", message: plain ? (item.verification_status === "verified" ? "설정을 저장했습니다. 연결 시험은 하지 않았습니다." : "설정을 저장했습니다. 연결 시험은 하지 않았습니다. '연결 시험'으로 확인해야 사용할 수 있습니다.") : nativeAsr ? "ASR ready/metadata를 확인하고 등록했습니다. 실제 전사는 WAV 처리 결과에서 확인하세요." : item.verification_status === "verified" ? "연결 시험에 성공했고 Provider 연결을 저장했습니다."
+        : personalProbed && item.access_mode === "personal" ? "모델 확인을 통과했고 연결을 저장했습니다. 개인 연결이라 시험 Key는 저장하지 않았습니다. 이 연결을 쓰려면 각자 개인 Key를 등록하세요."
+        : "시험은 통과하지 않았습니다. Provider 연결을 사용 대기 상태로 저장했습니다." });
     } catch (error) {
       if (!compatible) setCredential("");
       setSaveResult({ kind: "failed", plain });
