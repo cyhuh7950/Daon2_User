@@ -614,3 +614,25 @@ test("메모를 고친 뒤 자동 저장 전에 목록으로 나가도 마지막
     assert.deepEqual(studio.calls.filter((call) => call[0] === "revision"), [["revision", OID("m"), "고친 메모"]]);
   } finally { await view.close(); }
 });
+
+test("보고서 구성 확인(NB3-U1 공통 경로): 멈춘 카드는 '구성 확인 필요'를 보이고, 확정하면 목록으로 돌아가 카드가 '확정한 구성으로 생성 중'이 된다", async () => {
+  const studio = fakeStudio();
+  const review = { title: "보고서 제목", summary: "요약", sections: [], outline_review: [{ heading: "배경", purpose: "왜" }, { heading: "결론", purpose: "무엇" }] };
+  studio.getOutput = async (id) => ({ ...item({ output_id: id }), settings: {}, evidence: [], assets: [], revision: { content: { body: review, warnings: [] } } });
+  const view = await mount(studio);
+  try {
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const card = () => findElements(view.container, (n) => n.getAttribute?.("class") === "studio-card")[0];
+    assert.ok(card().textContent.includes("구성 확인 필요"));
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.equal(buttonByText(view.container, "편집"), undefined, "구성 검토 중에는 본문 편집 버튼이 없다");
+    await view.click(buttonByText(view.container, "이 구성으로 작성"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const [name, id, options] = studio.calls.at(-1);
+    assert.deepEqual([name, id, options.settings.confirm_outline], ["regenerate", OID("a"), "no"]);
+    assert.deepEqual(JSON.parse(options.settings.confirmed_outline).sections.map((s) => s.heading), ["배경", "결론"]);
+    assert.equal(card().getAttribute("data-state"), "generating");
+    assert.ok(card().textContent.includes("확정한 구성으로 생성 중"));
+  } finally { await view.close(); }
+});

@@ -15,6 +15,7 @@ import { ProductWorkspaceShell } from "../../packages/ui/src/product-workspace-s
 import { QuestionToolsMenu } from "../../packages/ui/src/question-tools-menu.jsx";
 import { ModelSelectionBar } from "../../packages/ui/src/model-selection-bar.jsx";
 import { NotebookOverview } from "../../packages/ui/src/notebook-overview.jsx";
+import { SettingsDialog } from "../../packages/ui/src/studio-dialogs.jsx";
 import "../../packages/ui/src/answer-process.css";
 import "./proposal.css";
 import "@daon2-user/design-tokens/tokens.css";
@@ -209,6 +210,63 @@ function OverviewHarness({ state }) {
       h("button", { className: "composer-submit", type: "submit", "aria-label": "질문 실행", disabled: true }, "↑")));
 }
 
+// 생성 전 구성 확인(NB3-U1): 슬라이드·동영상 설정 체크칸, 카드 "구성 확인 필요", 검토 화면, 입력 오류, 422, 확정 후 생성 중, 취소됨.
+// 확정·422는 검토 화면에서 "이대로 만들기"를 눌러 만든다(확정하면 가짜 목록이 생성 중으로 바뀐다).
+const OL_CONFIRM = { confirm_outline: { type: "string", enum: ["no", "yes"] }, confirmed_outline: { type: "string", maxLength: 40000, hidden: true } };
+const OL_SLIDES = item("q", "slides", "보험금 지급 발표 자료");
+const OL_VIDEO = item("r", "video_overview", "보험금 지급 동영상 개요");
+const OL_CANCELLED = item("t", "slides", "취소한 발표 자료", { status: "cancelled", current_revision: 0 });
+const OL_SLIDES_BODY = { title: "보험금 지급 안내", slides: [], outline_review: [
+  { title: "보험금 지급 안내", points: [] },
+  { title: "지급 기한", points: ["청구서류 접수 후 3일 이내 지급", "조사가 필요하면 지급 예정일을 안내"] },
+  { title: "면책 기간", points: ["계약일부터 90일", "이 기간의 질병 사고는 보장하지 않음"] },
+  { title: "청구 서류", points: ["진단서", "영수증 원본"] }] };
+const OL_VIDEO_BODY = { title: "보험금 지급 한눈에 보기", scenes: [], outline_review: [
+  { title: "들어가며", narration_summary: "오늘은 보험금이 언제, 어떻게 지급되는지 알아봅니다." },
+  { title: "지급 기한", narration_summary: "청구서류를 접수한 날부터 3일 이내에 보험금을 지급합니다.", bullets: ["접수일부터 3일 이내"] },
+  { title: "면책 기간", narration_summary: "계약일부터 90일 동안 생긴 질병 사고는 보장하지 않습니다.", bullets: ["계약일부터 90일"] }] };
+const OL_ERROR_BODY = { ...OL_SLIDES_BODY, outline_review: [OL_SLIDES_BODY.outline_review[0], { title: "", points: ["청구서류 접수 후 3일 이내 지급"] }, { title: "면책 기간", points: ["가".repeat(130)] }] };
+const OL_STATES = {
+  "outline-settings-slides": { label: "구성 확인: 슬라이드 설정 체크칸", settings: "slides" },
+  "outline-settings-video": { label: "구성 확인: 동영상 설정 체크칸", settings: "video_overview" },
+  "outline-cards": { label: "구성 확인: 카드(확인 필요·취소됨)" },
+  "outline-review-slides": { label: "구성 확인: 슬라이드 검토 중", open: OL_SLIDES.output_id },
+  "outline-review-video": { label: "구성 확인: 동영상 검토 중", open: OL_VIDEO.output_id },
+  "outline-error-slides": { label: "구성 확인: 입력 오류(빈 제목·글자 수)", open: OL_SLIDES.output_id, slidesBody: OL_ERROR_BODY },
+  "outline-422-video": { label: "구성 확인: 서버 거부 422(확정 누르기)", open: OL_VIDEO.output_id, reject: true },
+};
+function makeOutlineStudio(view) {
+  const outputs = [OL_SLIDES, OL_VIDEO, OL_CANCELLED].map((o) => ({ ...o }));
+  const bodies = { slides: view.slidesBody ?? OL_SLIDES_BODY, video_overview: OL_VIDEO_BODY };
+  const types = ["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "memo"].map((type_id) => ({
+    type_id, available: true, formats: [], presets: [], export_formats: [], default_format: null,
+    settings_schema: { type: "object", properties: { focus: { type: "string" }, ...(["slides", "video_overview"].includes(type_id) ? { length: { type: "string", enum: ["short", "normal", "long"] }, ...OL_CONFIRM } : {}) } } }));
+  return {
+    types,
+    listTypes: async () => types,
+    listOutputs: async () => ({ items: outputs.map((o) => ({ ...o })), nextCursor: null }),
+    getOutput: async (id) => { const base = outputs.find((o) => o.output_id === id); return { ...base, settings: { confirm_outline: "yes" }, assets: [], evidence: [], revision: { content: { body: bodies[base.type_id], warnings: [] } } }; },
+    regenerateOutput: async (id) => {
+      if (view.reject) throw Object.assign(new Error("OUTLINE_INVALID"), { code: "OUTLINE_INVALID", status: 422 });
+      const target = outputs.find((o) => o.output_id === id); target.status = "generating"; target.progress_pct = 15;
+      return { output_id: id, job_id: "svj-h", status: "queued" };
+    },
+    cancelOutput: async () => ({}), createOutput: async () => ({ output_id: sid("u"), job_id: "j", status: "queued" }), exportFormats: () => [],
+  };
+}
+function OutlineHarness({ state }) {
+  const view = OL_STATES[state];
+  const studio = useMemo(() => makeOutlineStudio(view), [view]);
+  if (view.settings) {
+    const type = studio.types.find((t) => t.type_id === view.settings);
+    return h("div", { "data-harness-state": state, className: "studio-panel", style: { maxWidth: 420, minHeight: 560 } },
+      h(SettingsDialog, { type, typeLabel: view.settings === "slides" ? "슬라이드 자료" : "동영상 개요", initial: { confirm_outline: "yes" }, onSubmit: () => {}, onCancel: () => {} }));
+  }
+  return h("div", { "data-harness-state": state, style: { maxWidth: 420 } },
+    h(StudioPanel, { studio, sourceStats: { sourceCount: 3, checkedCount: 3, readySourceCount: 3, processingCount: 0 }, checkedSourceVersionIds: ["sv-1"],
+      openOutputRequest: view.open ? { outputId: view.open, nonce: 1 } : null }));
+}
+
 function App() {
   const params = new URLSearchParams(location.search);
   const bare = params.has("bare");
@@ -221,7 +279,7 @@ function App() {
   useEffect(() => { location.hash = view; }, [view]);
   const studio = useMemo(makeStudio, []);
   const wizardStudio = useMemo(() => ({ ...studio, downloadExport: studio.downloadExport, authoring: { listTemplates: async () => [], createSession: async () => review, getSession: async () => review, answer: async () => ({}), review: async () => ({}), listConnectors: async () => [], listDocuments: async () => [] } }), [studio]);
-  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label])];
+  const tabs = [["studio", "Studio 패널"], ["wizard", "작성 마법사"], ["tools", "노트북 도구"], ["home", "노트북 홈"], ["settings", "설정(지식 연결)"], ["tts", "설정(TTS 엔진)"], ["orgjoin", "조직 가입"], ["orgadmin", "조직 관리"], ["login", "로그인"], ...Object.entries(PROCESS_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(MEMO_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(QT_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OV_STATES).map(([key, value]) => [key, value.label]), ...Object.entries(OL_STATES).map(([key, value]) => [key, value.label])];
   return h("div", { style: { padding: 12, color: theme === "dark" ? "#e8eaed" : "#1b2230" } },
     bare ? null : h("div", { style: { display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" } },
       ...tabs.map(([key, label]) => h("button", { key, type: "button", id: `tab-${key}`, onClick: () => setView(key), style: { fontWeight: view === key ? 700 : 400 } }, label)),
@@ -265,6 +323,7 @@ function App() {
     MEMO_STATES[view] ? h(MemoSourceHarness, { key: view, state: view }) : null,
     QT_STATES[view] ? h(QuestionToolsHarness, { key: view, state: view }) : null,
     OV_STATES[view] ? h(OverviewHarness, { key: view, state: view }) : null,
+    OL_STATES[view] ? h(OutlineHarness, { key: view, state: view }) : null,
     view === "tools" ? h("div", { className: "workspace-app-actions" }, h(NotebookTools, { studio, title: "원본 노트북", counts: { sources: 3 }, onOpenChatSettings: () => {} })) : null);
 }
 

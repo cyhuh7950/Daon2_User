@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { msg } from "./studio-messages.ko.js";
+import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 import { MemoSourceAction } from "./memo-source.jsx";
+import { OUTLINE_REVIEW_TYPES, OutlineReviewEditor } from "./outline-review.jsx";
 
 const LEVEL_COLORS = ["#3b6fd8", "#3fa37a", "#8e5bd1", "#b57b00", "#2a8ea3", "#c0453f"];
 
@@ -22,13 +23,16 @@ const Unverified = ({ warnings, path }) => warnings?.some((w) => w.code === "UNV
 /** 보고서 구성을 사람이 확인하고 고친 뒤 본문 작성을 요청한다(WO-K4 §4.5). */
 function OutlineReview({ body, onConfirm }) {
   const [sections, setSections] = useState(body.outline_review);
+  const [error, setError] = useState(null);
   const update = (index, heading) => setSections((list) => list.map((item, i) => i === index ? { ...item, heading } : item));
   const valid = sections.every((item) => item.heading.trim());
   return <article className="studio-report">
     {body.title && <h2 style={{ fontSize: 18 }}>{body.title}</h2>}
     <p>{msg("viewer.outline.help")}</p>
     <ol>{sections.map((item, index) => <li key={index}><input aria-label={msg("viewer.outline.heading", { n: index + 1 })} maxLength={120} style={{ width: "100%" }} value={item.heading} onChange={(event) => update(index, event.target.value)} /><small>{item.purpose}</small></li>)}</ol>
-    <button type="button" className="studio-btn studio-btn--primary" disabled={!valid || !onConfirm} onClick={() => onConfirm(JSON.stringify({ title: body.title, summary: body.summary, sections }))}>{msg("viewer.outline.confirm")}</button>
+    {error && <p className="studio-alert" role="alert">{error}</p>}
+    <button type="button" className="studio-btn studio-btn--primary" disabled={!valid || !onConfirm}
+      onClick={() => { setError(null); Promise.resolve(onConfirm(JSON.stringify({ title: body.title, summary: body.summary, sections }))).catch((e) => setError(studioErrorMessage(e?.code))); }}>{msg("viewer.outline.confirm")}</button>
   </article>;
 }
 
@@ -401,7 +405,7 @@ export function activeChapterIndex(chapters, currentMs) {
   return found;
 }
 
-export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, onLoadCaptions }) {
+export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, onLoadCaptions, confirmedOutline = false }) {
   const body = content.body ?? {};
   const scenes = body.scenes ?? [];
   const chapters = body.chapters ?? scenes.map((s) => ({ title: s.title, start_ms: s.start_ms }));
@@ -449,6 +453,8 @@ export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, on
       </label>
     </div>}
     <h3>{msg("viewer.video.chapters")}</h3>
+    {/* 확정한 장면 목록으로 만든 동영상은 장면별 근거 행이 없다(NB3-F1 Ruling). 오류가 아니므로 경고가 아닌 안내로 보인다. */}
+    {confirmedOutline && !scenes.some((scene) => (scene.refs ?? []).length) && <p><small>{msg("viewer.outline.confirmed_video_note")}</small></p>}
     <ol className="studio-video__chapters">{chapters.map((chapter, index) => <li key={index} aria-current={index === active ? "true" : undefined}
       style={index === active ? { fontWeight: 700 } : undefined}>
       <button type="button" className="studio-btn" onClick={() => seek(chapter)} disabled={!media.url} aria-label={`${msg("viewer.video.seek")}: ${chapter.title}`}>{chapter.title}</button>{" "}
@@ -457,10 +463,14 @@ export function VideoViewer({ content, evidence, onOpenEvidence, onLoadVideo, on
   </div>;
 }
 
-export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, memoSource = null, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
+export function StudioViewer({ output, onConfirmOutline, onCancelOutline, onOpenEvidence, onAskAboutNode, onAttempt, onSaveMemo, memoSource = null, onLoadImage, onLoadAudio, onLoadVideo, onLoadCaptions }) {
   const content = output.revision?.content;
   if (!content) return <p>{msg("studio.card.generating")}</p>;
   const common = { content, evidence: output.evidence ?? [], onOpenEvidence };
+  // 생성 전 구성 확인(NB3-U1): 슬라이드·동영상이 장·장면 목록에서 멈췄으면 검토 화면을 보인다.
+  if (OUTLINE_REVIEW_TYPES.includes(output.type_id) && content.body?.outline_review?.length) {
+    return <OutlineReviewEditor key={`${output.output_id}:${output.current_revision}`} typeId={output.type_id} body={content.body} onConfirm={onConfirmOutline} onCancel={onCancelOutline} />;
+  }
   switch (output.type_id) {
     case "report": return <ReportViewer {...common} onConfirmOutline={onConfirmOutline} />;
     case "data_table": return <TableViewer {...common} />;
@@ -470,7 +480,7 @@ export function StudioViewer({ output, onConfirmOutline, onOpenEvidence, onAskAb
     case "slides": return <SlidesViewer {...common} />;
     case "infographic": return <InfographicViewer {...common} onLoadImage={onLoadImage} />;
     case "audio_overview": return <AudioViewer {...common} onLoadAudio={onLoadAudio} />;
-    case "video_overview": return <VideoViewer {...common} onLoadVideo={onLoadVideo} onLoadCaptions={onLoadCaptions} />;
+    case "video_overview": return <VideoViewer {...common} onLoadVideo={onLoadVideo} onLoadCaptions={onLoadCaptions} confirmedOutline={Boolean(output.settings?.confirmed_outline)} />;
     case "memo": return <MemoViewer content={content} onSave={onSaveMemo} memoSource={memoSource} />;
     default: return <p>{msg("viewer.unsupported")}</p>;
   }
