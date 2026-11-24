@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 문서 상태 | **승인 대기** (2026-11-23 작성). 신산님이 승인하면 §1의 결정과 이 계획 범위 안에서는 사용자 인수 테스트까지 추가 질문 없이 진행한다 |
+| 문서 상태 | **승인됨** (2026-11-23 작성·승인, 진도는 `NOTEBOOK_WORK_CHECK.md`). 신산님이 승인하면 §1의 결정과 이 계획 범위 안에서는 사용자 인수 테스트까지 추가 질문 없이 진행한다 |
 | 설계 정본 | `docs/work_orders/WO-N1-gemini-notebook-parity.md` (이하 "설계서"). 이 계획서는 설계서를 실행 단위로 나눈 것이며, 설계와 다르게 정한 내용은 §1·§2에 근거와 함께 적었다 |
 | 상위 정본 | `D:\Project\PMO\AGENTS.md` → `AGENTS.md` → `docs/daon2-user-studio-design.md` → `docs/daon2_user_development_plan.md` → `DESIGN.md`(화면 기준) |
 | 진도 보고 | `NOTEBOOK_WORK_CHECK.md` — 이 계획서의 작업 단위 ID와 1:1로 대응한다 |
