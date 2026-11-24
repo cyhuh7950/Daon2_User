@@ -266,7 +266,7 @@ export function SlidesViewer({ content, evidence, onOpenEvidence }) {
   return <div className="studio-slides">
     <div className="studio-thumbs" role="list">{slides.map((s, i) => <button key={i} role="listitem" type="button" className="studio-thumb" aria-current={i === index ? "true" : undefined} onClick={() => setIndex(i)}>{i + 1}. {s.title}</button>)}</div>
     <div>
-      <div className="studio-slide" style={slide.layout === "title" ? { display: "flex", flexDirection: "column", justifyContent: "center", textAlign: "center" } : undefined}>
+      <div className="studio-slide" style={slide.layout === "title" ? { display: "flex", flexDirection: "column", justifyContent: "safe center", textAlign: "center" } : undefined}>
         <h4>{slide.title}</h4>
         {slide.layout === "table" && slide.table
           ? <table className="studio-table"><thead><tr>{slide.table.columns.map((c, i) => <th key={i}>{c}</th>)}</tr></thead><tbody>{slide.table.rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody></table>

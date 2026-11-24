@@ -184,5 +184,19 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(service.export(None, "sv2-x", "csv", None).media_type, "text/csv; charset=utf-8")
 
 
+    def test_service_rejects_export_while_outline_review_is_pending(self):
+        # N1-B10 실서버: 구성 검토 중(장 목록만 있고 본문 없음) 내려받으면 PPTX_EMPTY 500이 났다.
+        for type_id, body in (("slides", {"title": "", "slides": [], "outline_review": [{"title": "장", "points": ["요지"]}]}),
+                              ("report", {"title": "", "sections": [], "outline_review": [{"heading": "절"}]})):
+            with self.subTest(type_id=type_id):
+                service = StudioV2Service.__new__(StudioV2Service)
+                service.get_output = lambda ctx, oid, rev, t=type_id, b=body: {  # type: ignore[method-assign]
+                    "output_id": oid, "type_id": t, "title": "t", "status": "completed", "evidence": [],
+                    "revision": {"revision_no": 1, "content": {"body": b}}}
+                fmt = "pptx" if type_id == "slides" else "docx"
+                with self.assertRaises(StudioError) as rejected:
+                    service.export(None, "sv2-x", fmt, None)
+                self.assertEqual((rejected.exception.code, rejected.exception.status), ("OUTLINE_REVIEW_PENDING", 409))
+
 if __name__ == "__main__":
     unittest.main()

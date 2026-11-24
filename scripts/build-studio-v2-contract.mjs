@@ -18,7 +18,7 @@ export const ERROR_CODES = [
   "CHAT_EDIT_UNSUPPORTED", "CHAT_EDIT_BUSY", "CHAT_EDIT_STALE", "CHAT_EDIT_INVALID", "CHAT_EDIT_TOO_LARGE", "CHAT_EDIT_STATE_INVALID",
   "FORBIDDEN", "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
   "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
-  "OUTLINE_INVALID",
+  "OUTLINE_INVALID", "OUTLINE_REVIEW_PENDING",
 ];
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const exact = (properties, required = Object.keys(properties)) => ({ type: "object", additionalProperties: false, required, properties });

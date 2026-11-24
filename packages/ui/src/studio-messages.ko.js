@@ -140,6 +140,7 @@ export const STUDIO_ERRORS = Object.freeze({
   STUDIO_REVISION_TOO_LARGE: "내용이 너무 큽니다.",
   STUDIO_INPUT_INVALID: "입력을 확인하세요.",
   OUTLINE_INVALID: "구성 목록이 올바르지 않습니다. 빈 제목이나 개수·글자 수 상한을 넘은 항목을 고친 뒤 다시 확정하세요.",
+  OUTLINE_REVIEW_PENDING: "구성을 확정한 뒤에 내려받을 수 있습니다. 검토 화면에서 '이대로 만들기'를 누르세요.",
   EXPORT_FORMAT_UNSUPPORTED: "지원하지 않는 형식입니다.",
   RESOURCE_UNAVAILABLE: "찾을 수 없는 항목입니다.",
   IDEMPOTENCY_CONFLICT: "같은 요청이 이미 처리되었습니다.",

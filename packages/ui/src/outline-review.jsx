@@ -63,7 +63,8 @@ export function OutlineReviewEditor({ typeId, body, onConfirm, onCancel }) {
   const rules = OUTLINE_RULES[typeId];
   const counter = useRef(0);
   const nextKey = () => { counter.current += 1; return counter.current; };
-  const [title, setTitle] = useState(String(body?.title ?? ""));
+  // 서버가 문서 제목을 비워 보내면 첫 항목 제목으로 채운다(N1-B11). 사용자가 고칠 수 있다.
+  const [title, setTitle] = useState(() => String(body?.title || body?.outline_review?.[0]?.title || ""));
   const [items, setItems] = useState(() => fromServer(typeId, body?.outline_review, nextKey));
   const [pending, setPending] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -106,8 +107,8 @@ export function OutlineReviewEditor({ typeId, body, onConfirm, onCancel }) {
         {rules.narration && <textarea aria-label={msg("outline.label.narration", { n, unit })} maxLength={rules.narration} rows={3} value={item.narration}
           placeholder={msg("outline.placeholder.narration")} onChange={(event) => change(index, { narration: event.target.value })} />}
         {item.list.length > 0 && <ul className="studio-outline-review__points">{item.list.map((value, at) => <li key={at}>
-          <input aria-label={msg("outline.label.list_item", { n, unit, field, m: at + 1 })} maxLength={rules.listItem} value={value}
-            onChange={(event) => change(index, { list: item.list.map((old, i) => (i === at ? event.target.value : old)) })} />
+          <textarea rows={2} aria-label={msg("outline.label.list_item", { n, unit, field, m: at + 1 })} maxLength={rules.listItem} value={value}
+            onChange={(event) => change(index, { list: item.list.map((old, i) => (i === at ? event.target.value.replace(/\s*\n\s*/gu, " ") : old)) })} />
           <button type="button" className="studio-btn studio-outline-review__small" aria-label={msg("outline.label.list_remove", { n, unit, field, m: at + 1 })}
             onClick={() => change(index, { list: item.list.filter((_, i) => i !== at) })}>{msg("outline.remove")}</button>
         </li>)}</ul>}

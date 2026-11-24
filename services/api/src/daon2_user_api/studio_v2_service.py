@@ -79,6 +79,10 @@ class StudioV2Service(PostgresStudioV2Repository):
             raise StudioError("EXPORT_FORMAT_UNSUPPORTED", 400)  # 템플릿이 제공하지 않는 형식(예: 약관·계약서의 PPTX)
         if output.get("revision") is None:
             raise StudioError("STUDIO_VERSION_CONFLICT", 409)
+        body = content.get("body")
+        if isinstance(body, dict) and body.get("outline_review"):
+            # N1-B10: 구성 검토 중에는 본문이 없다. 빈 파일 생성 오류(500) 대신 확정 뒤 받으라고 알린다.
+            raise StudioError("OUTLINE_REVIEW_PENDING", 409)
         type_id = str(output["type_id"])
         if type_id in _MEDIA_KINDS:
             stem = safe_stem(str(output.get("title", "")))

@@ -359,3 +359,46 @@ test("확정한 구성으로 만든 동영상은 장면별 근거가 없어도 �
     assert.ok(!alerts(view.container).includes("근거"), "근거 없음은 경고(alert)로 보이지 않는다");
   } finally { await view.close(); }
 });
+
+// ---- N1-B10·B11 (UAT-09) ----
+test("검토 중에는 머리줄에 '다운로드'가 없고, 완성된 산출물에는 있다", async () => {
+  const done = item({ output_id: OID("d"), title: "완성된 발표", type_id: "slides" });
+  const studio = fakeStudio({ outputs: [item(), done] });
+  studio.exportFormats = () => ["pptx"];
+  const base = studio.getOutput;
+  studio.getOutput = async (id) => (id === done.output_id
+    ? { ...done, settings: {}, evidence: [], assets: [], revision: { content: { body: { title: "발표", slides: [{ layout: "title", title: "표지", bullets: [], notes: "", refs: [] }] } } } }
+    : base(id));
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "열기: 발표 자료"));
+    assert.ok(text(view.container).includes("구성 검토 중"));
+    assert.ok(!buttonByText(view.container, "다운로드"), "검토 중에는 내려받을 본문이 없다");
+    await view.click(byLabel(view.container, "목록으로"));
+    await view.click(byLabel(view.container, "열기: 완성된 발표"));
+    assert.ok(Boolean(buttonByText(view.container, "다운로드")), "완성된 산출물은 내려받을 수 있다");
+  } finally { await view.close(); }
+});
+
+for (const [title, label] of [["발표 자료", "2번 장 요지 1"], ["동영상 개요", "2번 장면 글머리 1"]]) {
+  test(`${title} 검토의 요지·글머리 칸은 긴 문장이 잘리지 않게 줄바꿈되는 입력칸이다`, async () => {
+    const view = await mount(fakeStudio());
+    try {
+      await view.click(byLabel(view.container, `열기: ${title}`));
+      const field = byLabel(view.container, label);
+      assert.ok(field, `${label} 칸이 있어야 한다`);
+      assert.equal(field.tagName, "TEXTAREA");
+      await type(view, label, "첫 줄\n둘째 줄");
+      assert.equal(byLabel(view.container, label).value, "첫 줄 둘째 줄", "요지·글머리는 한 줄 문장으로 저장한다");
+    } finally { await view.close(); }
+  });
+}
+
+test("서버가 문서 제목을 비워 보내면 문서 제목 칸을 첫 장 제목으로 채운다", async () => {
+  const studio = fakeStudio({ bodies: { slides: { ...SLIDES_REVIEW, title: "" }, video_overview: VIDEO_REVIEW } });
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "열기: 발표 자료"));
+    assert.equal(byLabel(view.container, "문서 제목").value, "표지");
+  } finally { await view.close(); }
+});
