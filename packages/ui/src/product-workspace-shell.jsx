@@ -18,6 +18,7 @@ import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
 import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citationKeys, citationOriginLabel, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import { ManualMarkdown } from "./manual-markdown.jsx";
+import { filterManualToc, manualToc } from "./manual-toc.js";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
 import { SourceGroupsList } from "./source-groups.jsx";
@@ -990,6 +991,9 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [manualManifest, setManualManifest] = useState(null);
   const [manualDocument, setManualDocument] = useState(null);
   const [manualSearch, setManualSearch] = useState("");
+  // 설명서 목차(N1-B15): 지금 보고 있는 절과 본문 칸.
+  const [manualActive, setManualActive] = useState(null);
+  const manualReaderRef = useRef(null);
   const [manualPending, setManualPending] = useState(false);
   const [manualSafeError, setManualSafeError] = useState(null);
   const [sourceAction, setSourceAction] = useState(null);
@@ -2053,6 +2057,29 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
       setManualPending(false);
     }
   };
+  // 문서가 하나뿐이면 창을 열 때 바로 그 문서를 연다(N1-B15). 오류가 나면 다시 시도하지 않는다.
+  useEffect(() => {
+    if (modalView === "manual" && manualManifest?.documents.length === 1 && !manualDocument && !manualPending && !manualSafeError) {
+      void readManual(manualManifest.documents[0].document_id);
+    }
+  }, [modalView, manualManifest, manualDocument, manualPending, manualSafeError]); // eslint-disable-line react-hooks/exhaustive-deps
+  const manualTocItems = manualDocument ? filterManualToc(manualToc(manualDocument.text), manualSearch) : [];
+  const openManualSection = (id) => {
+    setManualActive(id);
+    manualReaderRef.current?.querySelector(`[id="${id}"]`)?.scrollIntoView({ block: "start" });
+  };
+  // 본문을 스크롤하면 화면 위쪽에 있는 절을 목차에 표시한다.
+  const trackManualSection = (event) => {
+    const body = event.target;
+    if (!(body instanceof HTMLElement) || !body.classList.contains("manual-reader-body")) return;
+    const top = body.getBoundingClientRect().top + 24;
+    let current = null;
+    for (const heading of body.querySelectorAll("h4[id]")) {
+      if (heading.getBoundingClientRect().top <= top) current = heading.id;
+      else break;
+    }
+    if (current && current !== manualActive) setManualActive(current);
+  };
   const downloadManual = async (documentId, format) => {
     if (manualPending || typeof adapter?.downloadManual !== "function") return;
     setManualPending(true);
@@ -2617,19 +2644,26 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           </div> : modalView === "manual" ? <div className="workspace-modal-content manual-hub" aria-live="polite">
             <div className="manual-hub-toolbar">
               <div><strong>Daon 문서 Hub</strong><small>{manualManifest ? `Release ${manualManifest.release_version} · ${manualManifest.language}` : "Release 정보를 확인하고 있습니다."}</small></div>
-              <label><span className="sr-only">설명서 검색</span><input type="search" value={manualSearch} onChange={(event) => setManualSearch(event.target.value)} placeholder="문서 제목 또는 설명 검색" disabled={!manualManifest || manualPending} /></label>
+              <label><span className="sr-only">설명서 검색</span><input type="search" value={manualSearch} onChange={(event) => setManualSearch(event.target.value)} placeholder="문서·절 이름 검색" disabled={!manualManifest} /></label>
             </div>
             {manualPending && !manualManifest ? <div className="modal-unavailable" role="status">사용자 설명서를 불러오고 있습니다.</div> : null}
             {manualSafeError ? <div className="modal-unavailable" role="alert"><strong>사용자 설명서를 처리하지 못했습니다.</strong><p>허용된 Release 문서를 다시 확인해 주세요.</p><button type="button" disabled={manualPending} onClick={() => void loadManualHub()}>다시 불러오기</button></div> : null}
             <div className="manual-hub-layout">
-              <nav className="manual-document-list" aria-label="Daon 설명서 목록">
-                {manualManifest?.documents.filter((item) => `${item.title} ${item.summary}`.toLocaleLowerCase("ko-KR").includes(manualSearch.trim().toLocaleLowerCase("ko-KR"))).map((item) => <article key={item.document_id} data-manual-scope={item.auth_scope}>
-                  <button type="button" aria-pressed={manualDocument?.document_id === item.document_id} disabled={manualPending} onClick={() => void readManual(item.document_id)}><strong>{item.title}</strong><small>{item.summary}</small><span>Web에서 읽기</span></button>
-                  <div><button type="button" disabled={manualPending} onClick={() => void downloadManual(item.document_id, "docx")}>DOCX</button><button type="button" disabled={manualPending} onClick={() => void downloadManual(item.document_id, "pdf")}>PDF</button></div>
-                </article>)}
-              </nav>
-              <article className="manual-reader" aria-label="선택한 설명서 본문">
-                {manualDocument ? <><header><div><strong>{manualDocument.title}</strong><small>검증된 Release Markdown 정본</small></div><button type="button" onClick={() => setManualDocument(null)}>목록 보기</button></header><ManualMarkdown text={manualDocument.text} /></> : <div className="manual-reader-empty"><span aria-hidden="true">▤</span><strong>읽을 문서를 선택해 주세요.</strong><small>문서별 공개 범위와 로그인 후 조직 전용 절차를 구분해 제공합니다.</small></div>}
+              <div className="manual-hub-side">
+                <nav className="manual-document-list" aria-label="Daon 설명서 목록">
+                  {manualManifest?.documents.filter((item) => manualDocument || `${item.title} ${item.summary}`.toLocaleLowerCase("ko-KR").includes(manualSearch.trim().toLocaleLowerCase("ko-KR"))).map((item) => <article key={item.document_id} data-manual-scope={item.auth_scope}>
+                    <button type="button" aria-pressed={manualDocument?.document_id === item.document_id} disabled={manualPending} onClick={() => void readManual(item.document_id)}><strong>{item.title}</strong><small>{item.summary}</small><span>Web에서 읽기</span></button>
+                    <div><button type="button" disabled={manualPending} onClick={() => void downloadManual(item.document_id, "docx")}>DOCX</button><button type="button" disabled={manualPending} onClick={() => void downloadManual(item.document_id, "pdf")}>PDF</button></div>
+                  </article>)}
+                </nav>
+                {manualDocument ? <nav className="manual-toc" aria-label="설명서 목차">
+                  {manualTocItems.length ? <ol>{manualTocItems.map((item) => <li key={item.id} data-level={item.level}>
+                    <button type="button" aria-current={manualActive === item.id ? "location" : undefined} onClick={() => openManualSection(item.id)}>{item.title}</button>
+                  </li>)}</ol> : <p>찾는 절이 없습니다.</p>}
+                </nav> : null}
+              </div>
+              <article className="manual-reader" aria-label="선택한 설명서 본문" ref={manualReaderRef} onScrollCapture={trackManualSection}>
+                {manualDocument ? <><header><div><strong>{manualDocument.title}</strong><small>검증된 Release Markdown 정본</small></div></header><ManualMarkdown text={manualDocument.text} /></> : <div className="manual-reader-empty"><span aria-hidden="true">▤</span><strong>{manualPending ? "설명서를 여는 중입니다." : "읽을 문서를 선택해 주세요."}</strong><small>문서별 공개 범위와 로그인 후 조직 전용 절차를 구분해 제공합니다.</small></div>}
               </article>
             </div>
           </div> : <div className="operations-status-grid" aria-live="polite">
