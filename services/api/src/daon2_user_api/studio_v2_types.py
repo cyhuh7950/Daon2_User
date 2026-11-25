@@ -69,6 +69,7 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
         _t("memo", ("md", "txt"), requires_llm=False),
         _t("authored_document", ("docx", "pptx", "pdf"), phase="A1",
            schema={"template_id": {"type": "string", "maxLength": 64}}),
+        _t("web_page", ("html",), schema={"page_request": {"type": "string", "maxLength": 2000}}),
     )
 }
 
