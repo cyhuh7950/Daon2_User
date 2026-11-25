@@ -106,7 +106,7 @@ const TURN = `svt-${"b".repeat(32)}`;
 const EDIT_OID = `sv2-${"a".repeat(32)}`;
 const EDIT_BASE = `/bff/api/workspaces/ws-1/notebooks/nb-1/studio/outputs/${EDIT_OID}/edit-turns`;
 const editTurn = (over = {}) => ({ turn_id: TURN, output_id: EDIT_OID, base_revision: 3, instruction: "고쳐", state: "ready", reply: "됨",
-  changes: [{ op: "replace", id: "s1.b1", before_text: "가", after_text: "나", reason: "요청", anchor_text: "" }], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00", ...over });
+  changes: [{ op: "replace", id: "s1.b1", before_text: "가", after_text: "나", reason: "요청", anchor_text: "" }], error_code: null, applied_revision: null, created_at: "2026-11-10T00:00:00+00:00", preview_html: null, ...over });
 const envelope = (data, status = 200) => Response.json({ data, meta: { trace_id: "t" } }, { status });
 
 test("대화 수정 API는 경로·Idempotency-Key·응답 모양을 지킨다", async () => {
@@ -120,6 +120,9 @@ test("대화 수정 API는 경로·Idempotency-Key·응답 모양을 지킨다",
 
   const turns = await listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope({ turns: [editTurn()] }) });
   assert.equal(turns[0].changes[0].after_text, "나");
+  // WO-N8: 서버는 모든 고친 안에 preview_html(웹 페이지 ready면 문자열, 그 밖에는 null)을 싣는다.
+  const page = await listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope({ turns: [editTurn({ preview_html: "<!DOCTYPE html><p>a</p>" })] }) });
+  assert.equal(page[0].preview_html, "<!DOCTYPE html><p>a</p>");
 
   const applied = await applyStudioEditTurn("ws-1", EDIT_OID, TURN, { notebookId: "nb-1", fetchImpl: async (url) => { assert.equal(url, `${EDIT_BASE}/${TURN}/apply`); return envelope({ output_id: EDIT_OID, turn_id: TURN, revision_no: 4 }, 201); } });
   assert.equal(applied.revision_no, 4);
@@ -128,7 +131,7 @@ test("대화 수정 API는 경로·Idempotency-Key·응답 모양을 지킨다",
 });
 
 test("대화 수정 API는 잘못된 응답과 잘못된 번호를 거부한다", async () => {
-  for (const bad of [{ turns: [editTurn({ extra: 1 })] }, { turns: [editTurn({ state: "unknown" })] }, { turns: [editTurn({ changes: [{ op: "move", id: "x", before_text: "", after_text: "", reason: "" }] })] }, { turns: "x" }]) {
+  for (const bad of [{ turns: [editTurn({ extra: 1 })] }, { turns: [editTurn({ preview_html: 1 })] }, { turns: [editTurn({ state: "unknown" })] }, { turns: [editTurn({ changes: [{ op: "move", id: "x", before_text: "", after_text: "", reason: "" }] })] }, { turns: "x" }]) {
     await assert.rejects(listStudioEditTurns("ws-1", EDIT_OID, { notebookId: "nb-1", fetchImpl: async () => envelope(bad) }), { code: "STUDIO_RESPONSE_INVALID" });
   }
   await assert.rejects(applyStudioEditTurn("ws-1", EDIT_OID, "../x", { notebookId: "nb-1", fetchImpl: async () => { throw new Error("MUST_NOT_SEND"); } }), { code: "STUDIO_INPUT_INVALID" });

@@ -182,13 +182,14 @@ export async function createStudioRevision(workspaceId, outputId, { notebookId, 
 const TURN_ID = /^svt-[0-9a-f]{32}$/u;
 const TURN_STATES = new Set(["queued", "working", "ready", "no_change", "failed", "applied", "discarded"]);
 const CHANGE_OPS = new Set(["replace", "insert_after", "delete"]);
-const TURN_KEYS = ["turn_id", "output_id", "base_revision", "instruction", "state", "reply", "changes", "error_code", "applied_revision", "created_at"];
+// preview_html(WO-N8): 웹 페이지 고친 안의 미리보기 HTML. ready일 때만 문자열, 그 밖에는 null.
+const TURN_KEYS = ["turn_id", "output_id", "base_revision", "instruction", "state", "reply", "changes", "error_code", "applied_revision", "created_at", "preview_html"];
 const CHANGE_KEYS = ["op", "id", "before_text", "after_text", "reason", "anchor_text"];
 const validChange = (c) => exact(c, CHANGE_KEYS) && CHANGE_OPS.has(c.op) && typeof c.id === "string" && typeof c.before_text === "string"
   && typeof c.after_text === "string" && typeof c.reason === "string" && typeof c.anchor_text === "string";
 const validTurn = (t) => exact(t, TURN_KEYS) && TURN_ID.test(t.turn_id) && TURN_STATES.has(t.state) && typeof t.instruction === "string"
   && (t.reply === null || typeof t.reply === "string") && Array.isArray(t.changes) && t.changes.every(validChange)
-  && (t.error_code === null || ERROR_CODE.test(t.error_code));
+  && (t.error_code === null || ERROR_CODE.test(t.error_code)) && (t.preview_html === null || typeof t.preview_html === "string");
 
 function turnPath(workspaceId, notebookId, outputId, turnId) {
   if (!TURN_ID.test(turnId ?? "")) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
