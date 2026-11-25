@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shouldSubmitOnEnter } from "./answer-presentation.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
+import { WebPageFrame } from "./studio-web-page-viewer.jsx";
 
 // 완료 자료 대화 수정(WO-K5): 말로 지시하고, 고치기 전·후를 본 뒤 반영한다.
 
@@ -31,6 +32,9 @@ function Turn({ turn, busy, onApply, onDiscard }) {
     {turn.reply && <p>{turn.reply}</p>}
     {turn.state === "failed" && <p className="studio-alert" role="alert">{studioErrorMessage(turn.error_code)}</p>}
     {turn.changes.map((change, index) => <Change key={index} change={change} />)}
+    {/* 웹 페이지 고친 안(WO-N8): 서버가 정리한 preview_html은 보기와 같은 격리 iframe으로만 보인다. */}
+    {turn.state === "ready" && typeof turn.preview_html === "string" && turn.preview_html
+      && <div className="studio-web-page__preview"><WebPageFrame html={turn.preview_html} title={msg("studio.web_page.preview")} /></div>}
     {turn.state === "ready" && <div className="studio-chat-edit__actions">
       <button type="button" className="studio-btn studio-btn--primary" disabled={busy} onClick={() => onApply(turn.turn_id)}>{msg("studio.chat_edit.apply")}</button>
       <button type="button" className="studio-btn" disabled={busy} onClick={() => onDiscard(turn.turn_id)}>{msg("studio.chat_edit.discard")}</button>

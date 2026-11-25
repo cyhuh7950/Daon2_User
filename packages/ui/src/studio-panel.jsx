@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { StudioIcon, STUDIO_TYPE_STYLE } from "./studio-icon.js";
 import {
   TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds,
@@ -97,6 +97,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
   const [output, setOutput] = useState(null);
   const [error, setError] = useState(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [includeSources, setIncludeSources] = useState(true);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -110,7 +111,8 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
   const [stepUp, setStepUp] = useState(null); // { format, pending, error } — 조직이 내보내기 추가 인증을 켠 경우
   const download = async (format, grant) => {
     try {
-      const { bytes, contentType, disposition } = await studio.downloadExport(outputId, format, grant ? { stepUp: grant } : undefined);
+      const options = { ...(grant ? { stepUp: grant } : {}), ...(format === "html" ? { includeSources } : {}) };
+      const { bytes, contentType, disposition } = await studio.downloadExport(outputId, format, Object.keys(options).length ? options : undefined);
       setStepUp(null);
       const blob = new Blob([bytes], { type: contentType });
       const url = globalThis.URL.createObjectURL(blob);
@@ -168,7 +170,10 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
       {exportFormats.length > 0 && !reviewing && <span style={{ position: "relative" }}>
         <button type="button" className="studio-btn" aria-haspopup="menu" aria-expanded={downloadOpen} onClick={() => setDownloadOpen((v) => !v)}>{msg("studio.menu.download")}</button>
         {downloadOpen && <div className="studio-menu" role="menu" style={{ top: 44 }} onKeyDown={(event) => { if (event.key === "Escape") setDownloadOpen(false); }}>
-          {exportFormats.map((format) => <button key={format} type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button>)}</div>}
+          {exportFormats.map((format) => <Fragment key={format}>
+            {format === "html" && <label className="studio-menu__check">
+              <input type="checkbox" checked={includeSources} onChange={(event) => setIncludeSources(event.target.checked)} /> {msg("studio.web_page.include_sources")}</label>}
+            <button type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button></Fragment>)}</div>}
       </span>}
     </div>
     <div className="studio-detail__body">

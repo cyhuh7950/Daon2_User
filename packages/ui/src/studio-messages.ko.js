@@ -23,6 +23,8 @@ export const STUDIO_MESSAGES = Object.freeze({
   "studio.web_page.request.hint": "어떤 페이지를 만들지 적어 주세요. 최대 2000자.",
   "studio.web_page.excluded": "근거 부족으로 뺀 내용 {n}건",
   "studio.web_page.include_sources": "출처 목록 넣기",
+  "studio.web_page.frame": "웹 페이지: {title}",
+  "studio.web_page.preview": "고친 안 웹 페이지 미리 보기",
   "studio.progress.web_page.content": "내용 만드는 중",
   "studio.progress.web_page.html": "페이지 만드는 중",
   "studio.tile.hint.report": "소스를 기반으로 보고서 생성",

@@ -149,9 +149,11 @@ export function browserSessionCookieName(profile = "production") {
   return profile === "wsl_http_qa" ? WSL_HTTP_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
 }
 
-const STUDIO_V2_EXPORT_FORMATS = new Set(["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt"]);
+const STUDIO_V2_EXPORT_FORMATS = new Set(["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt", "html"]);
 const STUDIO_V2_EXPORT_BYTES = 32 * 1024 * 1024;
 const STUDIO_V2_REVISION_QUERY = new Set(["revision"]);
+// 웹 페이지 HTML 내려받기(WO-N8): 출처 목록 넣기 선택을 API로 넘긴다.
+const STUDIO_V2_EXPORT_QUERY = new Set(["revision", "include_sources"]);
 const STUDIO_V2_ACTIONS = new Map([
   ["edit-turns", ["GET", "POST"]], ["revisions", ["POST"]], ["regenerate", ["POST"]], ["cancel", ["POST"]], ["provenance", ["GET"]],
   ["sharing", ["GET"]], ["learning-attempts", ["GET", "POST"]], ["source", ["POST"]],
@@ -202,7 +204,7 @@ function studioV2Route(method, segments) {
     return make(`/outputs/${id}/edit-turns/${encodeURIComponent(rest[3])}/${rest[4]}`, ["POST"]);
   }
   if (rest.length === 4 && rest[2] === "exports" && STUDIO_V2_EXPORT_FORMATS.has(rest[3])) {
-    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: STUDIO_V2_REVISION_QUERY, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
+    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: STUDIO_V2_EXPORT_QUERY, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
   }
   if (rest.length === 3 && rest[2] === "audio") {
     return make(`/outputs/${id}/audio`, ["GET"], { timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES });

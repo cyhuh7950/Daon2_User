@@ -40,6 +40,7 @@ test("Studio v2 읽기 경로는 정확한 세그먼트로만 전달된다", asy
     [get("/outputs/sv2-1/audio"), seg("outputs", "sv2-1", "audio"), "/outputs/sv2-1/audio"],
     [get("/outputs/sv2-1/video"), seg("outputs", "sv2-1", "video"), "/outputs/sv2-1/video"],
     [get("/outputs/sv2-1/exports/vtt"), seg("outputs", "sv2-1", "exports", "vtt"), "/outputs/sv2-1/exports/vtt"],
+    [get("/outputs/sv2-1/exports/html", "?revision=2&include_sources=0"), seg("outputs", "sv2-1", "exports", "html"), "/outputs/sv2-1/exports/html?revision=2&include_sources=0"],
     [get("/outputs/sv2-1/evidence/ref-1/content", "?revision=1"), seg("outputs", "sv2-1", "evidence", "ref-1", "content"), "/outputs/sv2-1/evidence/ref-1/content?revision=1"],
   ];
   for (const [request, segments, suffix] of cases) {
