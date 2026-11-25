@@ -285,12 +285,19 @@ BEHAVIOR_SCRIPT = (
     "(function(){"
     "function all(root,q){return Array.prototype.slice.call(root.querySelectorAll(q));}"
     'function own(box,el){return el.closest("[data-tabs]")===box;}'
-    "function hide(el,off){if(off){el.setAttribute(\"hidden\",\"\");}else{el.removeAttribute(\"hidden\");}}"
+    # 모델 CSS가 hidden 대신 aria-hidden·display·.active로 보이고 숨길 수 있어 모두 함께 맞춘다(ysna 1차 확인).
+    'function hide(el,off){if(off){el.setAttribute("hidden","");el.setAttribute("aria-hidden","true");el.style.display="none";}'
+    'else{el.removeAttribute("hidden");el.setAttribute("aria-hidden","false");el.style.display="";'
+    'if(getComputedStyle(el).display==="none"){el.style.display="block";}}'
+    'el.classList.toggle("active",!off);}'
+    # 영역이 [data-tabs] 밖(같은 부모의 형제)에 있으면 그 부모 안에서 어느 탭 묶음에도 속하지 않은 영역을 쓴다.
+    'function panels(box){var mine=all(box,"[data-panel]").filter(function(p){return own(box,p);});'
+    'if(mine.length||!box.parentElement){return mine;}'
+    'return all(box.parentElement,"[data-panel]").filter(function(p){return !p.closest("[data-tabs]");});}'
     "function show(box,name){"
-    'all(box,"[data-tab]").forEach(function(b){if(own(box,b)){'
-    'b.setAttribute("aria-selected",b.getAttribute("data-tab")===name?"true":"false");}});'
-    'all(box,"[data-panel]").forEach(function(p){if(own(box,p)){'
-    'hide(p,p.getAttribute("data-panel")!==name);}});}'
+    'all(box,"[data-tab]").forEach(function(b){if(own(box,b)){var on=b.getAttribute("data-tab")===name;'
+    'b.setAttribute("aria-selected",on?"true":"false");b.classList.toggle("active",on);}});'
+    'panels(box).forEach(function(p){hide(p,p.getAttribute("data-panel")!==name);});}'
     "function init(){"
     'all(document,"[data-tabs]").forEach(function(box){'
     'var first=all(box,"[data-tab]").filter(function(b){return own(box,b);})[0];'

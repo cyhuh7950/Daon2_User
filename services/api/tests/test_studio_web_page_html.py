@@ -386,6 +386,16 @@ def test_behavior_script_shape_and_attach() -> None:
     assert attach_behavior(html).count("data-daon-behavior") == 1
 
 
+def test_behavior_script_handles_model_layouts_seen_on_server() -> None:
+    # ysna 실서버 1차 확인(2026-11-25): 모델이 [data-tabs]를 버튼 줄에만 달고 영역은 형제 요소에 두었고,
+    # CSS가 aria-hidden 값으로 영역을 보이고 숨겨 hidden 속성만 바꾸는 스크립트로는 탭이 바뀌지 않았다.
+    body = BEHAVIOR_SCRIPT[len("<script data-daon-behavior>"):-len("</script>")]
+    assert 'setAttribute("aria-hidden"' in body  # CSS가 aria-hidden으로 보이고 숨기는 경우
+    assert "style.display" in body  # CSS가 display를 따로 정한 경우에도 실제 표시를 맞춘다
+    assert "parentElement" in body  # 영역이 [data-tabs] 밖(형제)에 있는 경우
+    assert 'classList.toggle("active"' in body  # .active 관례를 쓰는 CSS
+
+
 def test_finalize_inserts_behavior_then_bridge_and_strip_keeps_behavior() -> None:
     final = finalize_html(_page("<h2>개요</h2><p>a</p>"), "개요 a", "", ["개요"])
     b, r, end = final.index(BEHAVIOR_SCRIPT), final.index(BRIDGE_SCRIPT), final.index("<h2>")
