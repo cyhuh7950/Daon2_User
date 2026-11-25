@@ -178,17 +178,28 @@ def _block_key(block: Mapping[str, Any]) -> tuple[Any, ...]:
     return tuple(sorted((k, repr(v)) for k, v in block.items() if k != "insufficient"))
 
 
-def mark_edited_blocks(new_body: Mapping[str, Any], old_body: Mapping[str, Any], extra_text: str) -> dict[str, Any]:
+def _ref_scoped_allowed(refs: Sequence[str], old_body: Mapping[str, Any], plain_by_ref: Mapping[str, str]) -> frozenset[str]:
+    """바뀐 블록 하나의 허용 anchor: 그 블록 refs에 해당하는 새 자료 본문 + 이전 본문에서 같은 ref를 가진 근거 확인 블록 글."""
+    wanted = set(refs)
+    parts = [str(plain_by_ref[r]) for r in refs if r in plain_by_ref]
+    for section in verified_body(old_body)["sections"]:
+        parts.extend(_block_text(b) for b in section["blocks"] if wanted & set(b.get("refs") or []))
+    return _evidence_anchors("\n".join(parts))
+
+
+def mark_edited_blocks(new_body: Mapping[str, Any], old_body: Mapping[str, Any], plain_by_ref: Mapping[str, str]) -> dict[str, Any]:
     """대화로 고친 본문의 바뀐 블록을 1단계와 같은 규칙으로 다시 판정한 사본을 돌려준다.
 
-    허용 근거 글 = 이전 본문의 근거 확인 글(verified_text) + 이번에 새로 찾은 자료 글(extra_text).
+    plain_by_ref: 이번에 새로 찾은 자료의 근거 번호 → 본문 글(태그·파일 이름·위치 글 제외).
     - 같은 자리의 이전 블록과 내용이 같으면 원래 판정을 그대로 둔다.
-    - 바뀌었거나 새 블록이면 유효 refs가 없거나 숫자·날짜·식별자가 허용 근거 글에 없을 때 insufficient=True.
+    - 바뀌었거나 새 블록이면 유효 refs가 없거나, 숫자·날짜·식별자가 그 블록 refs의 근거 글(새 자료 중 같은 ref 본문 +
+      이전 본문에서 같은 ref를 가진 근거 확인 블록 글)에 없을 때 insufficient=True. 다른 ref 블록의 숫자는 근거가 아니다.
     - 자리가 밀린 블록이라도 이전에 근거 부족이던 블록과 내용이 같으면 근거 부족으로 둔다(승격하지 않는다).
-    - 절 제목의 anchor가 허용 근거 글에 없으면 그 절의 블록을 모두 근거 부족으로 둔다(1단계 규칙과 같다).
-    - 제목이 바뀌었으면 title_insufficient도 같은 방법으로 다시 정한다.
+    - 절 제목·제목은 이전 본문의 근거 확인 글(verified_text) + 새 자료 본문 전체로 본다. 절 제목의 anchor가 없으면
+      그 절의 블록을 모두 근거 부족으로 둔다(1단계 규칙과 같다). 제목이 바뀌었으면 title_insufficient도 다시 정한다.
     """
-    allowed = _evidence_anchors(verified_text(old_body) + "\n" + (extra_text or ""))
+    plain_by_ref = {str(k): str(v) for k, v in (plain_by_ref or {}).items()}
+    allowed = _evidence_anchors(verified_text(old_body) + "\n" + "\n".join(plain_by_ref.values()))
     old_sections = list(old_body.get("sections") or [])
     weak = {_block_key(b) for s in old_sections for b in s.get("blocks", []) if b.get("insufficient")}
     sections: list[dict[str, Any]] = []
@@ -206,8 +217,9 @@ def mark_edited_blocks(new_body: Mapping[str, Any], old_body: Mapping[str, Any],
             if old_block is not None and _block_key(old_block) == _block_key(item):
                 item["insufficient"] = bool(old_block.get("insufficient"))
             else:
-                item["insufficient"] = (not item.get("refs") or not _evidence_anchors(_block_text(item)).issubset(allowed)
-                                        or _block_key(item) in weak)
+                refs = [str(r) for r in (item.get("refs") or [])]
+                item["insufficient"] = (not refs or _block_key(item) in weak
+                                        or not _evidence_anchors(_block_text(item)).issubset(_ref_scoped_allowed(refs, old_body, plain_by_ref)))
             if not heading_ok:
                 item["insufficient"] = True
             blocks.append(item)

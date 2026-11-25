@@ -267,64 +267,84 @@ BAD_C = {"type": "paragraph", "text": "근거 없는 2026-01-05 일정", "refs":
 class MarkEditedBlocksTests(unittest.TestCase):
     def test_unchanged_blocks_keep_flags(self):
         old = _body(OK_A, BAD_C)
-        marked = mark_edited_blocks(copy.deepcopy(old), old, "")
+        marked = mark_edited_blocks(copy.deepcopy(old), old, {})
         self.assertEqual([b["insufficient"] for b in marked["sections"][0]["blocks"]], [False, True])
 
     def test_changed_block_without_refs_is_insufficient(self):
         old = _body(OK_A, OK_B)
         new = _body(OK_A, {**OK_B, "text": "장소는 별관이다.", "refs": []})
-        self.assertTrue(mark_edited_blocks(new, old, "")["sections"][0]["blocks"][1]["insufficient"])
+        self.assertTrue(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][1]["insufficient"])
 
     def test_changed_block_with_known_anchor_stays_verified(self):
         old = _body(OK_A, OK_B)
         new = _body(OK_A, {**OK_B, "text": "장소는 본관이고 예산은 500만 원이다.", "insufficient": True})
-        self.assertFalse(mark_edited_blocks(new, old, "")["sections"][0]["blocks"][1]["insufficient"])
+        self.assertFalse(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][1]["insufficient"])
 
     def test_new_anchor_found_in_extra_text_is_verified(self):
         old = _body(OK_A)
         new = _body(OK_A, {"type": "paragraph", "text": "참가비는 3만 원이다.", "refs": ["S2"]})
-        self.assertTrue(mark_edited_blocks(new, old, "")["sections"][0]["blocks"][1]["insufficient"])
-        self.assertFalse(mark_edited_blocks(new, old, "[찾은 자료]\n참가비 3만 원")["sections"][0]["blocks"][1]["insufficient"])
+        self.assertTrue(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][1]["insufficient"])
+        self.assertFalse(mark_edited_blocks(new, old, {"S2": "참가비 3만 원"})["sections"][0]["blocks"][1]["insufficient"])
+
+    # --- 최종 검토 I2: 바뀐 블록은 자기 refs의 근거 글로만 판정한다 ---
+
+    def test_number_from_block_with_other_refs_is_insufficient(self):
+        other = {"type": "paragraph", "text": "장소는 본관이다.", "refs": ["S2"], "insufficient": False}
+        old = _body(OK_A, other)
+        new = _body(OK_A, {**other, "text": "장소는 본관이고 예산은 500만 원이다."})
+        self.assertTrue(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][1]["insufficient"])
+
+    def test_number_from_block_with_same_ref_passes(self):
+        other = {"type": "paragraph", "text": "장소는 본관이다.", "refs": ["S2"], "insufficient": False}
+        old = _body(OK_A, other)
+        new = _body(OK_A, {**other, "text": "장소는 본관이고 예산은 500만 원이다.", "refs": ["S2", "S1"]})
+        self.assertFalse(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][1]["insufficient"])
+
+    def test_new_material_counts_only_for_matching_ref(self):
+        old = _body(OK_A)
+        new = _body(OK_A, {"type": "paragraph", "text": "참가비는 3만 원이다.", "refs": ["S2"]})
+        self.assertFalse(mark_edited_blocks(new, old, {"S2": "참가비 3만 원"})["sections"][0]["blocks"][1]["insufficient"])
+        self.assertTrue(mark_edited_blocks(new, old, {"S3": "참가비 3만 원"})["sections"][0]["blocks"][1]["insufficient"])
 
     def test_anchor_of_insufficient_old_block_does_not_count(self):
         old = _body(OK_A, BAD_C)
         new = _body(OK_A, BAD_C, {"type": "paragraph", "text": "2026-01-05에 연다.", "refs": ["S1"]})
-        self.assertTrue(mark_edited_blocks(new, old, "")["sections"][0]["blocks"][2]["insufficient"])
+        self.assertTrue(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][2]["insufficient"])
 
     def test_shifted_insufficient_block_is_not_promoted(self):
         weak = {"type": "paragraph", "text": "확인 안 된 설명", "refs": ["S1"], "insufficient": True}
         old = _body(OK_A, weak)
         new = _body(weak)  # 앞 블록을 지워 자리가 바뀌었다
-        self.assertTrue(mark_edited_blocks(new, old, "")["sections"][0]["blocks"][0]["insufficient"])
+        self.assertTrue(mark_edited_blocks(new, old, {})["sections"][0]["blocks"][0]["insufficient"])
 
     def test_changed_heading_with_unknown_anchor_marks_section(self):
         old = _body(OK_A, OK_B)
         new = _body(OK_A, OK_B, heading="2027년 개요")
-        self.assertEqual([b["insufficient"] for b in mark_edited_blocks(new, old, "")["sections"][0]["blocks"]], [True, True])
+        self.assertEqual([b["insufficient"] for b in mark_edited_blocks(new, old, {})["sections"][0]["blocks"]], [True, True])
         same = _body(OK_A, OK_B, heading="행사 개요")
-        self.assertEqual([b["insufficient"] for b in mark_edited_blocks(same, old, "")["sections"][0]["blocks"]], [False, False])
+        self.assertEqual([b["insufficient"] for b in mark_edited_blocks(same, old, {})["sections"][0]["blocks"]], [False, False])
 
     def test_edit_under_unsupported_old_heading_stays_insufficient(self):
         weak = {"type": "paragraph", "text": "설명", "refs": ["S1"], "insufficient": True}
         old = {**_body(OK_A), "sections": [*_body(OK_A)["sections"], {"heading": "2027년 계획", "blocks": [weak]}]}
         new = copy.deepcopy(old)
         new["sections"][1]["blocks"][0] = {"type": "paragraph", "text": "고친 설명", "refs": ["S1"]}
-        marked = mark_edited_blocks(new, old, "")
+        marked = mark_edited_blocks(new, old, {})
         self.assertTrue(marked["sections"][1]["blocks"][0]["insufficient"])
         self.assertFalse(marked["sections"][0]["blocks"][0]["insufficient"])
 
     def test_changed_title_is_rechecked(self):
         old = _body(OK_A)
-        self.assertTrue(mark_edited_blocks(_body(OK_A, title="2027 행사 안내"), old, "")["title_insufficient"])
-        self.assertFalse(mark_edited_blocks(_body(OK_A, title="새 행사 안내"), old, "")["title_insufficient"])
-        kept = mark_edited_blocks(_body(OK_A, title_insufficient=True), _body(OK_A, title_insufficient=True), "")
+        self.assertTrue(mark_edited_blocks(_body(OK_A, title="2027 행사 안내"), old, {})["title_insufficient"])
+        self.assertFalse(mark_edited_blocks(_body(OK_A, title="새 행사 안내"), old, {})["title_insufficient"])
+        kept = mark_edited_blocks(_body(OK_A, title_insufficient=True), _body(OK_A, title_insufficient=True), {})
         self.assertTrue(kept["title_insufficient"])
 
     def test_preserves_other_fields_and_does_not_mutate(self):
         old = _body(OK_A)
         new = _body({**OK_A, "text": "예산은 900만 원이다."})
         snapshot = copy.deepcopy(new)
-        marked = mark_edited_blocks(new, old, "")
+        marked = mark_edited_blocks(new, old, {})
         self.assertEqual(new, snapshot)
         self.assertEqual((marked["request"], marked["html"], marked["title"]), ("요청", "", "행사 안내"))
 
