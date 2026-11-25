@@ -50,3 +50,7 @@ test("창 배치: 도구줄은 늘어나지 않고 아래 두 칸이 남은 높�
   assert.match(rules(".manual-hub-side"), /overflow-y:\s*auto/u);
   assert.match(rules(".manual-reader-body"), /overflow:\s*auto|overflow-y:\s*auto/u);
 });
+
+test("지금 읽는 절이 바뀌면 왼쪽 목차도 그 항목이 보이게 따라간다", () => {
+  assert.match(shell, /useEffect\(\(\) => \{[\s\S]{0,300}manual-toc[\s\S]{0,200}scrollIntoView\(\{ block: "nearest" \}\)[\s\S]{0,80}\}, \[manualActive\]\)/u);
+});
