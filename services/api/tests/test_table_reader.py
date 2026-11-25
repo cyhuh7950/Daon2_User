@@ -312,5 +312,53 @@ class TableReaderTests(unittest.TestCase):
         self.assertEqual(table.columns[0].name, "가" * 200)
 
 
+    # --- review fix round 1 ---
+
+    def test_csv_header_row_is_physical_line(self):
+        content = '"제목\n둘째줄"\n이름,금액\n홍,100\n'.encode()
+        table = read_csv(content, header_row=3)
+        self.assertEqual([c.name for c in table.columns], ["이름", "금액"])
+        self.assertEqual(table.row_numbers, (4,))
+        self.assertCode("TABLE_HEADER_INVALID", read_csv, content, header_row=2)
+        cr_only = read_csv(b"t\ra,b\r1,2\r", header_row=2)
+        self.assertEqual([c.name for c in cr_only.columns], ["a", "b"])
+        self.assertEqual(cr_only.row_numbers, (3,))
+
+    def test_csv_delimiter_detected_on_header_line(self):
+        table = read_csv("월간 보고서\n이름\t금액\n홍\t100\n".encode(), header_row=2)
+        self.assertEqual([c.name for c in table.columns], ["이름", "금액"])
+        self.assertEqual(table.rows, (("홍", Decimal(100)),))
+
+    def test_max_cells_limit(self):
+        self.assertEqual(TableLimits().max_cells, 2_000_000)
+        rows = [[f"h{c}" for c in range(5)]] + [[1] * 5 for _ in range(1000)]
+        content = workbook([("S", sheet_xml(rows))])
+        self.assertLess(len(content), 20_000)
+        self.assertCode("TABLE_TOO_LARGE", read_xlsx, content, limits=TableLimits(max_cells=4999))
+        self.assertEqual(len(read_xlsx(content, limits=TableLimits(max_cells=5000)).rows), 1000)
+        csv_content = ("a,b\n" + "1,2\n" * 10).encode()
+        self.assertCode("TABLE_TOO_LARGE", read_csv, csv_content, limits=TableLimits(max_cells=19))
+
+    def test_time_and_duration_formats_stay_numbers(self):
+        styles = ('<styleSheet xmlns="%s"><numFmts count="3"><numFmt numFmtId="164" formatCode="[h]:mm:ss"/>'
+                  '<numFmt numFmtId="165" formatCode="mm:ss.0"/><numFmt numFmtId="166" formatCode="yyyy\\-mm"/></numFmts>'
+                  '<cellXfs count="7"><xf numFmtId="0"/><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="18"/>'
+                  '<xf numFmtId="46"/><xf numFmtId="166"/><xf numFmtId="22"/></cellXfs></styleSheet>') % NS
+        header = "".join(f'<c r="{_letter(i)}1" t="inlineStr"><is><t>h{i}</t></is></c>' for i in range(1, 7))
+        data = "".join(f'<c r="{_letter(i)}2" s="{i}"><v>46086.5</v></c>' for i in range(1, 7))
+        xml = f'<sheetData><row r="1">{header}</row><row r="2">{data}</row></sheetData>'
+        table = read_xlsx(workbook([("S", xml)], extra={"xl/styles.xml": styles}))
+        self.assertEqual([c.kind for c in table.columns], ["number", "number", "number", "number", "date", "date"])
+        self.assertEqual(table.rows[0][:4], (Decimal("46086.5"),) * 4)
+        self.assertEqual(table.rows[0][4:], (date(2026, 3, 5), date(2026, 3, 5)))
+
+    def test_cell_reference_row_mismatch_rejected(self):
+        xml = '<sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A3"><v>1</v></c></row></sheetData>'
+        self.assertCode("TABLE_FORMAT_UNSUPPORTED", read_xlsx, workbook([("S", xml)]))
+
+    def test_csv_field_over_size_limit_is_too_large(self):
+        self.assertCode("TABLE_TOO_LARGE", read_csv, b"a,b\n" + b"x" * 200_000 + b",1\n")
+
+
 if __name__ == "__main__":
     unittest.main()

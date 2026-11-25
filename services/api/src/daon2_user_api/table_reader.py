@@ -41,7 +41,7 @@ _CHUNK = 65536
 _SAFE_XML_ENCODINGS = {'utf-8', 'utf8', 'utf-16', 'utf-16le', 'utf-16be', 'us-ascii', 'ascii', 'iso-8859-1', 'latin-1', 'latin1'}
 # ko-KR/ja-JP/zh locales render these built-in ids as dates; they are absent
 # from the locale-neutral table, so classify them explicitly.
-_LOCALE_DATE_FORMAT_IDS = set(range(27, 37)) | set(range(50, 59))
+_LOCALE_DATE_FORMAT_IDS = (set(range(27, 37)) | set(range(50, 59))) - {32, 33, 55, 56}  # ko-KR 32/33/55/56 are times
 
 
 @dataclass(frozen=True)
@@ -49,6 +49,7 @@ class TableLimits:
     max_bytes: int = 20 * 1024 * 1024
     max_rows: int = 100_000
     max_columns: int = 100
+    max_cells: int = 2_000_000  # stored cells = kept rows x kept columns
 
 
 class TableReadError(Exception):
@@ -202,7 +203,6 @@ def _infer_and_convert(raw_rows, width, deadline):
             kinds.append('date')
         else:
             kinds.append('text')
-    rows = []
     for i, row in enumerate(raw_rows):
         if i % _DEADLINE_EVERY == 0:
             _check_deadline(deadline)
@@ -228,8 +228,8 @@ def _infer_and_convert(raw_rows, width, deadline):
                     out.append(parsed if parsed is not None else NotDate(value))
             else:
                 out.append(value.isoformat() if isinstance(value, date) else str(value))
-        rows.append(tuple(out))
-    return kinds, rows
+        raw_rows[i] = tuple(out)  # in place: never two full copies
+    return kinds, raw_rows
 
 
 def _header_names(raw_header, first, width):
@@ -258,6 +258,12 @@ def _build_table(*, deadline, file_name, source_format, sheet, header_row, raw_h
     )
     return Table(file_name=file_name, source_format=source_format, sheet=sheet, header_row=header_row,
                  columns=columns, rows=tuple(rows), row_numbers=tuple(row_numbers))
+
+
+def _admit_row(kept, width, limits):
+    """Checked while streaming, before the row is stored."""
+    if kept >= limits.max_rows or (kept + 1) * width > limits.max_cells:
+        _fail('TABLE_TOO_LARGE')
 
 
 def _header_span(raw_header_cells, limits):
@@ -443,12 +449,27 @@ def _sheet_target(package, rid):
 
 
 def _is_date_format(ident, code):
+    """True only when the format shows a calendar date (y, d or month m).
+
+    Time/duration-only formats (h:mm, mm:ss, [h]:mm:ss, AM/PM) keep the value
+    a number. Excel reads m as minutes right after an h token or right before
+    an s token; any other m is a month.
+    """
     if ident in _LOCALE_DATE_FORMAT_IDS:
         return True
     if not code or code == 'General':
         return False
-    tokens = re.sub(r'"[^"]*"|\\.|\[[^]]*\]', '', code)
-    return bool(re.search(r'[ymdhis]', tokens, re.I))
+    tokens = re.sub(r'"[^"]*"|\\.|\[[^]]*\]|am/pm|a/p', '', code.lower())
+    runs = [match[0] for match in re.finditer(r'([a-z])\1*', tokens)]  # 'mmss' -> mm, ss
+    for index, run in enumerate(runs):
+        if run[0] in {'y', 'd'}:
+            return True
+        if run[0] == 'm':
+            after_hour = index > 0 and runs[index - 1][0] == 'h'
+            before_second = index + 1 < len(runs) and runs[index + 1][0] == 's'
+            if not (after_hour or before_second):
+                return True
+    return False
 
 
 def _date_styles(package):
@@ -563,11 +584,11 @@ def _xlsx_value(cell, strings, date_styles, date1904):
     return value
 
 
-def _column_index(ref, previous):
+def _column_index(ref, previous, row_number):
     if ref is None:
         return previous + 1
     match = _CELL_REF.fullmatch(ref)
-    if not match:
+    if not match or int(match[2]) != row_number:
         _fail('TABLE_FORMAT_UNSUPPORTED')
     col = 0
     for letter in match[1]:
@@ -630,7 +651,7 @@ def _read_xlsx(content, *, file_name, sheet, header_row, limits, deadline):
                     for cell in elem:
                         if _local(cell.tag) != 'c':
                             continue
-                        col = _column_index(cell.get('r'), previous)
+                        col = _column_index(cell.get('r'), previous, row_number)
                         if col <= previous or col >= _MAX_EXCEL_COLUMN:
                             _fail('TABLE_FORMAT_UNSUPPORTED')
                         previous = col
@@ -641,10 +662,9 @@ def _read_xlsx(content, *, file_name, sheet, header_row, limits, deadline):
                         first, width = _header_span(cells.items(), limits)
                         header = [cells.get(first + j) for j in range(width)]
                     else:
-                        values = [cells.get(first + j) for j in range(width)]
+                        values = tuple(cells.get(first + j) for j in range(width))
                         if any(value is not None for value in values):
-                            if len(raw_rows) >= limits.max_rows:
-                                _fail('TABLE_TOO_LARGE')
+                            _admit_row(len(raw_rows), width, limits)
                             raw_rows.append(values); row_numbers.append(row_number)
                 parent.remove(elem); elem.clear()
             elif parent is not None:
@@ -672,34 +692,55 @@ def _decode_csv(content):
         _fail('TABLE_ENCODING_UNSUPPORTED')
 
 
+def _physical_line(text, number, deadline):
+    """The number-th physical line, split exactly as csv.reader counts lines."""
+    stream = io.StringIO(text, newline='')
+    for index in range(1, number + 1):
+        line = stream.readline()
+        if not line:
+            return None
+        if index % _DEADLINE_EVERY == 0:
+            _check_deadline(deadline)
+    return line
+
+
 def _read_csv(content, *, file_name, header_row, limits, deadline):
     if len(content) > limits.max_bytes:
         _fail('TABLE_TOO_LARGE')
     text = _decode_csv(content)
-    newline = text.find('\n')
-    first_line = text if newline < 0 else text[:newline]
-    delimiter = '\t' if first_line.count('\t') > first_line.count(',') else ','
+    header_line = _physical_line(text, header_row, deadline)
+    if header_line is None:
+        _fail('TABLE_HEADER_INVALID')
+    delimiter = '	' if header_line.count('	') > header_line.count(',') else ','
     reader = csv.reader(io.StringIO(text, newline=''), delimiter=delimiter)
     header = None; first = width = 0
     raw_rows = []; row_numbers = []
     record = 0; line_after = 0
-    for fields in reader:
-        record += 1
-        start_line = line_after + 1
-        line_after = reader.line_num
-        if record % _DEADLINE_EVERY == 0:
-            _check_deadline(deadline)
-        if record < header_row:
-            continue
-        if header is None:
-            first, width = _header_span(((j, _clean(value)) for j, value in enumerate(fields)), limits)
-            header = [_clean(fields[first + j]) for j in range(width)]
-            continue
-        values = [_clean(fields[first + j]) if first + j < len(fields) else None for j in range(width)]
-        if any(value is not None for value in values):
-            if len(raw_rows) >= limits.max_rows:
-                _fail('TABLE_TOO_LARGE')
-            raw_rows.append(values); row_numbers.append(start_line)
+    try:
+        for fields in reader:
+            record += 1
+            # header_row and row_numbers are both physical line numbers: a
+            # record spanning several lines is numbered by its first line.
+            start_line = line_after + 1
+            line_after = reader.line_num
+            if record % _DEADLINE_EVERY == 0:
+                _check_deadline(deadline)
+            if header is None:
+                if line_after < header_row:
+                    continue
+                if start_line != header_row:
+                    _fail('TABLE_HEADER_INVALID')  # header line is inside a multi-line record
+                first, width = _header_span(((j, _clean(value)) for j, value in enumerate(fields)), limits)
+                header = [_clean(fields[first + j]) for j in range(width)]
+                continue
+            values = tuple(_clean(fields[first + j]) if first + j < len(fields) else None for j in range(width))
+            if any(value is not None for value in values):
+                _admit_row(len(raw_rows), width, limits)
+                raw_rows.append(values); row_numbers.append(start_line)
+    except csv.Error as error:
+        if 'field larger than field limit' in str(error):
+            _fail('TABLE_TOO_LARGE')
+        raise
     if header is None:
         _fail('TABLE_HEADER_INVALID')
     _check_deadline(deadline)
