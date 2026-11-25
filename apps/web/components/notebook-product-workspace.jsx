@@ -189,13 +189,23 @@ export function NotebookProductWorkspace({
     const onPageShow = (event) => { if (event.persisted) revalidate(); };
     const onPageHide = () => { requestEpoch.current += 1; controller?.abort(); conceal(); };
     // 포커스를 잃는 것만으로는 진행 중인 요청을 취소하지 않고 화면만 가린다.
-    const onBlur = () => { conceal(); };
-    const onVisibility = () => { if (document.visibilityState === "hidden") onBlur(); else void softRevalidate(); };
+    // 단, 포커스가 이 문서 안의 iframe(스튜디오 웹 페이지 칸)으로 옮겨 간 것이면 창을 떠난 것이 아니므로 가리지 않는다.
+    // 이때 window blur는 activeElement가 바뀐 뒤에 판단해야 하므로 한 틱 미룬다.
+    let focusInFrame = false;
+    const onBlur = () => {
+      setTimeout(() => {
+        if (document.activeElement instanceof HTMLIFrameElement && document.hasFocus()) { focusInFrame = true; return; }
+        conceal();
+      }, 0);
+    };
+    // iframe에서 앱으로 포커스가 돌아온 것은 창 재진입이 아니므로 세션 재확인(가림)을 하지 않는다.
+    const onFocus = () => { if (focusInFrame) { focusInFrame = false; return; } void softRevalidate(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden") conceal(); else void softRevalidate(); };
     window.addEventListener("pageshow", onPageShow);
     window.addEventListener("pagehide", onPageHide);
     window.addEventListener("popstate", revalidate);
     window.addEventListener("blur", onBlur);
-    window.addEventListener("focus", softRevalidate);
+    window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       controller?.abort();
@@ -203,7 +213,7 @@ export function NotebookProductWorkspace({
       window.removeEventListener("pagehide", onPageHide);
       window.removeEventListener("popstate", revalidate);
       window.removeEventListener("blur", onBlur);
-      window.removeEventListener("focus", softRevalidate);
+      window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [conceal, load]);

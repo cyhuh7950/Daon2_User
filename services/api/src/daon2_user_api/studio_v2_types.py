@@ -248,6 +248,8 @@ def validate_settings(type_id: str, format_id: str | None, settings: Mapping[str
         clean[key] = value
     if format_id == "custom" and not str(clean.get("custom_instruction", "")).strip():
         raise ValueError("STUDIO_INPUT_INVALID")
+    if type_id == "web_page" and not str(clean.get("page_request", "")).strip():
+        raise ValueError("STUDIO_INPUT_INVALID")  # 요청 글 없이 만들면 접수 단계에서 거부한다(실패 카드가 생기지 않게)
     if ("research_query" in clean) != ("research_scopes" in clean):
         raise ValueError("STUDIO_INPUT_INVALID")  # 심층 조사는 질문과 범위를 함께 보낸다
     if "research_query" in clean and (clean.get("confirm_outline") == "yes" or clean.get("confirmed_outline")):

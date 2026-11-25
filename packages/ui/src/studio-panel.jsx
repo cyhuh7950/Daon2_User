@@ -397,7 +397,12 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
           const style = STUDIO_TYPE_STYLE[typeId];
           return <div key={typeId} className="studio-tile-wrap" style={{ position: "relative" }}>
             <button type="button" className="studio-tile" style={{ width: "100%" }} aria-disabled={!tile.enabled} aria-label={label(typeId)}
-              aria-describedby={`studio-tip-${typeId}`} onClick={() => { if (tile.enabled) create(typeId); }}>
+              aria-describedby={`studio-tip-${typeId}`} onClick={() => {
+                if (!tile.enabled) return;
+                // 요청 글이 꼭 필요한 유형(웹 페이지)은 빈 설정으로 바로 만들지 않고 설정 창부터 연다.
+                if (type.settings_schema?.properties?.page_request) setDialog({ kind: "settings", typeId });
+                else create(typeId);
+              }}>
               <StudioIcon name={style.icon} accent={typeId} size={24} />
               <span className="studio-tile__label">{label(typeId)}</span>
               {typeId === "report" && type.new_until && Date.parse(type.new_until) > now() && <span className="studio-v2-badge">New</span>}
