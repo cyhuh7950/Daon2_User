@@ -21,3 +21,18 @@ def test_migration_0088_py_chain_and_downgrade_guards():
     py = Path(MIGRATIONS, "0088_web_page.py").read_text(encoding="utf-8")
     assert "revision = '0088'" in py and "down_revision = '0087'" in py
     assert "WEB_PAGE_FORWARD_RECOVERY_REQUIRED" in py
+
+
+def test_migration_0088_sql_constraint_lists_all_types_and_downgrade_guards():
+    sql = Path(MIGRATIONS, "0088_web_page.sql").read_text(encoding="utf-8")
+    py = Path(MIGRATIONS, "0088_web_page.py").read_text(encoding="utf-8")
+    add = sql[sql.index("ADD CONSTRAINT studio_v2_outputs_type_id_check"):]
+    for type_id in ("report", "data_table", "mind_map", "flashcards", "quiz", "slides", "infographic",
+                    "audio_overview", "video_overview", "memo", "authored_document", "web_page"):
+        assert f"'{type_id}'" in add
+    down = py[py.index("def downgrade"):]
+    assert "<>'0088'" in down and "rolsuper" in down
+    assert "type_id='web_page'" in down and "preview_json<>'{}'::jsonb" in down
+    assert "WEB_PAGE_FORWARD_RECOVERY_REQUIRED" in down
+    assert "DROP COLUMN preview_json" in down
+    assert "'web_page'" not in down[down.index("ADD CONSTRAINT"):]
