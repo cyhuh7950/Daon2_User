@@ -714,9 +714,14 @@ def _collect(html: str) -> tuple[str, str]:
     return "".join(collector.visible), "\n".join(collector.extra)
 
 
+def _drop_format(text: str) -> str:
+    """보이지 않는 서식 문자(Cf: U+200B·U+00AD·U+2060·U+FEFF 등)를 지운다. 5​만 원이 순번처럼 보이지 않게 한다."""
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
 def _anchors(text: str) -> frozenset[str]:
-    """_evidence_anchors 앞에 세 자리 쉼표만 양쪽 똑같이 지운다(1,000,000 = 1000000)."""
-    return _evidence_anchors(_THOUSANDS.sub("", unicodedata.normalize("NFKC", text)))
+    """서식 문자를 지우고, _evidence_anchors 앞에 세 자리 쉼표만 양쪽 똑같이 지운다(1,000,000 = 1000000)."""
+    return _evidence_anchors(_THOUSANDS.sub("", _drop_format(unicodedata.normalize("NFKC", text))))
 
 
 _DIGITS = re.compile(r"\d+")
@@ -737,7 +742,7 @@ def _strip_ordinals(text: str) -> str:
 
     앞에 '제'·글자·숫자·. , : / - + 통화 기호가 붙었거나, 뒤에 숫자(소수점·시각 포함)·%·글자·한글 단위/셈말이
     붙으면 단독이 아니다(5만 원, 제3조, 10세, 2배, 3회, 5명은 남아서 대조된다)."""
-    text = unicodedata.normalize("NFKC", text)
+    text = _drop_format(unicodedata.normalize("NFKC", text))
 
     def rep(match: re.Match[str]) -> str:
         digits = match.group(0)
@@ -771,9 +776,10 @@ def _excepted(anchor: str) -> bool:
 def stray_anchors(html: str, allowed_text: str, request: str) -> set[str]:
     """보이는 글·속성 글(alt·title·aria-*·placeholder·value·label·비구조 data-*·ol[start])·
     CSS content 글의 anchor 가운데 allowed_text·요청 글에 없는 것(예외 제외).
-    속성 글은 따로 뽑아 보이는 글과 붙지 않게 한다. 보이는 글의 1~20 단독 순번만 대조 전에 지운다."""
+    속성 글은 따로 뽑아 보이는 글과 붙지 않게 한다. 보이는 글·속성 글의 1~20 단독 순번만 대조 전에 지운다
+    (ol start="3", aria-level="2", aria-label="탭 2"는 통과, title="5만 원"·aria-label="제3조"는 대조)."""
     visible, extra = _collect(html)
-    page = _anchors(_strip_ordinals(visible)) | _anchors(extra)
+    page = _anchors(_strip_ordinals(visible)) | _anchors(_strip_ordinals(extra))
     allowed = _anchors(allowed_text) | _anchors(request)
     return {a for a in page - allowed if not _excepted(a)}
 

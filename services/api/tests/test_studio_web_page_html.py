@@ -520,3 +520,24 @@ def test_reviewer_probe_numbers_are_stray() -> None:
     html = sanitize_html("<!DOCTYPE html><html><body><h2>보장</h2><p>월 보험료는 5만 원이며, 약관 제7조에 따라 3배 보상, 10세 이상 가입.</p></body></html>")
     stray = stray_anchors(html, allowed, "고객 안내 페이지")
     assert {"number:5", "number:7", "number:3", "number:10"} <= stray
+
+
+# --- 재검토: 서식 문자·속성 글의 순번 ---
+
+
+@pytest.mark.parametrize("hidden", ["​", "­", "⁠", "﻿"])
+def test_format_characters_do_not_hide_units(hidden: str) -> None:
+    html = sanitize_html(_page(f"<h2>안내</h2><p>보험료 5{hidden}만 원</p>"))
+    assert "number:5" in stray_anchors(html, "안내 보험료", "요청"), repr(hidden)
+
+
+@pytest.mark.parametrize("body", ['<ol start="3"><li>신청</li></ol>', '<h2 aria-level="2">신청</h2>', '<button aria-label="탭 2">신청</button>'])
+def test_standalone_ordinals_in_attributes_pass(body: str) -> None:
+    html = sanitize_html(_page(body))
+    assert stray_anchors(html, "신청", "요청") == set(), body
+
+
+@pytest.mark.parametrize(("body", "anchor"), [('<p title="5만 원">신청</p>', "number:5"), ('<p aria-label="제3조">신청</p>', "number:3")])
+def test_small_numbers_with_units_in_attributes_are_stray(body: str, anchor: str) -> None:
+    html = sanitize_html(_page(body))
+    assert anchor in stray_anchors(html, "신청", "요청"), body
