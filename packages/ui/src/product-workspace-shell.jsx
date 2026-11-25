@@ -16,7 +16,7 @@ import { StudioIcon } from "./studio-icon.js";
 import "./studio-icon.css";
 import { classifyConversationIntent } from "./conversation-intent.js";
 import { secureUuid } from "./secure-uuid.js";
-import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citationKeys, citationOriginLabel, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
+import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citationKeys, citationOriginLabel, numberDuplicateLabels, parseAnswerBlocks, shouldSubmitOnEnter, usesApprovedKnowledge, validCitationDocumentName } from "./answer-presentation.js";
 import { ManualHubView } from "./manual-hub-view.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
@@ -2424,11 +2424,14 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               <AnswerProcess process={process} canOpenEvidence={(item) => citationForEvidence(answerValue, item) !== null}
                 onOpenEvidence={(event, item) => openEvidence(event, answerValue, item)} />
             </div>;
-            const renderCitations = (answerValue) => (
-          <div className="citation-row">{answerValue?.citations?.map((citation) => (
-            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => openCitation(event, citation)}>{citation.origin === "mcp_daon_rag" ? `${citationOriginLabel(citation)} · ${approvedKnowledgeCitationDetail(citation)}` : <>{citationOriginLabel(citation, citationSourceName(viewState.sources, citation))} · {citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}</>}</a>
-          ))}</div>
-            );
+            // 칩 이름(후속 A-4): 이름이 같은 칩에만 순번을 붙인다.
+            const citationChipLabel = (citation) => citation.origin === "mcp_daon_rag" ? `${citationOriginLabel(citation)} · ${approvedKnowledgeCitationDetail(citation)}` : `${citationOriginLabel(citation, citationSourceName(viewState.sources, citation))} · ${citation.locator.kind === "audio_segment" ? `음성 ${audioTime(parseAudioSegment(citation.locator.value).start_ms)}–${audioTime(parseAudioSegment(citation.locator.value).end_ms)}` : citation.locator.kind === "pptx_block" ? pptxBlockLabel(citation.locator.value) : citation.locator.kind === "docx_block" ? `${parseDocxBlock(citation.locator.value)?.block} · ${parseDocxBlock(citation.locator.value)?.start}–${parseDocxBlock(citation.locator.value)?.end}` : citation.locator.kind === "sheet_cell" ? `${parseSheetCell(citation.locator.value)?.sheet} · ${parseSheetCell(citation.locator.value)?.range}` : citation.locator.kind === "page" ? `${citation.page}쪽` : citation.locator.kind === "image_region" ? "이미지 영역" : "지식 구간"}`;
+            const renderCitations = (answerValue) => {
+              const labels = numberDuplicateLabels((answerValue?.citations ?? []).map(citationChipLabel));
+              return <div className="citation-row">{answerValue?.citations?.map((citation, citationIndex) => (
+            <a key={citation.citation_id} href={citation.content_url} {...(citation.origin === "mcp_daon_rag" ? { target: "_blank", rel: "noopener noreferrer", title: approvedKnowledgeCitationLabel(citation) } : {})} onClick={(event) => openCitation(event, citation)}>{labels[citationIndex]}</a>
+          ))}</div>;
+            };
             return turns.map((turn, index) => {
               const last = index === turns.length - 1;
               return <div className="conversation-turn" key={turn.id} data-turn-state={turn.pending ? "pending" : turn.error ? "failed" : "answered"}>

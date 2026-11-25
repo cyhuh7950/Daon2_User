@@ -196,3 +196,26 @@ class SlidesOutlineConfirmTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutlineRefLabelTests(unittest.TestCase):
+    """후속 A-3: 구성 검토 요지 끝에 모델이 붙인 "[S1]" 같은 근거 표시가 글자로 보였다. 구성 목록에서는 지운다."""
+
+    def test_strip_ref_labels_removes_only_source_labels(self):
+        from daon2_user_api.studio_v2_types import strip_ref_labels
+        self.assertEqual(strip_ref_labels("상해 의료비 300만 원 한도 [S1]"), "상해 의료비 300만 원 한도")
+        self.assertEqual(strip_ref_labels("지급 기한 [S1, S2] 안내 (S3)"), "지급 기한 안내")
+        self.assertEqual(strip_ref_labels("3조 [별표 1] 참고"), "3조 [별표 1] 참고")
+        self.assertEqual(strip_ref_labels("ISO S3 등급"), "ISO S3 등급")
+
+    def test_slide_outline_titles_and_points_have_no_ref_labels(self):
+        reply = {"title": "보험 안내 [S1]", "slides": [
+            {"title": "지급 기한 [S2]", "points": ["접수일부터 3일 이내 [S2]", "[S1]"]}]}
+        body = SlidesGenerator(FakeReader(), ScriptedLLM(reply)).generate(gen_ctx("slides", {"confirm_outline": "yes"})[0]).content["body"]
+        self.assertEqual(body["title"], "보험 안내")
+        self.assertEqual(body["outline_review"], [{"title": "지급 기한", "points": ["접수일부터 3일 이내"]}])
+
+    def test_video_outline_review_uses_the_same_cleanup(self):
+        import inspect
+        from daon2_user_api import studio_video
+        self.assertIn("strip_ref_labels", inspect.getsource(studio_video.VideoOverviewGenerator.generate))

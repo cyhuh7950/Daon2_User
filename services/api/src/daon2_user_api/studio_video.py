@@ -24,6 +24,7 @@ from .studio_infographic import _font, _width, wrap
 from .studio_v2_generation import GenerationContext, GenerationResult
 from .studio_workspace import StudioError
 from .tts_engines import AudioResult, Spoken, TtsClient, TtsConfig, TtsEngine, TtsError, synthesize_dialogue
+from .studio_v2_types import strip_ref_labels
 
 WIDTH, HEIGHT, FPS = 1280, 720, 5
 MARGIN = 80
@@ -344,7 +345,9 @@ class VideoOverviewGenerator(_Base):
             body, warnings, used = V.validate_video_scenes(data, pack, max_scenes=hi + 4)
             if ctx.settings.get("confirm_outline") == "yes":
                 # 장면 목록에서 멈춘다(보고서와 같은 outline_review 봉투). TTS·화면 그리기·MP4 합성은 확정한 뒤에만 한다.
-                review = [{"title": s["title"], "narration_summary": s["narration"], **({"bullets": s["bullets"]} if s.get("bullets") else {})}
+                # 화면에 보이는 장면 목록에서는 모델이 붙인 근거 표시([S1] 등)를 지운다(후속 A-3).
+                review = [{"title": strip_ref_labels(s["title"]), "narration_summary": strip_ref_labels(s["narration"]),
+                           **({"bullets": [b for b in (strip_ref_labels(x) for x in s["bullets"]) if b]} if s.get("bullets") else {})}
                           for s in body["scenes"]]  # type: ignore[union-attr]
                 return self._finish(ctx, pack, {"title": body["title"], "scenes": [], "outline_review": review}, [], [])
         scenes: list[dict[str, Any]] = body["scenes"]  # type: ignore[assignment]

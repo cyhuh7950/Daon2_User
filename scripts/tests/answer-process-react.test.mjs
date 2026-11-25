@@ -305,3 +305,26 @@ test("과정이 없는 일반 실패 오류 카드에는 답변 과정을 붙이
     assert.equal(buttonByText(view.container, "답변 과정"), undefined);
   } finally { await view.close(); }
 });
+
+// 후속 A-4·A-5: 같은 소스의 근거가 똑같은 이름으로 두 번, 인용 0개인데 "인용이 근거 구간과 맞습니다"가 보였다.
+test("근거 찾기 목록에서 이름이 같은 근거에는 순번을 붙인다", async () => {
+  const same = evidenceItem({ title: "약관_보장범위.txt", page: null });
+  const view = await mountProcess({ process: { ...normal(), evidence: { searched: 2, selected: [same, { ...same }] } } });
+  try {
+    await view.open();
+    const evidence = view.steps().find((node) => node.getAttribute("data-step") === "evidence");
+    assert.match(evidence.textContent, /약관_보장범위\.txt 1/u);
+    assert.match(evidence.textContent, /약관_보장범위\.txt 2/u);
+  } finally { await view.close(); }
+});
+
+test("인용이 0개면 검증 단계는 '인용 없음'만 보이고 '인용이 근거 구간과 맞습니다'를 보이지 않는다", async () => {
+  const view = await mountProcess({ process: insufficient() });
+  try {
+    await view.open();
+    const verification = view.steps().find((node) => node.getAttribute("data-step") === "verification");
+    assert.match(verification.textContent, /인용 없음/u);
+    assert.doesNotMatch(verification.textContent, /인용이 근거 구간과 맞습니다/u);
+    assert.doesNotMatch(verification.textContent, /인용 0개 확인/u);
+  } finally { await view.close(); }
+});

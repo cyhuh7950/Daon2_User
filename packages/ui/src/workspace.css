@@ -401,3 +401,10 @@ select { width: 100%; min-height: var(--daon-target-desktop-control); margin-top
 .website-original pre { max-height: 360px; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 
 /* 매뉴얼 보기: 표·그림·네 단계 제목 */
+/* 답변 아래 상태 줄(근거 부족·승인 지식 사용 등)은 근거 칩·답변 과정과 같은 38px 들여쓰기(후속 A-5). */
+.conversation-turn > .context-selection-status { margin: 4px 38px 0; }
+/* 소스 작업 창(재처리 설정·작업 확인): 화면 가운데 떠 있는 작은 창, 넘치면 창 안 스크롤(후속 A-6). 소스 추가 창은 그대로. */
+.source-action-dialog:not(.source-add-dialog) { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 60; box-sizing: border-box; display: grid; gap: 10px; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; padding: 16px; border: 1px solid var(--workspace-border); border-radius: 12px; background: var(--workspace-surface); color: var(--workspace-text); box-shadow: 0 12px 40px rgb(0 0 0 / 40%); }
+.source-action-dialog:not(.source-add-dialog) label { display: grid; gap: 5px; font-weight: 700; }
+.source-action-dialog:not(.source-add-dialog) select { min-height: 34px; padding: 0 8px; border: 1px solid var(--workspace-border); border-radius: 8px; background: var(--workspace-surface-soft); color: inherit; font: inherit; }
+.source-action-dialog:not(.source-add-dialog) small, .source-action-dialog:not(.source-add-dialog) p { margin: 0; color: var(--workspace-muted); }
