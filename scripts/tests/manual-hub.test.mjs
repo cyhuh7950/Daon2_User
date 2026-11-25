@@ -237,17 +237,20 @@ test("DOCX/PDF 다운로드는 caller duck manifest를 Network 전에 다시 검
 });
 
 test("Workspace 설정은 검색·Web 읽기·Release·DOCX/PDF 다운로드 Hub를 제공한다", async () => {
-  const [shell, actual, css, dockerfile] = await Promise.all([
+  // N1-B15: Hub 화면은 노트북 창과 설정 페이지가 함께 쓰는 ManualHubView로 옮겼다(검색·Release·DOCX/PDF는 부품 안).
+  const [shell, view, actual, css, dockerfile] = await Promise.all([
     read("packages/ui/src/product-workspace-shell.jsx"),
+    read("packages/ui/src/manual-hub-view.jsx"),
     read("apps/web/components/actual-workspace.jsx"),
-    read("packages/ui/src/workspace.css"),
+    read("packages/ui/src/manual-hub.css"),
     read("apps/web/Dockerfile"),
   ]);
   assert.match(shell, /사용자 설명서/u);
-  assert.match(shell, /manualSearch/u);
-  assert.match(shell, /Release/u);
-  assert.match(shell, /DOCX/u);
-  assert.match(shell, /PDF/u);
+  assert.match(shell, /<ManualHubView\b/u);
+  assert.match(view, /type="search"/u);
+  assert.match(view, /Release/u);
+  assert.match(view, /DOCX/u);
+  assert.match(view, /PDF/u);
   assert.match(actual, /getManualManifest/u);
   assert.match(actual, /readManualDocument/u);
   assert.match(actual, /downloadManualAsset/u);
