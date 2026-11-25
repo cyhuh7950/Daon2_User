@@ -2248,6 +2248,32 @@ class OmniRouteResponseShapeTests(unittest.TestCase):
                 self.assertIn("output_text=str", joined)
                 self.assertNotIn("CANARY", joined)
 
+    def _grounded(self, payload):
+        import json as _json
+        from daon2_user_api.question_answering import GroundedQuestionRequest
+        chunk = IndexedEvidenceChunk("chunk-1", "doc-1", "ver-1", 1, "휴대품 손해는 1개 물품당 20만 원, 전체 100만 원 한도", "blk-1", 1.0)
+        adapter, selection = self._adapter(_json.dumps(payload, ensure_ascii=False))
+        try:
+            return adapter.generate(GroundedQuestionRequest("휴대품 한도는?", (chunk,), "trace-omni2"), selection)
+        finally:
+            selection.release()
+
+    def test_grounded_uses_the_same_repairs_as_the_default_path(self):
+        # OmniRoute 질문이 GROUNDING_INVALID로 자주 실패했다. 기본 경로의 보정(N1-B01·B08·B14)이 이 경로에는 없었다.
+        partial = self._grounded({"answer": "휴대품은 1개 20만 원, 전체 100만 원 한도입니다. 도난 신고 기한은 확인되지 않습니다.",
+                                  "cited_chunk_ids": ["chunk-1"], "insufficient": True})
+        self.assertFalse(partial.insufficient)
+        self.assertEqual(partial.cited_chunk_ids, ("chunk-1",))
+        notice = self._grounded({"answer": "근거에는 30일 기한이 없습니다.", "cited_chunk_ids": [], "insufficient": True})
+        self.assertTrue(notice.insufficient)
+        self.assertEqual(notice.answer, "선택한 원문 근거에 질문에 답할 정보가 없습니다.")
+
+    def test_grounded_failure_logs_the_reason_kind(self):
+        with self.assertLogs("daon2_user_api.question_answering", level="WARNING") as logs, \
+                self.assertRaisesRegex(ValueError, "TEXT_GENERATION_GROUNDING_INVALID"):
+            self._grounded({"answer": "휴대품 한도는 300만 원입니다.", "cited_chunk_ids": ["chunk-1"], "insufficient": False})
+        self.assertIn("text_grounding_failure reason=anchors_unsupported", "\n".join(logs.output))
+
 class AnswerProcessServiceTests(unittest.TestCase):
     """NB1-F1: 시스템이 실제로 한 일만 담은 process 블록을 저장 인자·차단 오류에 싣는다."""
 
