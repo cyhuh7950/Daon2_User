@@ -465,3 +465,33 @@ def test_finalize_success_and_failures() -> None:
     with pytest.raises(WebPageCheckFailed) as empty:
         finalize_html("설명만 있고 HTML은 없음", "", "요청", [])
     assert empty.value.reason == "empty"
+
+
+# --- 최종 검토 C1: 1~20 예외는 단독 순번만 ---
+
+
+@pytest.mark.parametrize("phrase", [
+    "5만 원", "3억 원", "3천만 원", "월 12만 원", "제3조", "제15조 제2항", "10세", "2배", "3회", "5명",
+    "5 명", "7일", "20%", "3 kg", "1.5", "10:30",
+])
+def test_small_numbers_with_units_are_stray(phrase: str) -> None:
+    html = sanitize_html(_page(f"<h2>안내</h2><p>보험료 {phrase} 안내</p>"))
+    assert stray_anchors(html, "안내 보험료", "요청") != set(), phrase
+
+
+@pytest.mark.parametrize("phrase", ["1. 신청", "(2) 서류", "2) 접수", "탭 3", "3단계", "3번", "3번째", "단계 20"])
+def test_standalone_ordinals_pass(phrase: str) -> None:
+    html = sanitize_html(_page(f"<h2>안내</h2><p>{phrase}</p>"))
+    assert stray_anchors(html, "안내 신청 서류 접수", "요청") == set(), phrase
+
+
+def test_small_numbers_in_request_text_still_pass() -> None:
+    html = sanitize_html(_page("<p>보험료 5만 원, 제3조</p>"))
+    assert stray_anchors(html, "보험료", "보험료 5만 원과 제3조 안내") == set()
+
+
+def test_reviewer_probe_numbers_are_stray() -> None:
+    allowed = "월 보험료는 15만 원이며 보장 기간은 20년입니다."
+    html = sanitize_html("<!DOCTYPE html><html><body><h2>보장</h2><p>월 보험료는 5만 원이며, 약관 제7조에 따라 3배 보상, 10세 이상 가입.</p></body></html>")
+    stray = stray_anchors(html, allowed, "고객 안내 페이지")
+    assert {"number:5", "number:7", "number:3", "number:10"} <= stray

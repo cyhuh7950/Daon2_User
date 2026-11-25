@@ -690,10 +690,50 @@ def _anchors(text: str) -> frozenset[str]:
     return _evidence_anchors(_THOUSANDS.sub("", unicodedata.normalize("NFKC", text)))
 
 
+_DIGITS = re.compile(r"\d+")
+# 단독 순번 뒤에 붙어도 되는 말(단계·번째·번). 그 밖의 한글이 바로 붙으면 단위·셈말로 본다.
+_ORDINAL_SUFFIX = re.compile(r"(?:단계|번째|번)(?![가-힣])")
+# 띄어 쓴 뒤 오는 단위·셈말(5 명, 3 kg, 20 %): 이것들이 오면 순번이 아니다.
+_SPACED_UNIT = re.compile(
+    r"\s+(?:%|[만억천백조원세배회명개년월일시분초항호차건쪽장권점층평]"
+    r"|(?:kg|g|mg|km|m|cm|mm|l|ml|day|days|month|months|year|years|hour|hours|minute|minutes"
+    r"|second|seconds|item|items|percent|won|krw|usd)(?![a-z]))",
+    re.I,
+)
+_BEFORE_BLOCK = set(".,:/-+$₩€¥£")
+
+
+def _strip_ordinals(text: str) -> str:
+    """보이는 글에서 1~20의 단독 순번(목록 번호 1. (2) 2), 탭 3, 3단계, 3번째 등)만 지운다.
+
+    앞에 '제'·글자·숫자·. , : / - + 통화 기호가 붙었거나, 뒤에 숫자(소수점·시각 포함)·%·글자·한글 단위/셈말이
+    붙으면 단독이 아니다(5만 원, 제3조, 10세, 2배, 3회, 5명은 남아서 대조된다)."""
+    text = unicodedata.normalize("NFKC", text)
+
+    def rep(match: re.Match[str]) -> str:
+        digits = match.group(0)
+        start, end = match.span()
+        if digits.startswith("0") or not 1 <= int(digits) <= 20:
+            return digits
+        before = text[start - 1] if start else ""
+        if before and (before.isalnum() or before in _BEFORE_BLOCK):
+            return digits
+        after = text[end:]
+        if re.match(r"[.,:/]\d", after):
+            return digits
+        if _ORDINAL_SUFFIX.match(after):
+            return " " * len(digits)
+        if after and (after[0].isalnum() or after[0] == "%"):
+            return digits
+        if _SPACED_UNIT.match(after):
+            return digits
+        return " " * len(digits)
+
+    return _DIGITS.sub(rep, text)
+
+
 def _excepted(anchor: str) -> bool:
     kind, _, value = anchor.partition(":")
-    if kind == "number":
-        return value.isdigit() and 1 <= int(value) <= 20
     if kind == "identifier":
         return all(_REF_PART.fullmatch(part) for part in re.split(r"[-_.:/]", value))
     return False
@@ -702,9 +742,9 @@ def _excepted(anchor: str) -> bool:
 def stray_anchors(html: str, allowed_text: str, request: str) -> set[str]:
     """보이는 글·속성 글(alt·title·aria-*·placeholder·value·label·비구조 data-*·ol[start])·
     CSS content 글의 anchor 가운데 allowed_text·요청 글에 없는 것(예외 제외).
-    속성 글은 따로 뽑아 보이는 글과 붙지 않게 한다."""
+    속성 글은 따로 뽑아 보이는 글과 붙지 않게 한다. 보이는 글의 1~20 단독 순번만 대조 전에 지운다."""
     visible, extra = _collect(html)
-    page = _anchors(visible) | _anchors(extra)
+    page = _anchors(_strip_ordinals(visible)) | _anchors(extra)
     allowed = _anchors(allowed_text) | _anchors(request)
     return {a for a in page - allowed if not _excepted(a)}
 
