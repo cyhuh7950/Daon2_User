@@ -320,6 +320,23 @@ def _typed_sheet(rows: Sequence[Sequence[object]]) -> str:
             f'<cols>{cols}</cols><sheetData>{"".join(out)}</sheetData></worksheet>')
 
 
+def _evidence_range(evidence: Mapping[str, Any], ident: object) -> str:
+    """계산값 근거 한 칸의 원본 범위 글. 증감률 근거는 이번 달·전월 근거 번호를 따라가 두 범위를 함께 적는다."""
+    entry = evidence.get(ident) if isinstance(ident, str) else None
+    if not isinstance(entry, Mapping):
+        return ""
+    if "current_evidence_id" in entry:
+        def part(name: str, ref: object) -> str:
+            target = evidence.get(ref) if isinstance(ref, str) else None
+            text = _clean_text(target.get("range")) if isinstance(target, Mapping) and target.get("range") else "없음"
+            return f"{name}({_clean_text(ref)}): {text}"
+        previous = entry.get("previous_evidence_id")
+        return f"{part('이번 달', entry.get('current_evidence_id'))} / {part('전월', previous) if previous else '전월: 자료 없음'}"
+    if isinstance(entry.get("ranges"), list):  # 예전 저장 형식(범위 목록)
+        return ", ".join(_clean_text(x) for x in entry["ranges"])
+    return _clean_text(entry.get("range")) if entry.get("range") else ""
+
+
 def _aggregation_body(output: Mapping[str, Any]) -> Mapping[str, Any]:
     body = _content(output).get("body")
     if not isinstance(body, Mapping) or not isinstance(body.get("columns"), list) or not isinstance(body.get("rows"), list):
@@ -341,7 +358,8 @@ def _aggregation_tables(body: Mapping[str, Any]) -> tuple[list[list[object]], li
     file_name, sheet = _clean_text(source.get("file_name")), _clean_text(source.get("sheet"))
     evidence = body.get("evidence") if isinstance(body.get("evidence"), Mapping) else {}
     table: list[list[object]] = [header]
-    proof: list[list[object]] = [["행", "열", "값", "파일", "시트", "범위", "필터", "계산식", "대상 행 수", "제외(숫자 아님)", "제외(빈칸)", "계산 불가 이유"]]
+    proof: list[list[object]] = [["행", "열", "값", "파일", "시트", "범위", "필터", "계산식", "대상 행 수", "제외(숫자 아님)", "제외(빈칸)", "계산 불가 이유",
+                                  "근거 번호"]]
     for r_index, row in enumerate(body.get("rows", []), 2):
         out: list[object] = []
         for column, computed, item in zip(columns, computed_cols, row if isinstance(row, list) else []):
@@ -356,11 +374,10 @@ def _aggregation_tables(body: Mapping[str, Any]) -> tuple[list[list[object]], li
             entry = evidence.get(item.get("evidence_id")) if item.get("evidence_id") else None
             if isinstance(entry, Mapping):
                 excluded = entry.get("excluded") if isinstance(entry.get("excluded"), Mapping) else {}
-                ranges = entry.get("ranges") if isinstance(entry.get("ranges"), list) else []
                 proof.append([r_index, _clean_text(column.get("label", column.get("key"))), _clean_text(item.get("display")), file_name, sheet,
-                              ", ".join(_clean_text(x) for x in ranges), _clean_text(entry.get("filter_text")), _clean_text(entry.get("formula")),
+                              _evidence_range(evidence, item.get("evidence_id")), _clean_text(entry.get("filter_text")), _clean_text(entry.get("formula")),
                               *(_count(v) for v in (entry.get("row_count"), excluded.get("not_number"), excluded.get("blank"))),
-                              "" if ok else reason])
+                              "" if ok else reason, _clean_text(item.get("evidence_id"))])
         table.append(out)
     stats = body.get("stats") if isinstance(body.get("stats"), Mapping) else {}
     conditions: list[list[object]] = [["항목", "내용"], ["요청 글", _clean_text(body.get("request"))],
@@ -382,13 +399,14 @@ def render_aggregation_xlsx(output: Mapping[str, Any]) -> bytes:
 
 
 def _csv_safe(value: object) -> str:
-    """CSV 수식 주입 막기: 글자 칸이 수식 시작 문자로 시작하면 작은따옴표를 붙인다. 숫자 칸은 저장값 그대로."""
+    """CSV 수식 주입 막기: 글자 칸이 수식 시작 문자로 시작하면 작은따옴표를 붙인다. 숫자 칸은 저장값 그대로.
+    순수한 숫자 모양 글자(-5, -1.25 같은 묶음 원본값)는 수식이 될 수 없으므로 그대로 둔다."""
     if isinstance(value, _Num):
         return value.text
     if isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     text = _clean_text(value)
-    return "'" + text if text.startswith(_FORMULA_START) else text
+    return "'" + text if text.startswith(_FORMULA_START) and not _NUMBER.fullmatch(text) else text
 
 
 def render_aggregation_csv(output: Mapping[str, Any]) -> bytes:

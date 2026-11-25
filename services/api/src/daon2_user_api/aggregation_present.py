@@ -36,8 +36,10 @@ def _join(row, indexes) -> str:
     return _SEPARATOR.join(row[i]['display'] for i in indexes)
 
 
-def _text(cell) -> str:
-    return cell['display'] if cell['value'] is None else cell['value']
+def _series_key(row, indexes) -> str:
+    """Series key from the underlying group values; a blank group is JSON null,
+    so it never collides with a literal '(빈칸)' text value."""
+    return json.dumps([row[i]['value'] for i in indexes], ensure_ascii=False, separators=(',', ':'))
 
 
 def build_chart(result: dict, spec: dict) -> dict | None:
@@ -45,9 +47,10 @@ def build_chart(result: dict, spec: dict) -> dict | None:
 
     line (month group present): x categories are the month strings ascending
     and identical for every series (a month missing from a series is a point
-    with value None); series are ordered by their underlying group value
+    with value None and ``missing: True``; a not-computable cell is a point
+    with value None and no ``missing``); series are ordered by their underlying group value
     ascending, regardless of the row sort. Series are keyed by the underlying
-    group cell value, labelled by its display.
+    group cell values (JSON array, blank = null), labelled by the display.
     bar: single series in row order; x is the group combination. With several
     group columns x_key is the FIRST group column key and x_label the joined
     column labels (the composite x text lives in the points).
@@ -71,12 +74,13 @@ def build_chart(result: dict, spec: dict) -> dict | None:
         entry = grouped.get(ident)
         if entry is None:
             entry = grouped[ident] = {
-                'key': _SEPARATOR.join(_text(row[i]) for i in series_idx) if series_idx else measure['key'],
+                'key': _series_key(row, series_idx) if series_idx else measure['key'],
                 'label': _join(row, series_idx) if series_idx else measure['label'], 'values': {}}
         entry['values'][row[month_idx]['value']] = row[measure_idx]['value']
     ordered = sorted(grouped.items(), key=lambda kv: tuple('' if v is None else v for v in kv[0]))
     series = [{'key': e['key'], 'label': e['label'],
-               'points': [{'x': m, 'value': e['values'].get(m)} for m in months]} for _, e in ordered]
+               'points': [{'x': m, 'value': e['values'][m]} if m in e['values'] else {'x': m, 'value': None, 'missing': True}
+                          for m in months]} for _, e in ordered]
     return {'kind': 'line', 'x_key': columns[month_idx]['key'], 'x_label': columns[month_idx]['label'],
             'series': series}
 

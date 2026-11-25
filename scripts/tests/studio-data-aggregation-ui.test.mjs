@@ -248,7 +248,8 @@ test("설정 변경 후 다시 생성은 출력 상세의 지난 요청·소스�
 // ---------------------------------------------------------------- 보기
 const cell = (value, display, extra = {}) => ({ value, display, computed: false, status: "ok", reason: null, evidence_id: null, ...extra });
 const comp = (value, display, evidence_id, extra = {}) => cell(value, display, { computed: true, evidence_id, ...extra });
-const MANY = Array.from({ length: 6 }, (_, i) => `청구내역!F${i * 10 + 2}:F${i * 10 + 5}`);
+// 근거 범위는 칸마다 문자열 하나(시트·열은 한 번만): 6묶음.
+const MANY = "청구내역!F: 2–5, 12–15, 22–25, 32–35, 42–45, 52–55";
 const BODY = {
   request: "월별 지급액", source: { source_version_id: "ver-xlsx", sha256: "a".repeat(64), file_name: "청구.xlsx", sheet: "청구내역", header_row: 1 },
   spec: {}, spec_raw: {}, conditions_text: "묶기: 상품 · 집계: 합계(지급액)",
@@ -259,9 +260,9 @@ const BODY = {
     [cell("종신", "종신"), comp("-20", "-20", "e3")],
   ],
   evidence: {
-    e1: { ranges: MANY, filter_text: "상품 = 암보험", formula: "지급액 합계 = 숫자 46개의 합", row_count: 46, excluded: { not_number: 2, blank: 1 } },
-    e2: { ranges: [], filter_text: "상품 = 실손", formula: "지급액 합계 = 숫자 0개의 합", row_count: 0, excluded: { not_number: 3, blank: 0 } },
-    e3: { ranges: ["청구내역!F7"], filter_text: "상품 = 종신", formula: "지급액 합계 = 숫자 1개의 합", row_count: 1, excluded: { not_number: 0, blank: 0 } },
+    e1: { range: MANY, filter_text: "상품 = 암보험", formula: "지급액 합계 = 숫자 46개의 합", row_count: 46, excluded: { not_number: 2, blank: 1 } },
+    e2: { range: null, filter_text: "상품 = 실손", formula: "지급액 합계 = 숫자 0개의 합", row_count: 0, excluded: { not_number: 3, blank: 0 } },
+    e3: { range: "청구내역!F: 7", filter_text: "상품 = 종신", formula: "지급액 합계 = 숫자 1개의 합", row_count: 1, excluded: { not_number: 0, blank: 0 } },
   },
   chart: { kind: "bar", x_key: "상품", x_label: "상품", series: [{ key: "m1", label: "지급액 합계", points: [{ x: "암보험", value: "1234.50" }, { x: "실손", value: null }, { x: "종신", value: "-20" }] }] },
   summary: ["지급액 합계 가장 큰 묶음: 암보험 (1,234.50)"],
@@ -298,18 +299,107 @@ test("보기: 계산값 칸에 계산값 표지, 계산 불가는 이유, 칸을
     assert.ok(pane.textContent.includes("청구.xlsx"));
     // 범위가 길면 묶음 수만 보이고 펼쳐서 전체를 본다.
     assert.ok(pane.textContent.includes("범위 6묶음"));
-    assert.ok(!pane.textContent.includes(MANY[5]));
+    assert.ok(!pane.textContent.includes("52–55"));
     await view.click(findElements(pane, (n) => n.tagName === "BUTTON" && n.textContent === "펼치기")[0]);
-    for (const range of MANY) assert.ok(pane.textContent.includes(range), range);
+    assert.ok(pane.textContent.includes(MANY), pane.textContent);
 
     await view.click(findElements(computed[1], (n) => n.tagName === "BUTTON")[0]);
     evidence = findElements(pane, (n) => n.getAttribute?.("data-evidence-id") === "e2")[0];
     assert.ok(evidence.textContent.includes("계산 불가") && evidence.textContent.includes("숫자 값 없음"));
     assert.ok(evidence.textContent.includes("상품 = 실손"));
 
+    await view.click(findElements(computed[2], (n) => n.tagName === "BUTTON")[0]);
+    assert.ok(pane.textContent.includes("청구내역!F: 7") && !pane.textContent.includes("범위 1묶음"));
+
     await view.click(findElements(originals[0], (n) => n.tagName === "BUTTON")[0]);
     assert.ok(pane.textContent.includes("원본값"));
   } finally { await view.close(); await cleanup(); }
+});
+
+test("보기: 묶음 열 칸은 원본값 표지로 계산값과 구분한다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-data-aggregation-viewer.jsx", "studio-aggregation-original");
+  const view = await mount(module.DataAggregationViewer, { content: { body: BODY } });
+  try {
+    const originals = findElements(view.container, (n) => n.tagName === "TD" && n.getAttribute("data-computed") === "false");
+    assert.equal(originals.length, 3);
+    for (const td of originals) {
+      const marks = findElements(td, (n) => String(n.getAttribute?.("class") ?? "").includes("studio-aggregation__mark--original"));
+      assert.equal(marks.length, 1, td.textContent);
+      assert.equal(marks[0].textContent, "원본값");
+    }
+    const computed = findElements(view.container, (n) => n.tagName === "TD" && n.getAttribute("data-computed") === "true");
+    for (const td of computed) assert.ok(!td.textContent.includes("원본값"));
+  } finally { await view.close(); await cleanup(); }
+});
+
+test("보기: 증감률 칸의 근거는 이번 달·전월 근거 번호를 따라가 두 범위를 보인다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-data-aggregation-viewer.jsx", "studio-aggregation-growth");
+  const body = { ...BODY,
+    columns: [{ key: "월", label: "청구일(월)", role: "group" }, { key: "m1", label: "합계(지급액)", role: "measure" }, { key: "growth_m1", label: "전월 대비 증감률 · 합계(지급액)", role: "growth" }],
+    rows: [[cell("2026-02", "2026-02"), comp("300", "300", "e1"), comp("50", "50.0%", "e2")],
+      [cell("2026-04", "2026-04"), comp("10", "10", "e3"), comp(null, "계산 불가", "e4", { status: "not_computable", reason: "전월 자료 없음" })]],
+    evidence: {
+      e1: { range: "청구내역!F: 3, 9", filter_text: "청구일(월) = 2026-02", formula: "합계(지급액) = 숫자 2개의 합", row_count: 2, excluded: { not_number: 0, blank: 0 } },
+      e2: { current_evidence_id: "e1", previous_evidence_id: "e5", filter_text: "청구일(월) = 2026-02, 2026-01", formula: "(합계(지급액)[2026-02] − 합계(지급액)[2026-01]) ÷ 합계(지급액)[2026-01] × 100", row_count: 3, excluded: { not_number: 0, blank: 0 } },
+      e3: { range: "청구내역!F: 12", filter_text: "청구일(월) = 2026-04", formula: "합계(지급액) = 숫자 1개의 합", row_count: 1, excluded: { not_number: 0, blank: 0 } },
+      e4: { current_evidence_id: "e3", previous_evidence_id: null, filter_text: "청구일(월) = 2026-04, 2026-03", formula: "(…)", row_count: 1, excluded: { not_number: 0, blank: 0 } },
+      e5: { range: "청구내역!F: 2", filter_text: "청구일(월) = 2026-01", formula: "합계(지급액) = 숫자 1개의 합", row_count: 1, excluded: { not_number: 0, blank: 0 } },
+    },
+    chart: null };
+  const view = await mount(module.DataAggregationViewer, { content: { body } });
+  try {
+    const computed = findElements(view.container, (n) => n.tagName === "TD" && n.getAttribute("data-computed") === "true");
+    const pane = findElements(view.container, (n) => n.tagName === "ASIDE")[0];
+    await view.click(findElements(computed[1], (n) => n.tagName === "BUTTON")[0]);
+    assert.ok(pane.textContent.includes("원본 범위(이번 달)") && pane.textContent.includes("청구내역!F: 3, 9"), pane.textContent);
+    assert.ok(pane.textContent.includes("원본 범위(전월)") && pane.textContent.includes("청구내역!F: 2"), pane.textContent);
+    assert.ok(pane.textContent.includes("2026-02, 2026-01"));
+    await view.click(findElements(computed[3], (n) => n.tagName === "BUTTON")[0]);
+    assert.ok(pane.textContent.includes("청구내역!F: 12"), pane.textContent);
+    assert.ok(pane.textContent.includes("원본 범위(전월)") && pane.textContent.includes("전월 자료 없음"), pane.textContent);
+  } finally { await view.close(); await cleanup(); }
+});
+
+test("차트: 빠진 달(missing) 점은 자료 없음, 계산 불가 점과 범례 문구가 다르다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-data-aggregation-viewer.jsx", "studio-aggregation-missing");
+  try {
+    const chart = { kind: "line", x_key: "월", x_label: "월", series: [
+      { key: "[\"암\"]", label: "암", points: [{ x: "2026-01", value: "3" }, { x: "2026-02", value: null, missing: true }, { x: "2026-03", value: "4" }] }] };
+    const model = module.chartModel(chart);
+    assert.equal(model.gap, false);
+    assert.equal(model.missing, true);
+    assert.equal(model.marks[1].missing, true);
+    const body = { ...BODY, columns: [{ key: "월", label: "월", role: "group" }, { key: "상품", label: "상품", role: "group" }, { key: "m1", label: "건수", role: "measure" }],
+      rows: [[cell("2026-01", "2026-01"), cell("암", "암"), comp("3", "3", "e1")], [cell("2026-03", "2026-03"), cell("암", "암"), comp("4", "4", "e1")]], chart };
+    const view = await mount(module.DataAggregationViewer, { content: { body } });
+    try {
+      assert.equal(findElements(view.container, (n) => n.getAttribute?.("data-gap") === "true").length, 0);
+      const legend = findElements(view.container, (n) => n.getAttribute?.("data-missing") === "true");
+      assert.equal(legend.length, 1);
+      assert.ok(legend[0].textContent.includes("자료 없음") && !legend[0].textContent.includes("계산 불가"), legend[0].textContent);
+    } finally { await view.close(); }
+    const bar = { kind: "bar", x_key: "상품", x_label: "상품", series: [{ key: "m1", label: "건수", points: [{ x: "암", value: null, missing: true }, { x: "실손", value: null }] }] };
+    const barView = await mount(module.DataAggregationViewer, { content: { body: { ...BODY, chart: bar } } });
+    try {
+      const marks = findElements(barView.container, (n) => (n.tagName === "rect" || n.tagName === "RECT") && n.getAttribute("data-series") !== null);
+      assert.ok(marks[0].textContent.includes("자료 없음") && !marks[0].textContent.includes("계산 불가"), marks[0].textContent);
+      assert.ok(marks[1].textContent.includes("계산 불가"), marks[1].textContent);
+    } finally { await barView.close(); }
+  } finally { await cleanup(); }
+});
+
+test("차트 말풍선: 빈칸 묶음과 글자 '(빈칸)' 묶음은 series key(값)로 구분한다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-data-aggregation-viewer.jsx", "studio-aggregation-blank-key");
+  try {
+  const body = { ...BODY, columns: [{ key: "월", label: "월", role: "group" }, { key: "상품", label: "상품", role: "group" }, { key: "m1", label: "건수", role: "measure" }],
+    rows: [[cell("2026-01", "2026-01"), cell("(빈칸)", "(빈칸)"), comp("7", "7", "e1")], [cell("2026-01", "2026-01"), cell(null, "(빈칸)"), comp("2", "2", "e1")]],
+    chart: { kind: "line", x_key: "월", x_label: "월", series: [
+      { key: "[null]", label: "(빈칸)", points: [{ x: "2026-01", value: "2" }] },
+      { key: "[\"(빈칸)\"]", label: "(빈칸)", points: [{ x: "2026-01", value: "7" }] }] } };
+  const lookup = module.chartDisplayLookup(body);
+  assert.equal(lookup(body.chart.series[0], 0, body.chart.series[0].points[0]), "2");
+  assert.equal(lookup(body.chart.series[1], 0, body.chart.series[1].points[0]), "7");
+  } finally { await cleanup(); }
 });
 
 test("차트 SVG가 chart.series 값과 같다(막대·선), 계산 불가는 빈 막대·끊긴 점과 범례 문구", async () => {

@@ -8,7 +8,7 @@ from decimal import Context, Decimal
 
 import pytest
 
-from daon2_user_api.aggregation_engine import AggregationTimeout, compress_ranges, run
+from daon2_user_api.aggregation_engine import AggregationTimeout, compact_range, run
 from daon2_user_api.table_reader import Column, NotDate, NotNumber, Table
 
 D = Decimal
@@ -42,21 +42,31 @@ def by_key(result):
     return [dict(zip(keys, row)) for row in result['rows']]
 
 
-def expand(ranges):
-    """근거 범위 문자열을 행 번호 집합으로 펼친다 (XLSX·CSV 모두)."""
+def expand(text):
+    """근거 범위 한 줄(``시트!F: 2–31, 45–60`` 또는 ``행 2–31 · 열``)을 행 번호 집합으로 펼친다."""
+    if text is None:
+        return set()
+    if text.startswith('행 '):
+        body = text[2:].split(' · ')[0]
+    else:
+        ref = text.rpartition('!')[2]
+        assert re.fullmatch(r'[A-Z]+: .+', ref), text
+        body = ref.split(': ', 1)[1]
     numbers = set()
-    for text in ranges:
-        if text.startswith('행 '):
-            body = text[2:].split(' · ')[0]
-            for part in body.split(', '):
-                lo, _, hi = part.partition('–')
-                numbers.update(range(int(lo), int(hi or lo) + 1))
-        else:
-            ref = text.split('!')[-1]
-            lo, _, hi = ref.partition(':')
-            lo_n = int(re.sub(r'[A-Z]', '', lo)); hi_n = int(re.sub(r'[A-Z]', '', hi or lo))
-            numbers.update(range(lo_n, hi_n + 1))
+    for part in body.split(', '):
+        lo, _, hi = part.partition('–')
+        numbers.update(range(int(lo), int(hi or lo) + 1))
     return numbers
+
+
+def growth_rows(result, entry):
+    """증감률 근거: 이번 달·전월 근거 번호를 따라가 두 범위의 행을 합친다."""
+    assert 'range' not in entry
+    ev = result['evidence']
+    rows = expand(ev[entry['current_evidence_id']]['range'])
+    if entry['previous_evidence_id'] is not None:
+        rows |= expand(ev[entry['previous_evidence_id']]['range'])
+    return rows
 
 
 SAMPLE = [
@@ -116,7 +126,9 @@ def test_growth_previous_month():
     assert feb['growth_s']['value'] == '50' and feb['growth_s']['display'] == '50.0%'
     assert mar['growth_s']['value'] == '-12.5' and mar['growth_s']['display'] == '-12.5%'
     ev = result['evidence'][feb['growth_s']['evidence_id']]
-    assert expand(ev['ranges']) == {2, 3}
+    assert growth_rows(result, ev) == {2, 3}
+    assert ev['current_evidence_id'] == feb['s']['evidence_id'] and ev['previous_evidence_id'] == jan['s']['evidence_id']
+    assert result['evidence'][jan['growth_s']['evidence_id']]['previous_evidence_id'] is None
     assert ev['formula'] == '(합계(지급액)[2026-02] − 합계(지급액)[2026-01]) ÷ 합계(지급액)[2026-01] × 100'
 
 
@@ -145,6 +157,9 @@ def test_avg_no_rows_not_computable():
                                          measures=[{'id': 'a', 'func': 'avg', 'column': '지급액'}]))
     cell = by_key(result)[0]['a']
     assert cell['status'] == 'not_computable' and cell['value'] is None and cell['reason']
+    ev = result['evidence'][cell['evidence_id']]
+    assert ev['formula'] == '평균(지급액): 대상 행 없음'  # '합계 0 ÷ 0개' 같은 식을 쓰지 않는다
+    assert ev['range'] is None and ev['row_count'] == 0
     # 아무 행도 맞지 않는 묶음 없는 집계: 한 줄, 건수 0, 합계·평균 계산 불가
     result = run(make_table(SAMPLE), spec(filters=[{'column': '상품', 'op': 'eq', 'value': 'Z'}], measures=MEASURES3))
     (row,) = by_key(result)
@@ -164,14 +179,14 @@ def test_not_number_and_blank_excluded_and_counted():
     ev = result['evidence'][row['s']['evidence_id']]
     assert ev['excluded'] == {'not_number': 1, 'blank': 1}
     assert ev['row_count'] == 2
-    assert expand(ev['ranges']) == {2, 5}
+    assert expand(ev['range']) == {2, 5}
     assert any('숫자 아님 1행' in w for w in result['warnings'])
 
 
 def _count_rows(table, flt):
     result = run(table, spec(filters=[flt], measures=[{'id': 'n', 'func': 'count', 'column': None}]))
     (row,) = by_key(result)
-    return expand(result['evidence'][row['n']['evidence_id']]['ranges'])
+    return expand(result['evidence'][row['n']['evidence_id']]['range'])
 
 
 def test_filters_each_op():
@@ -211,31 +226,38 @@ def test_evidence_ranges_match_rows():
         result = run(table, spec(group_by=[{'column': '상품', 'month': False}], measures=MEASURES3))
         a, b = by_key(result)
         ev = result['evidence']
-        assert expand(ev[a['n']['evidence_id']]['ranges']) == {2, 3, 7, 8, 11}
-        assert expand(ev[a['s']['evidence_id']]['ranges']) == {2, 3, 7, 11}
-        assert expand(ev[a['a']['evidence_id']]['ranges']) == {2, 3, 7, 11}
-        assert expand(ev[b['s']['evidence_id']]['ranges']) == {4, 10}
+        assert expand(ev[a['n']['evidence_id']]['range']) == {2, 3, 7, 8, 11}
+        assert expand(ev[a['s']['evidence_id']]['range']) == {2, 3, 7, 11}
+        assert expand(ev[a['a']['evidence_id']]['range']) == {2, 3, 7, 11}
+        assert expand(ev[b['s']['evidence_id']]['range']) == {4, 10}
         assert ev[a['s']['evidence_id']]['row_count'] == 4
         assert a['s']['value'] == '14' and b['s']['value'] == '9'
         if not csv:
-            assert ev[a['s']['evidence_id']]['ranges'] == ['청구내역!G2:G3', '청구내역!G7', '청구내역!G11']
-            assert ev[a['n']['evidence_id']]['ranges'][0].startswith('청구내역!F')
+            assert ev[a['s']['evidence_id']]['range'] == '청구내역!G: 2–3, 7, 11'
+            assert ev[a['n']['evidence_id']]['range'].startswith('청구내역!F: ')
         else:
-            assert ev[a['s']['evidence_id']]['ranges'] == ['행 2–3, 7, 11 · 지급액']
+            assert ev[a['s']['evidence_id']]['range'] == '행 2–3, 7, 11 · 지급액'
         # 근거 번호는 행 우선 순서로 e1, e2, ...
         ids = [cell['evidence_id'] for row in result['rows'] for cell in row if cell['evidence_id']]
         assert ids == [f'e{i}' for i in range(1, len(ids) + 1)]
         assert set(ev) == set(ids)
 
 
-def test_compress_ranges_xlsx_and_csv():
+def test_compact_range_xlsx_and_csv():
     numbers = list(range(45, 61)) + list(range(2, 32))
-    xlsx = compress_ranges('F', '지급액', '청구내역', numbers)
-    assert xlsx == ['청구내역!F2:F31', '청구내역!F45:F60']
-    assert ', '.join(r.split('!')[1] for r in xlsx) == 'F2:F31, F45:F60'
-    assert compress_ranges(None, '지급액', None, numbers) == ['행 2–31, 45–60 · 지급액']
-    assert compress_ranges('F', '지급액', '청구내역', []) == []
-    assert compress_ranges('F', '지급액', '청구 내역', [5]) == ["'청구 내역'!F5"]
+    # 시트·열은 한 번만 쓰고 행 묶음을 잇는다(근거 한 칸에 문자열 하나).
+    assert compact_range('F', '지급액', '청구내역', numbers) == '청구내역!F: 2–31, 45–60'
+    assert compact_range(None, '지급액', None, numbers) == '행 2–31, 45–60 · 지급액'
+    assert compact_range('F', '지급액', '청구내역', []) is None
+    assert compact_range('F', '지급액', '청구 내역', [5]) == "'청구 내역'!F: 5"
+    assert compact_range('F', '지급액', None, [5, 6]) == 'F: 5–6'
+
+
+def test_compact_range_quotes_cell_reference_like_sheet_names():
+    for name in ('A1', 'xfd100', 'R1C1', 'R', 'C', 'rc'):
+        assert compact_range('F', '지급액', name, [2]) == f"'{name}'!F: 2"
+    for name in ('청구내역', 'Sheet1', 'ABCD1', 'Data'):
+        assert compact_range('F', '지급액', name, [2]) == f'{name}!F: 2'
 
 
 def test_rounding_half_up_display():
@@ -311,7 +333,7 @@ def test_growth_within_same_other_group():
     assert got[('B', '2026-02')]['display'] == '-75.0%'
     assert got[('A', '2026-01')]['reason'] == '전월 자료 없음'
     ev = result['evidence'][got[('B', '2026-02')]['evidence_id']]
-    assert expand(ev['ranges']) == {4, 5}
+    assert growth_rows(result, ev) == {4, 5}
 
 
 def test_growth_when_previous_or_current_not_computable():
@@ -331,7 +353,7 @@ def test_filtered_rows_are_not_evidence_and_filter_text():
                                            measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}]))
     (a,) = by_key(result)  # B 행은 모두 100 미만
     ev = result['evidence'][a['s']['evidence_id']]
-    assert expand(ev['ranges']) == {2, 4, 6}
+    assert expand(ev['range']) == {2, 4, 6}
     assert '지급액 ≥ 100' in ev['filter_text'] and '상품 = A' in ev['filter_text']
     assert a['s']['value'] == '600.25'
 
@@ -373,8 +395,8 @@ def test_count_with_column_counts_all_rows():
     (row,) = by_key(result)
     assert row['n']['value'] == '4'
     ev = result['evidence'][row['n']['evidence_id']]
-    assert expand(ev['ranges']) == {2, 3, 4, 5}
-    assert ev['ranges'] == ['청구내역!G2:G5']
+    assert expand(ev['range']) == {2, 3, 4, 5}
+    assert ev['range'] == '청구내역!G: 2–5'
     assert ev['row_count'] == 4
     assert '건수' in ev['formula']
 
@@ -429,3 +451,91 @@ def test_blank_group_sorts_last_both_directions():
                                              sort={'by': '상품', 'desc': desc}))
         assert [r['상품']['value'] for r in by_key(result)] == expected
         assert by_key(result)[-1]['상품']['display'] == '(빈칸)'
+
+
+# ------------------------------------------------------------------ final review fixes
+
+def test_growth_previous_evidence_exists_when_cut_by_limit():
+    rows = [(date(2026, 1, 9), 'A', D('100')), (date(2026, 2, 9), 'A', D('300')), (date(2026, 3, 9), 'A', D('150'))]
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}], sort={'by': 's', 'desc': False}, limit=1))
+    (jan,) = by_key(result)  # 가장 작은 1월만 남는다
+    assert jan['청구일(월)']['value'] == '2026-01'
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}], sort={'by': 's', 'desc': True}, limit=1))
+    (feb,) = by_key(result)  # 2월만 보이고 1월 행은 잘렸다
+    ev = result['evidence'][feb['growth_s']['evidence_id']]
+    previous = result['evidence'][ev['previous_evidence_id']]
+    assert expand(previous['range']) == {2} and previous['row_count'] == 1
+    assert '2026-01' in previous['filter_text']
+    assert growth_rows(result, ev) == {2, 3}
+
+
+def test_growth_evidence_reuses_measure_entries_without_copying_ranges():
+    rows = [(date(2026, 1, 9), 'A', D('1')), (date(2026, 2, 9), 'A', D('2')), (date(2026, 3, 9), 'A', D('3'))]
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}]))
+    ranges = [e['range'] for e in result['evidence'].values() if 'range' in e]
+    assert len(ranges) == 3  # 달마다 한 번만
+    for entry in result['evidence'].values():
+        if 'range' not in entry:
+            assert set(entry) == {'current_evidence_id', 'previous_evidence_id', 'filter_text', 'formula', 'row_count', 'excluded'}
+
+
+def test_cancel_check_is_called_and_propagates():
+    rows = [(date(2026, 1, 1), 'A', D('1'))] * 2500
+    calls = []
+
+    class Cancelled(RuntimeError):
+        pass
+
+    def cancel():
+        calls.append(1)
+        if len(calls) >= 2:
+            raise Cancelled('cancelled')
+
+    with pytest.raises(Cancelled):
+        run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]), cancel_check=cancel)
+    seen = []
+    run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]), cancel_check=lambda: seen.append(1))
+    assert len(seen) >= 3  # 시작·반복 중간·끝
+
+
+def _representative(table):
+    from daon2_user_api.aggregation_present import build_chart, content_size_ok, summary_sentences
+    from daon2_user_api.aggregation_spec import describe, normalize
+    raw = {'filters': [], 'group_by': [{'column': '청구일', 'month': True}, {'column': '상품', 'month': False}],
+           'measures': [{'id': 'cnt', 'func': 'count', 'column': None}, {'id': 'amt', 'func': 'sum', 'column': '지급액'}],
+           'growth': [{'measure_id': 'cnt'}, {'measure_id': 'amt'}], 'sort': None, 'limit': None, 'unsupported': []}
+    normalized, warnings = normalize(raw, table)
+    result = run(table, normalized)
+    body = {'request': '월별·상품별 청구 건수와 지급액 합계, 전월 대비 증감률', 'source': {'source_version_id': 'v', 'sha256': '0' * 64,
+            'file_name': table.file_name, 'sheet': table.sheet, 'header_row': 1}, 'spec': normalized, 'spec_raw': raw,
+            'conditions_text': describe(normalized), 'columns': result['columns'], 'rows': result['rows'], 'evidence': result['evidence'],
+            'chart': build_chart(result, normalized), 'summary': summary_sentences(result, normalized),
+            'warnings': [*warnings, *result['warnings']], 'stats': {'rows_read': len(table.rows), 'elapsed_ms': 0}}
+    return body, content_size_ok(body)
+
+
+def test_representative_request_on_100k_rows_fits_storage_limit():
+    """대표 요청(월별·상품별 건수·지급액 합계·전월 대비 증감률)이 10만 행(CSV·XLSX 모양)에서 2 MiB 안에 든다."""
+    import json
+    import random
+    from dataclasses import replace
+
+    from daon2_user_api.table_reader import read_table
+    rng = random.Random(20261126)
+    products = ['암보험', '실손보험', '상해보험', '여행자보험', '치아보험']
+    lines = ['청구번호,청구일,상품,지급액']
+    for i in range(100_000):
+        lines.append(f'C{i + 1:07d},2026-{rng.randint(1, 6):02d}-{rng.randint(1, 28):02d},{rng.choice(products)},{rng.randint(1, 999) * 1000}')
+    table = read_table('\n'.join(lines).encode(), file_name='claims.csv', source_format='csv', sheet=None, header_row=1)
+    body, ok = _representative(table)
+    assert ok, len(json.dumps(body, ensure_ascii=False).encode())
+    xlsx = replace(table, source_format='xlsx', sheet='청구내역', file_name='claims.xlsx',
+                   columns=tuple(Column(c.name, 'ABCD'[i], i, c.kind) for i, c in enumerate(table.columns)))
+    body, ok = _representative(xlsx)
+    assert ok, len(json.dumps(body, ensure_ascii=False).encode())

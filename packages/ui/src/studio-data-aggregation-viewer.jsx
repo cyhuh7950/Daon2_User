@@ -27,7 +27,10 @@ export function splitWarnings(warnings = []) {
   return { skipped, notes };
 }
 
-/** 차트 점 → 집계표의 같은 칸 표시 문자열. 막대는 행 순서, 선은 (월, 묶음 표시) 일치로 찾는다. 못 찾으면 null. */
+/** 선 차트 계열 key: 묶음 칸 저장값 목록의 JSON(빈칸은 null). 서버(aggregation_present)와 같은 규칙. */
+export const seriesKeyOf = (values) => JSON.stringify(values.map((value) => (value === undefined ? null : value)));
+
+/** 차트 점 → 집계표의 같은 칸 표시 문자열. 막대는 행 순서, 선은 (월, 묶음 값 key) 일치로 찾는다. 못 찾으면 null. */
 export function chartDisplayLookup(body = {}) {
   const chart = body.chart;
   const columns = asArray(body.columns);
@@ -39,13 +42,17 @@ export function chartDisplayLookup(body = {}) {
   const monthIdx = columns.findIndex((column) => column?.key === chart.x_key);
   const seriesIdx = groupIdx.filter((index) => index !== monthIdx);
   return (series, _index, point) => {
+    // 빈칸 묶음과 글자 "(빈칸)" 묶음은 표시가 같으므로 저장값 key로 구분한다(key가 JSON 배열이 아니면 예전처럼 표시로 찾는다).
+    const byKey = typeof series?.key === "string" && series.key.startsWith("[");
     const row = rows.find((cells) => cells?.[monthIdx]?.value === point?.x
-      && (seriesIdx.length === 0 || seriesIdx.map((index) => cells?.[index]?.display ?? "").join(SEPARATOR) === series?.label));
+      && (seriesIdx.length === 0 || (byKey ? seriesKeyOf(seriesIdx.map((index) => cells?.[index]?.value)) === series.key
+        : seriesIdx.map((index) => cells?.[index]?.display ?? "").join(SEPARATOR) === series?.label)));
     return row?.[measureIdx]?.display ?? null;
   };
 }
 
-/** 차트 그림 모델(순수 함수). 점의 값은 point.value 문자열 그대로 들고 다닌다. null은 빈 막대·끊긴 점. */
+/** 차트 그림 모델(순수 함수). 점의 값은 point.value 문자열 그대로 들고 다닌다. null은 빈 막대·끊긴 점.
+ * point.missing은 그 달에 행이 없는 점(자료 없음)이고, 그 밖의 null은 계산 불가다(gap). */
 export function chartModel(chart, size = CHART_SIZE) {
   if (!chart || !["bar", "line"].includes(chart.kind)) return null;
   const series = asArray(chart.series);
@@ -62,10 +69,16 @@ export function chartModel(chart, size = CHART_SIZE) {
   const center = (index) => size.left + band * index + band / 2;
   const marks = [];
   let gap = false;
+  let missing = false;
   series.forEach((item, s) => asArray(item?.points).forEach((point, index) => {
     const raw = point?.value;
     const number = raw === null || raw === undefined ? NaN : Number(raw);
-    if (!Number.isFinite(number)) { gap = true; marks.push({ series: s, index, x: point?.x, value: null, empty: true, cx: center(index), cy: baseline }); return; }
+    if (!Number.isFinite(number)) {
+      const absent = point?.missing === true;
+      if (absent) missing = true; else gap = true;
+      marks.push({ series: s, index, x: point?.x, value: null, empty: true, missing: absent, cx: center(index), cy: baseline });
+      return;
+    }
     const mark = { series: s, index, x: point?.x, value: String(raw), empty: false, cx: center(index), cy: y(number) };
     if (chart.kind === "bar") {
       const width = Math.max(2, band * 0.6);
@@ -83,7 +96,7 @@ export function chartModel(chart, size = CHART_SIZE) {
     if (current.length) segments.push(current);
     return segments.map((segment) => segment.map((m) => `${m.cx.toFixed(1)},${m.cy.toFixed(1)}`).join(" "));
   }) : [];
-  return { kind: chart.kind, size, baseline, xs, band, center, marks, lines, gap };
+  return { kind: chart.kind, size, baseline, xs, band, center, marks, lines, gap, missing };
 }
 
 const shortLabel = (text) => { const value = String(text ?? ""); return value.length > 10 ? `${value.slice(0, 9)}…` : value; };
@@ -98,7 +111,7 @@ export function AggregationChart({ body }) {
   const label = (mark) => {
     const item = series[mark.series];
     const point = asArray(item?.points)[mark.index];
-    const shown = mark.empty ? msg("studio.aggregation.not_computable") : (lookup(item, mark.index, point) ?? mark.value);
+    const shown = mark.missing ? msg("studio.aggregation.no_data") : mark.empty ? msg("studio.aggregation.not_computable") : (lookup(item, mark.index, point) ?? mark.value);
     return `${series.length > 1 ? `${item?.label ?? ""}${SEPARATOR}` : ""}${mark.x ?? ""}: ${shown}`;
   };
   return <figure className="studio-aggregation__chart" data-chart-kind={model.kind}>
@@ -109,7 +122,8 @@ export function AggregationChart({ body }) {
       {model.lines.map((segments, s) => segments.map((points, index) => <polyline key={`l-${s}-${index}`} className={`studio-aggregation__line studio-aggregation__series-${s % 4}`} points={points} fill="none" />))}
       {model.marks.map((mark) => {
         const key = `${mark.series}-${mark.index}`;
-        const common = { "data-series": String(mark.series), "data-x": String(mark.x ?? ""), "data-value": mark.value ?? "", "data-empty": mark.empty ? "true" : undefined };
+        const common = { "data-series": String(mark.series), "data-x": String(mark.x ?? ""), "data-value": mark.value ?? "", "data-empty": mark.empty ? "true" : undefined,
+          "data-missing": mark.missing ? "true" : undefined };
         if (model.kind === "bar") {
           return mark.empty
             ? <rect key={key} {...common} className="studio-aggregation__bar studio-aggregation__bar--empty" x={mark.cx - Math.max(2, model.band * 0.3)} y={model.baseline - 6} width={Math.max(4, model.band * 0.6)} height={6}><title>{label(mark)}</title></rect>
@@ -121,19 +135,44 @@ export function AggregationChart({ body }) {
     <figcaption className="studio-aggregation__legend">
       {series.map((item, s) => <span key={s} className="studio-aggregation__legend-item"><span className={`studio-aggregation__swatch studio-aggregation__series-${s % 4}`} aria-hidden="true" />{item?.label ?? ""}</span>)}
       {model.gap && <span className="studio-aggregation__legend-item" data-gap="true">{msg("studio.aggregation.chart.gap")}</span>}
+      {model.missing && <span className="studio-aggregation__legend-item" data-missing="true">{msg("studio.aggregation.chart.missing")}</span>}
     </figcaption>
   </figure>;
 }
 
-function RangeList({ ranges }) {
+/** 근거 범위 한 줄(``시트!F: 2–31, 45–60`` · ``행 2–31, 45–60 · 열``)의 행 묶음 수. 모양이 다르면 1. */
+export function rangeRunCount(text) {
+  const value = String(text ?? "");
+  const match = /^행 (.+?) · /u.exec(value) ?? /^(?:.*!)?[A-Z]+: (.+)$/u.exec(value);
+  return match ? match[1].split(", ").length : 1;
+}
+
+/** 칸의 근거 범위 글. 예전 판(범위 목록 ranges)도 한 줄로 이어 보인다. */
+const rangeText = (entry) => (typeof entry?.range === "string" ? entry.range : asArray(entry?.ranges).map(String).join(", ") || null);
+
+function RangeText({ text }) {
   const [open, setOpen] = useState(false);
-  if (ranges.length === 0) return <dd>-</dd>;
-  if (ranges.length <= RANGE_PREVIEW) return <dd><ul className="studio-aggregation__ranges">{ranges.map((text, index) => <li key={index}>{text}</li>)}</ul></dd>;
+  if (!text) return <dd>-</dd>;
+  const runs = rangeRunCount(text);
+  if (runs <= RANGE_PREVIEW) return <dd><p className="studio-aggregation__ranges">{text}</p></dd>;
   return <dd>
-    <span>{msg("studio.aggregation.evidence.ranges_count", { n: ranges.length })}</span>{" "}
+    <span>{msg("studio.aggregation.evidence.ranges_count", { n: runs })}</span>{" "}
     <button type="button" className="studio-btn" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{msg(open ? "studio.aggregation.evidence.collapse" : "studio.aggregation.evidence.expand")}</button>
-    {open && <ul className="studio-aggregation__ranges">{ranges.map((text, index) => <li key={index}>{text}</li>)}</ul>}
+    {open && <p className="studio-aggregation__ranges">{text}</p>}
   </dd>;
+}
+
+/** 근거 범위 칸. 증감률 근거는 범위를 다시 쓰지 않고 이번 달·전월 근거 번호를 가지므로 따라가서 두 범위를 보인다. */
+function EvidenceRanges({ evidence, entry, id }) {
+  if (entry && "current_evidence_id" in entry) {
+    const previous = entry.previous_evidence_id ? evidence?.[entry.previous_evidence_id] : null;
+    return <>
+      <dt>{msg("studio.aggregation.evidence.ranges_current")}</dt><RangeText key={`${id}-c`} text={rangeText(evidence?.[entry.current_evidence_id])} />
+      <dt>{msg("studio.aggregation.evidence.ranges_previous")}</dt>
+      {previous ? <RangeText key={`${id}-p`} text={rangeText(previous)} /> : <dd>{msg("studio.aggregation.evidence.no_previous")}</dd>}
+    </>;
+  }
+  return <><dt>{msg("studio.aggregation.evidence.ranges")}</dt><RangeText key={id} text={rangeText(entry)} /></>;
 }
 
 export function EvidencePane({ body, selected }) {
@@ -155,7 +194,7 @@ export function EvidencePane({ body, selected }) {
       {!ok && cell.reason && <><dt>{msg("studio.aggregation.evidence.reason")}</dt><dd>{cell.reason}</dd></>}
       <dt>{msg("studio.aggregation.evidence.file")}</dt><dd>{source.file_name ?? ""}{source.sheet ? `${SEPARATOR}${source.sheet}` : ""}</dd>
       {entry && <>
-        <dt>{msg("studio.aggregation.evidence.ranges")}</dt><RangeList key={cell.evidence_id} ranges={asArray(entry.ranges).map(String)} />
+        <EvidenceRanges evidence={body?.evidence} entry={entry} id={cell.evidence_id} />
         <dt>{msg("studio.aggregation.evidence.filter")}</dt><dd>{entry.filter_text ?? ""}</dd>
         <dt>{msg("studio.aggregation.evidence.formula")}</dt><dd>{entry.formula ?? ""}</dd>
         <dt>{msg("studio.aggregation.evidence.row_count")}</dt><dd data-row-count="">{String(entry.row_count ?? "")}</dd>
@@ -195,7 +234,9 @@ export function DataAggregationViewer({ content }) {
             const cell = asArray(cells)[c] ?? {};
             const isSelected = selected?.row === r && selected?.col === c;
             if (!computedRole(column)) {
-              return <td key={c} data-computed="false"><button type="button" className="studio-aggregation__cell" aria-pressed={isSelected} onClick={() => setSelected({ row: r, col: c })}>{cell.display ?? ""}</button></td>;
+              return <td key={c} data-computed="false"><button type="button" className="studio-aggregation__cell" aria-pressed={isSelected} onClick={() => setSelected({ row: r, col: c })}>
+                <span>{cell.display ?? ""}</span><span className="studio-aggregation__mark studio-aggregation__mark--original">{msg("studio.aggregation.original")}</span>
+              </button></td>;
             }
             const ok = cell.status === "ok" && cell.value !== null && cell.value !== undefined;
             return <td key={c} data-computed="true" data-status={cell.status ?? ""}>

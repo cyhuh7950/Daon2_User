@@ -30,6 +30,8 @@ _EXACT = Context(prec=1000, rounding=ROUND_HALF_EVEN, traps=[Inexact, InvalidOpe
 _WIDE = Context(prec=5000, rounding=ROUND_HALF_UP, traps=[InvalidOperation, Overflow])
 _DIV = Context(prec=28, rounding=ROUND_HALF_EVEN, traps=[InvalidOperation, DivisionByZero, Overflow])
 _PLAIN_SHEET = re.compile(r'[^\W\d]\w*')
+# Names Excel would read as a cell reference (A1, XFD100, R1C1, R, C) must be quoted.
+_REF_LIKE_SHEET = re.compile(r'[A-Za-z]{1,3}[0-9]+|[Rr][0-9]*[Cc][0-9]*|[RrCc]')
 
 _REASON_NO_NUMBER = '숫자 값 없음'
 _REASON_PRECISION = '정밀도 초과'
@@ -49,9 +51,11 @@ def _invalid():
     raise ValueError(_SPEC_INVALID)
 
 
-def _check_deadline(deadline):
+def _check_deadline(deadline, cancel_check=None):
     if deadline is not None and time.monotonic() > deadline:
         raise AggregationTimeout('AGGREGATION_TIMEOUT')
+    if cancel_check is not None:
+        cancel_check()  # the job's cancellation propagates unchanged
 
 
 # ---------------------------------------------------------------- display
@@ -99,7 +103,7 @@ def _value_text(value) -> tuple[str | None, str]:
 # ---------------------------------------------------------------- ranges
 
 def _quote_sheet(sheet: str) -> str:
-    if _PLAIN_SHEET.fullmatch(sheet):
+    if _PLAIN_SHEET.fullmatch(sheet) and not _REF_LIKE_SHEET.fullmatch(sheet):
         return sheet
     return "'" + sheet.replace("'", "''") + "'"
 
@@ -114,22 +118,21 @@ def _runs(row_numbers):
     return runs
 
 
-def compress_ranges(column_letter: str | None, column_name: str, sheet: str | None,
-                    row_numbers: Sequence[int]) -> list[str]:
-    """Consecutive row numbers -> ranges.
+def compact_range(column_letter: str | None, column_name: str, sheet: str | None,
+                  row_numbers: Sequence[int]) -> str | None:
+    """Consecutive row numbers -> ONE compact range string (None for no rows).
 
-    XLSX (letter given): one ``시트!F2:F31`` item per run (``F5`` for one row).
-    CSV (no letter): a single ``행 2–31, 45–60 · 지급액`` item.
+    The sheet and column are written once, then the row runs:
+    XLSX (letter given): ``청구내역!F: 2–31, 45–60``; CSV: ``행 2–31, 45–60 · 지급액``.
     """
     runs = _runs(row_numbers)
     if not runs:
-        return []
+        return None
+    rows = ', '.join(f'{lo}' if lo == hi else f'{lo}–{hi}' for lo, hi in runs)
     if column_letter is None:
-        parts = [f'{lo}' if lo == hi else f'{lo}–{hi}' for lo, hi in runs]
-        return [f'행 {", ".join(parts)} · {column_name}']
+        return f'행 {rows} · {column_name}'
     prefix = f'{_quote_sheet(sheet)}!' if sheet else ''
-    return [f'{prefix}{column_letter}{lo}' if lo == hi else f'{prefix}{column_letter}{lo}:{column_letter}{hi}'
-            for lo, hi in runs]
+    return f'{prefix}{column_letter}: {rows}'
 
 
 # ---------------------------------------------------------------- spec
@@ -389,15 +392,22 @@ def _previous_month(ym):
 
 # ---------------------------------------------------------------- run
 
-def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_groups: int = 2000) -> dict:
-    _check_deadline(deadline)
+def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_groups: int = 2000,
+        cancel_check=None) -> dict:
+    """Evidence entries: a measure cell's entry has one compact ``range``
+    string; a growth cell's entry references the two measure entries it
+    compares (``current_evidence_id``, ``previous_evidence_id`` or None when
+    the previous month has no rows) instead of repeating their ranges. A
+    referenced previous-month entry exists even when that row is cut by
+    ``limit``."""
+    _check_deadline(deadline, cancel_check)
     filters, groups, measures, growth, month_index, keys, sort_index, sort_desc, limit = _parse_spec(table, spec)
 
     buckets: dict[tuple, list[_Acc]] = {}
     not_date = 0
     for i, (row, row_number) in enumerate(zip(table.rows, table.row_numbers)):
         if i % _DEADLINE_EVERY == 0:
-            _check_deadline(deadline)
+            _check_deadline(deadline, cancel_check)
         if not all(predicate(row[position]) for position, predicate, _ in filters):
             continue
         key = []
@@ -422,7 +432,7 @@ def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_group
         for acc, measure in zip(accs, measures):
             position = measure['position']
             acc.add(measure['func'], None if position is None else row[position], row_number, position is not None)
-    _check_deadline(deadline)
+    _check_deadline(deadline, cancel_check)
     if not groups and not buckets:
         buckets[()] = [_Acc() for _ in measures]
 
@@ -491,16 +501,35 @@ def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_group
                 texts.append(f'{column.name} = {_value_text(value)[1]}')
         return texts
 
-    def ranges(measure, row_numbers):
-        column = evidence_column(measure)
-        return compress_ranges(column.letter, column.name, sheet, row_numbers)
-
     evidence = {}
+    measure_evidence = {}  # (group key, measure index) -> evidence id
     rows_out = []
 
     def add_evidence(entry):
         ident = f'e{len(evidence) + 1}'
         evidence[ident] = entry
+        return ident
+
+    def measure_evidence_id(key, index):
+        ident = measure_evidence.get((key, index))
+        if ident is not None:
+            return ident
+        measure = measures[index]
+        acc = buckets[key][index]
+        label = measure['label']
+        if measure['func'] == 'count':
+            formula = f'{label} = 조건에 맞는 행 {len(acc.rows):,}개'
+        elif measure['func'] == 'sum':
+            formula = f'{label} = 숫자 {len(acc.rows):,}개의 합'
+        elif not acc.rows:
+            formula = f'{label}: 대상 행 없음'
+        else:
+            formula = f'{label} = 합계 {_grouped(acc.total)} ÷ {len(acc.rows):,}개'
+        column = evidence_column(measure)
+        ident = measure_evidence[(key, index)] = add_evidence({
+            'range': compact_range(column.letter, column.name, sheet, acc.rows),
+            'filter_text': ' · '.join(filter_texts + group_texts(key)) or '전체 행', 'formula': formula,
+            'row_count': len(acc.rows), 'excluded': {'not_number': acc.not_number, 'blank': acc.blank}})
         return ident
 
     def computed_cell(result, evidence_id):
@@ -513,32 +542,20 @@ def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_group
             stored, shown = (_month_text(value), _month_text(value)) if month else _value_text(value)
             row_cells.append({'value': stored, 'display': shown, 'computed': False, 'status': 'ok',
                               'reason': None, 'evidence_id': None})
-        conditions = ' · '.join(filter_texts + group_texts(key)) or '전체 행'
-        for index, measure in enumerate(measures):
-            acc = buckets[key][index]
-            result = results[key][index]
-            if measure['func'] == 'count':
-                formula = f'{measure["label"]} = 조건에 맞는 행 {len(acc.rows):,}개'
-            elif measure['func'] == 'sum':
-                formula = f'{measure["label"]} = 숫자 {len(acc.rows):,}개의 합'
-            else:
-                formula = f'{measure["label"]} = 합계 {_grouped(acc.total)} ÷ {len(acc.rows):,}개'
-            ident = add_evidence({'ranges': ranges(measure, acc.rows), 'filter_text': conditions, 'formula': formula,
-                                  'row_count': len(acc.rows),
-                                  'excluded': {'not_number': acc.not_number, 'blank': acc.blank}})
-            row_cells.append(computed_cell(result, ident))
+        for index in range(len(measures)):
+            row_cells.append(computed_cell(results[key][index], measure_evidence_id(key, index)))
         for (result, previous_key), index in zip(growth_results[key], growth):
-            measure = measures[index]
+            label = measures[index]['label']
             current_acc = buckets[key][index]
             previous_acc = buckets[previous_key][index] if previous_key in buckets else None
             current_month = _month_text(key[month_index]); previous_month = _month_text(previous_key[month_index])
-            label = measure['label']
-            row_numbers = list(current_acc.rows) + (list(previous_acc.rows) if previous_acc else [])
+            current_id = measure_evidence_id(key, index)
+            previous_id = measure_evidence_id(previous_key, index) if previous_acc is not None else None
             ident = add_evidence({
-                'ranges': ranges(measure, row_numbers),
+                'current_evidence_id': current_id, 'previous_evidence_id': previous_id,
                 'filter_text': ' · '.join(filter_texts + group_texts(key, f'{current_month}, {previous_month}')),
                 'formula': f'({label}[{current_month}] − {label}[{previous_month}]) ÷ {label}[{previous_month}] × 100',
-                'row_count': len(set(row_numbers)),
+                'row_count': len(current_acc.rows) + (len(previous_acc.rows) if previous_acc else 0),
                 'excluded': {
                     'not_number': current_acc.not_number + (previous_acc.not_number if previous_acc else 0),
                     'blank': current_acc.blank + (previous_acc.blank if previous_acc else 0),

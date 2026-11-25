@@ -152,3 +152,27 @@ def test_multi_group_without_month_has_x_label_and_first_group_x_key():
     assert all(' · ' in p['x'] and p['x'].split(' · ')[0] in ('암보험', '실손') for p in chart['series'][0]['points'])
     single, spec1 = build(raw_spec([PRODUCT]))
     assert build_chart(single, spec1)['x_label'] == '상품'
+
+
+# ------------------------------------------------------------------ final review fixes
+
+def test_missing_month_point_is_marked_missing_not_computable_is_not():
+    rows = ROWS + [(date(2026, 3, 9), '실손', NotNumber('x'))]  # 실손 3월: 행은 있지만 숫자 없음 -> 계산 불가
+    result, spec = build(raw_spec([PRODUCT, MONTH]), rows)
+    chart = build_chart(result, spec)
+    by_label = {s['label']: s['points'] for s in chart['series']}
+    assert by_label['실손'][2] == {'x': '2026-03', 'value': None}  # 계산 불가: missing 표시 없음
+    rows = ROWS[:4] + [(date(2026, 3, 1), '암보험', D('1'))]
+    result, spec = build(raw_spec([PRODUCT, MONTH]), rows)
+    by_label = {s['label']: s['points'] for s in build_chart(result, spec)['series']}
+    assert by_label['실손'][2] == {'x': '2026-03', 'value': None, 'missing': True}  # 그 달 행 없음
+    assert all('missing' not in p for p in by_label['암보험'])
+
+
+def test_series_key_distinguishes_blank_from_literal_blank_text():
+    rows = [(date(2026, 1, 5), None, D('1')), (date(2026, 1, 6), '(빈칸)', D('2'))]
+    result, spec = build(raw_spec([PRODUCT, MONTH]), rows)
+    chart = build_chart(result, spec)
+    assert len(chart['series']) == 2
+    assert {s['key'] for s in chart['series']} == {'[null]', '["(빈칸)"]'}
+    assert [s['label'] for s in chart['series']] == ['(빈칸)', '(빈칸)']

@@ -246,6 +246,7 @@
 .studio-aggregation__failed { display: inline-flex; flex-direction: column; align-items: flex-end; color: var(--studio-danger); }
 .studio-aggregation__failed small { color: var(--studio-muted); font-size: 11px; }
 .studio-aggregation__mark { flex: none; padding: 0 5px; border: 1px solid var(--studio-border); border-radius: 999px; color: var(--studio-muted); font-size: 10px; line-height: 16px; white-space: nowrap; }
+.studio-aggregation__mark--original { border-style: dashed; }
 .studio-aggregation__chart { margin: 0; padding: 8px; border: 1px solid var(--studio-border); border-radius: 12px; background: var(--studio-surface); }
 .studio-aggregation__chart svg { display: block; width: 100%; height: auto; max-height: 260px; }
 .studio-aggregation__axis { stroke: var(--studio-muted); stroke-width: 1; }
@@ -270,7 +271,7 @@
 .studio-aggregation__facts { margin: 6px 0 0; }
 .studio-aggregation__facts dt { margin-top: 6px; color: var(--studio-muted); font-size: 12px; }
 .studio-aggregation__facts dd { margin: 0; }
-.studio-aggregation__ranges { margin: 4px 0 0; padding-left: 18px; }
+.studio-aggregation__ranges { margin: 4px 0 0; overflow-wrap: anywhere; }
 .studio-aggregation__excluded { margin-top: 6px !important; color: var(--studio-muted); }
 /* 소스 목록 줄의 "집계 전용" 표지 */
 .source-aggregation-only { display: inline-flex; flex: none; align-items: center; min-height: 24px; padding: 0 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }

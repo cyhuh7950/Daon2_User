@@ -33,14 +33,17 @@ def body(**over):
              cell(None, "계산 불가", computed=True, status="not_computable", reason="전월 자료 없음", evidence_id="e4")],
         ],
         "evidence": {
-            "e1": {"ranges": ["청구내역!F2:F31", "청구내역!F45:F60"], "filter_text": "@상품 = =1+1", "formula": "지급액 합계 = 숫자 46개의 합",
+            "e1": {"range": "청구내역!F: 2–31, 45–60", "filter_text": "@상품 = =1+1", "formula": "지급액 합계 = 숫자 46개의 합",
                    "row_count": 46, "excluded": {"not_number": 2, "blank": 1}},
-            "e2": {"ranges": ["청구내역!F2:F31"], "filter_text": "상품 = =1+1", "formula": "(a − b) ÷ b × 100", "row_count": 30,
-                   "excluded": {"not_number": 0, "blank": 0}},
-            "e3": {"ranges": [], "filter_text": "상품 = 암보험", "formula": "지급액 합계 = 숫자 0개의 합", "row_count": 0,
+            # 증감률 근거는 범위를 다시 쓰지 않고 이번 달·전월 근거 번호만 가진다(e5는 표에 없는 전월 칸의 근거).
+            "e2": {"current_evidence_id": "e1", "previous_evidence_id": "e5", "filter_text": "상품 = =1+1", "formula": "(a − b) ÷ b × 100",
+                   "row_count": 76, "excluded": {"not_number": 2, "blank": 1}},
+            "e3": {"range": None, "filter_text": "상품 = 암보험", "formula": "지급액 합계 = 숫자 0개의 합", "row_count": 0,
                    "excluded": {"not_number": 3, "blank": 0}},
-            "e4": {"ranges": [], "filter_text": "상품 = 암보험", "formula": "(a − b) ÷ b × 100", "row_count": 0,
-                   "excluded": {"not_number": 0, "blank": 0}},
+            "e4": {"current_evidence_id": "e3", "previous_evidence_id": None, "filter_text": "상품 = 암보험", "formula": "(a − b) ÷ b × 100",
+                   "row_count": 0, "excluded": {"not_number": 3, "blank": 0}},
+            "e5": {"range": "청구내역!F: 70–99", "filter_text": "상품 = =1+1 · 월 = 2026-01", "formula": "지급액 합계 = 숫자 30개의 합",
+                   "row_count": 30, "excluded": {"not_number": 0, "blank": 0}},
         },
         "chart": None,
         "summary": ["지급액 합계 가장 큰 묶음: =1+1 (1,234.50)"],
@@ -104,11 +107,18 @@ class DataAggregationExportTest(unittest.TestCase):
         self.assertEqual(second[2], ("s", "계산 불가: 숫자 값 없음"))
         evidence = sheets[1]
         self.assertEqual([text for _, text in evidence[0]],
-                         ["행", "열", "값", "파일", "시트", "범위", "필터", "계산식", "대상 행 수", "제외(숫자 아님)", "제외(빈칸)", "계산 불가 이유"])
+                         ["행", "열", "값", "파일", "시트", "범위", "필터", "계산식", "대상 행 수", "제외(숫자 아님)", "제외(빈칸)", "계산 불가 이유", "근거 번호"])
         e1 = evidence[1]
         self.assertEqual(e1[1], ("s", "지급액 합계"))
         self.assertEqual(e1[3], ("s", "@청구.xlsx"))
-        self.assertEqual(e1[5], ("s", "청구내역!F2:F31, 청구내역!F45:F60"))
+        self.assertEqual(e1[5], ("s", "청구내역!F: 2–31, 45–60"))
+        self.assertEqual(e1[12], ("s", "e1"))
+        # 증감률: 이번 달·전월 근거를 번호와 범위로 함께 적는다(표에 없는 전월 칸의 범위도 보인다).
+        e2 = evidence[2]
+        self.assertEqual(e2[5], ("s", "이번 달(e1): 청구내역!F: 2–31, 45–60 / 전월(e5): 청구내역!F: 70–99"))
+        self.assertEqual(e2[12], ("s", "e2"))
+        self.assertEqual(evidence[3][5], ("s", ""))
+        self.assertEqual(evidence[4][5], ("s", "이번 달(e3): 없음 / 전월: 자료 없음"))
         self.assertEqual(e1[6], ("s", "@상품 = =1+1"))
         self.assertEqual(e1[7], ("s", "지급액 합계 = 숫자 46개의 합"))
         self.assertEqual(e1[8:11], [("n", "46"), ("n", "2"), ("n", "1")])
@@ -174,6 +184,18 @@ class DataAggregationExportTest(unittest.TestCase):
         ElementTree.fromstring(sheet)
         self.assertNotIn("￿".encode("utf-8"), sheet)
         self.assertNotIn("￾".encode("utf-8"), sheet)
+
+    def test_csv_numeric_looking_group_values_not_prefixed(self):
+        data = body()
+        data["rows"][0][0] = cell("-5", "-5")
+        data["rows"][1][0] = cell("-1.25", "-1.25")
+        rows = list(csv.reader(io.StringIO(export_v2("csv", output(data)).content[3:].decode("utf-8"))))
+        self.assertEqual(rows[1][0], "-5")
+        self.assertEqual(rows[2][0], "-1.25")
+        for text, expected in (("-abc", "'-abc"), ("+5", "'+5"), ("-5-1", "'-5-1"), ("-1.", "'-1."), ("@1", "'@1"), ("=1", "'=1")):
+            data["rows"][0][0] = cell(text, text)
+            rows = list(csv.reader(io.StringIO(export_v2("csv", output(data)).content[3:].decode("utf-8"))))
+            self.assertEqual(rows[1][0], expected)
 
     def test_csv_tab_and_cr_prefixed(self):
         data = body()
