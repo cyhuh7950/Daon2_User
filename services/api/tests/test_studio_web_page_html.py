@@ -90,7 +90,7 @@ def test_csp_meta_inserted_once() -> None:
     assert out.lower().count("content-security-policy") == 1
     assert "default-src *" not in out
     meta = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
-    assert re.search(r"<head>" + re.escape(meta), out)
+    assert re.search(r"<head>" + re.escape('<meta charset="utf-8">' + meta), out)
 
 
 def test_numbers_outside_verified_text_are_stray() -> None:
@@ -134,7 +134,7 @@ def test_bridge_attached_and_stripped() -> None:
     html = sanitize_html(_page('<p data-ref="S1">글</p>'))
     attached = attach_bridge(html)
     assert attached.count("data-daon-bridge") == 1
-    assert attached.index("data-daon-bridge") < attached.lower().rindex("</body>")
+    assert attached.index("data-daon-bridge") < attached.index("<p data-ref")
     stripped = strip_bridge(attached)
     assert stripped.count("data-daon-bridge") == 0
     assert stripped == html
@@ -326,7 +326,7 @@ def test_charset_and_doctype_always_ours() -> None:
         "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01//EN\"><p>a</p>",
     ):
         out = sanitize_html(raw)
-        assert out.startswith("<!DOCTYPE html><html><head>" + meta + '<meta charset="utf-8">')
+        assert out.startswith("<!DOCTYPE html><html><head>" + '<meta charset="utf-8">' + meta)
         assert out.lower().count("charset") == 1
         assert "euc-kr" not in out and "W3C" not in out
 
@@ -388,7 +388,7 @@ def test_behavior_script_shape_and_attach() -> None:
 
 def test_finalize_inserts_behavior_then_bridge_and_strip_keeps_behavior() -> None:
     final = finalize_html(_page("<h2>개요</h2><p>a</p>"), "개요 a", "", ["개요"])
-    b, r, end = final.index(BEHAVIOR_SCRIPT), final.index(BRIDGE_SCRIPT), final.lower().rindex("</body>")
+    b, r, end = final.index(BEHAVIOR_SCRIPT), final.index(BRIDGE_SCRIPT), final.index("<h2>")
     assert b < r < end
     stripped = strip_bridge(final)
     assert BEHAVIOR_SCRIPT in stripped and BRIDGE_SCRIPT not in stripped
@@ -399,13 +399,38 @@ def test_model_behavior_marker_attribute_removed() -> None:
     assert "data-daon-behavior" not in out
 
 
-def test_attach_uses_original_offsets_with_dotted_i() -> None:
+def test_attach_goes_right_after_head_metas() -> None:
+    # 최종 검토 M1: 고정 스크립트는 <head>의 charset·CSP 메타 바로 뒤에 들어간다(본문보다 앞).
     html = sanitize_html("<body><p>" + "İ" * 30 + '</p></body><p title="abcdefghijklmnopqrstuvwxyz">t</p>')
+    metas = f'<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="{CSP}">'
+    after = html.index(metas) + len(metas)
     attached = attach_bridge(html)
-    assert attached.index(BRIDGE_SCRIPT) == html.index("</body>")
+    assert attached.index(BRIDGE_SCRIPT) == after
     assert strip_bridge(attached) == html
     behaved = attach_behavior(html)
-    assert behaved.index(BEHAVIOR_SCRIPT) == html.index("</body>")
+    assert behaved.index(BEHAVIOR_SCRIPT) == after
+    both = attach_bridge(behaved)
+    assert both.index(BEHAVIOR_SCRIPT) == after and both.index(BRIDGE_SCRIPT) == after + len(BEHAVIOR_SCRIPT)
+
+
+def test_unclosed_math_does_not_swallow_fixed_scripts() -> None:
+    raw = '<!DOCTYPE html><html lang="ko"><body><h2>보장 안내</h2><p data-ref="S1">월 보험료는 15만 원입니다.</p><math><mi>x</body></html>'
+    out = finalize_html(raw, "보장 안내\n월 보험료는 15만 원입니다.", "고객 안내", ["보장 안내"])
+    body_start = out.index("<h2>")
+    assert out.index(BEHAVIOR_SCRIPT) < body_start and out.index(BRIDGE_SCRIPT) < body_start
+    assert out.index(BEHAVIOR_SCRIPT) < out.index(BRIDGE_SCRIPT)
+    assert out.index(BRIDGE_SCRIPT) < out.index("<math>")
+
+
+def test_charset_first_and_within_1024_bytes_even_with_huge_html_attrs() -> None:
+    huge = "x" * 5000
+    raw = f'<html data-x="{huge}" class="{huge}" lang="ko" dir="ltr" style="color:red"><body><p>a</p></body></html>'
+    out = sanitize_html(raw)
+    assert out.encode("utf-8").index(b'<meta charset="utf-8">') < 1024
+    assert out.startswith('<!DOCTYPE html><html lang="ko" dir="ltr"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy"')
+    assert huge not in out
+    long_lang = sanitize_html(f'<html lang="{huge}" dir="{huge}"><body>a</body></html>')
+    assert long_lang.startswith("<!DOCTYPE html><html><head><meta charset=")
 
 
 def test_attribute_values_are_reescaped() -> None:
@@ -418,7 +443,7 @@ def test_attribute_values_are_reescaped() -> None:
 def test_head_and_html_created_when_missing() -> None:
     out = sanitize_html("<p>조각</p>")
     meta = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
-    assert out.startswith("<!DOCTYPE html><html><head>" + meta + '<meta charset="utf-8">')
+    assert out.startswith("<!DOCTYPE html><html><head>" + '<meta charset="utf-8">' + meta)
     assert "<p>조각</p>" in out
 
 

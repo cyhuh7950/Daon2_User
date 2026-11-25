@@ -245,6 +245,22 @@ MAX_HTML_BYTES = 400_000
 CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
 _CSP_META = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
 _CHARSET_META = '<meta charset="utf-8">'
+# <head> 첫머리: charset(첫 1024바이트 안) → CSP. 고정 스크립트는 이 바로 뒤에 넣어 CSP 적용을 받고 본문보다 먼저 온다.
+_HEAD_METAS = _CHARSET_META + _CSP_META
+_LANG = re.compile(r"[A-Za-z]{1,8}(?:-[A-Za-z0-9]{1,8}){0,4}")
+_DIRS = {"ltr", "rtl", "auto"}
+
+
+def _html_lang_dir(attrs: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]:
+    """모델 <html> 속성 가운데 형식에 맞는 lang·dir만 남긴다."""
+    kept: list[tuple[str, str | None]] = []
+    for name, value in attrs:
+        text = (value or "").strip()
+        if name == "lang" and _LANG.fullmatch(text):
+            kept.append((name, text))
+        elif name == "dir" and text.lower() in _DIRS:
+            kept.append((name, text.lower()))
+    return kept
 
 BRIDGE_SCRIPT = (
     "<script data-daon-bridge>"
@@ -595,14 +611,15 @@ class _Sanitizer(HTMLParser):
     def result(self) -> str:
         if self.raw is not None:
             self.out.append(f"</{self.raw}>")
-        prefix = f"<!DOCTYPE html><html{_render_attrs(self.html_attrs or [])}><head>"
-        return prefix + _CSP_META + _CHARSET_META + "".join(self.out)
+        # charset을 맨 앞(첫 1024바이트 안)에 두려고 <html>에는 짧은 lang·dir만 옮긴다.
+        prefix = f"<!DOCTYPE html><html{_render_attrs(_html_lang_dir(self.html_attrs or []))}><head>"
+        return prefix + _HEAD_METAS + "".join(self.out)
 
 
 def sanitize_html(html: str) -> str:
-    """위험 요소·외부 주소를 지우고 <head> 첫 자식으로 우리 CSP 메타 하나를 넣는다.
+    """위험 요소·외부 주소를 지우고 <head> 첫머리에 우리 charset 메타와 CSP 메타를 이 순서로 넣는다.
 
-    모델이 쓴 <html>/<head> 시작 태그는 우리가 앞에 새로 쓰므로(첫 <html> 속성만 옮김) 버리고,
+    모델이 쓴 <html>/<head> 시작 태그는 우리가 앞에 새로 쓰므로(첫 <html>의 lang·dir만 옮김) 버리고,
     모델이 넣은 http-equiv 메타(CSP·refresh 포함)는 모두 지운다.
     """
     parser = _Sanitizer()
@@ -784,12 +801,31 @@ def _insert_before_body_end(html: str, script: str) -> str:
     return html[: last.start()] + script + html[last.start():]
 
 
+def _insert_in_head(html: str, script: str) -> str:
+    """<head>의 charset·CSP 메타(정리기가 넣은 것) 바로 뒤, 이미 붙은 고정 스크립트들 뒤에 넣는다.
+
+    본문 앞에 두므로 닫히지 않은 <math>·<svg> 같은 모델 요소가 스크립트를 삼키지 못한다.
+    정리기는 모델의 http-equiv 메타를 모두 지우므로 첫 메타 묶음은 늘 우리 것이다. 없으면 예전처럼 </body> 앞(없으면 끝)."""
+    at = html.find(_HEAD_METAS)
+    if at < 0:
+        return _insert_before_body_end(html, script)
+    at += len(_HEAD_METAS)
+    moved = True
+    while moved:
+        moved = False
+        for fixed in (BEHAVIOR_SCRIPT, BRIDGE_SCRIPT):
+            if html.startswith(fixed, at):
+                at += len(fixed)
+                moved = True
+    return html[:at] + script + html[at:]
+
+
 def attach_bridge(html: str) -> str:
-    return _insert_before_body_end(html, BRIDGE_SCRIPT)
+    return _insert_in_head(html, BRIDGE_SCRIPT)
 
 
 def attach_behavior(html: str) -> str:
-    return _insert_before_body_end(html, BEHAVIOR_SCRIPT)
+    return _insert_in_head(html, BEHAVIOR_SCRIPT)
 
 
 def strip_bridge(html: str) -> str:
@@ -797,7 +833,7 @@ def strip_bridge(html: str) -> str:
 
 
 def finalize_html(raw: str, allowed_text: str, request: str, headings: Sequence[str]) -> str:
-    """extract → sanitize → 크기 → 숫자 대조 → 절 제목 → 동작 스크립트·연결 스크립트(</body> 앞, 이 순서).
+    """extract → sanitize → 크기 → 숫자 대조 → 절 제목 → 동작 스크립트·연결 스크립트(<head> 메타 뒤, 이 순서).
     실패 시 WebPageCheckFailed."""
     extracted = extract_html(raw)
     if not extracted:
