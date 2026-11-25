@@ -159,12 +159,15 @@ const validHeaderRow = (value) => /^\d{1,2}$/u.test(String(value)) && Number(val
 
 // 데이터 집계(WO-N9) 설정 창: 요청 글(필수·2000자) + 표 소스(XLSX·CSV만) + 시트(XLSX만, 표 정보에서) + 머리글 행(1~50).
 // sources는 이미 고를 수 있는 표 소스만 받는다. loadProfile({ sourceVersionId, sheet, headerRow })는 표 정보(시트·열·행 수)를 돌려준다.
-export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {}, loading = false, loadProfile, onSubmit, onCancel }) {
+// lockSource: 설정 변경 후 다시 생성에서는 표 소스를 바꿀 수 없다(지금 소스를 보이고 잠근다, 검토 Ruling).
+export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {}, loading = false, lockSource = false, loadProfile, onSubmit, onCancel }) {
   const [request, setRequest] = useState(String(initial.aggregation_request ?? ""));
   const [sourceId, setSourceId] = useState(String(initial.table_source_version_id ?? sources[0]?.sourceVersionId ?? ""));
   const [sheet, setSheet] = useState(String(initial.sheet ?? ""));
   const [headerRow, setHeaderRow] = useState(String(initial.header_row ?? 1));
   const [profile, setProfile] = useState({ status: "idle", data: null, error: null });
+  // 시트 목록은 표 정보 오류(고른 시트를 못 읽음·503)가 나도 남겨 다른 시트를 고를 수 있게 한다. 소스가 바뀔 때만 비운다.
+  const [sheetList, setSheetList] = useState([]);
   const [retry, setRetry] = useState(0);
   const touched = useRef(false);
   const skipKey = useRef(null);
@@ -193,6 +196,7 @@ export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {
           if (!alive) return;
           setProfile({ status: "ready", data, error: null });
           const sheets = Array.isArray(data?.sheets) ? data.sheets : [];
+          setSheetList(sheets);
           // 시트를 아직 고르지 않았으면 서버가 읽은 첫 시트를 고른 것으로 보인다(같은 표라 다시 읽지 않는다).
           if (kind === "xlsx" && !requestSheet && sheets.length) { skipKey.current = `${sourceId}|${sheets[0]}|${Number(headerRow)}`; setSheet(sheets[0]); }
         })
@@ -200,12 +204,15 @@ export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {
     }, 300);
     return () => { alive = false; clearTimeout(timer); };
   }, [loading, sourceId, sheet, headerRow, kind, retry, loadProfile]);
-  const sheets = Array.isArray(profile.data?.sheets) ? profile.data.sheets : [];
+  const sheets = sheetList;
   const requestMissing = !request.trim();
   const profileLoading = profile.status === "loading";
+  // 고른 시트를 표로 못 읽음(TABLE_*): 만들기를 끈다. 503 바쁨(status error)은 다시 읽기만 보이고 만들기는 끄지 않는다.
+  const tableError = profile.status === "ready" && typeof profile.data?.error_code === "string" ? profile.data.error_code : null;
+  const blocked = requestMissing || !source || !headerOk || profileLoading || loading || Boolean(tableError);
   const submit = (event) => {
     event.preventDefault();
-    if (requestMissing || !source || !headerOk || profileLoading || loading) return;
+    if (blocked) return;
     // sheet는 CSV면 빈 값으로 보내 지난 시트 설정을 지운다(서버는 빈 값을 저장하지 않는다).
     onSubmit({ formatId: undefined, settings: { aggregation_request: request.trim(), table_source_version_id: sourceId,
       sheet: kind === "xlsx" ? sheet : "", header_row: Number(headerRow) } });
@@ -219,25 +226,28 @@ export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {
       <label htmlFor="studio-aggregation-source">{msg("studio.aggregation.source")}</label>
       {sources.length === 0
         ? <p role="note">{msg("studio.aggregation.source.none")}</p>
-        : <select id="studio-aggregation-source" required value={source ? sourceId : ""} onChange={(event) => { touched.current = true; setSourceId(event.target.value); setSheet(""); }}>
-          {!source && <option value="">{msg("studio.aggregation.source.choose")}</option>}
+        : <select id="studio-aggregation-source" required disabled={lockSource} value={source || lockSource ? sourceId : ""}
+          onChange={(event) => { touched.current = true; setSourceId(event.target.value); setSheet(""); setSheetList([]); }}>
+          {!source && !lockSource && <option value="">{msg("studio.aggregation.source.choose")}</option>}
+          {!source && lockSource && <option value={sourceId}>{sourceId}</option>}
           {sources.map((item) => <option key={item.sourceVersionId} value={item.sourceVersionId}>{item.filename ?? item.sourceVersionId}</option>)}
         </select>}
       {kind === "xlsx" && <>
         <label htmlFor="studio-aggregation-sheet">{msg("studio.aggregation.sheet")}</label>
         <select id="studio-aggregation-sheet" value={sheet} disabled={sheets.length === 0} onChange={touch(setSheet)}>
-          {sheets.length === 0 && <option value={sheet}>{sheet}</option>}
+          {(sheets.length === 0 || (sheet && !sheets.includes(sheet))) && <option value={sheet}>{sheet}</option>}
           {sheets.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
       </>}
       <label htmlFor="studio-aggregation-header-row">{msg("studio.aggregation.header_row")}</label>
       <input id="studio-aggregation-header-row" type="number" min={1} max={50} step={1} required value={headerRow} onChange={touch(setHeaderRow)} />
       {profileLoading && <p role="status">{msg("studio.aggregation.profile.loading")}</p>}
-      {profile.status === "ready" && Array.isArray(profile.data?.columns) && <p role="status">{msg("studio.aggregation.profile.summary", { columns: profile.data.columns.length, rows: profile.data.row_count })}</p>}
+      {tableError && <p role="alert">{studioErrorMessage(tableError)}</p>}
+      {profile.status === "ready" && !tableError && Array.isArray(profile.data?.columns) && <p role="status">{msg("studio.aggregation.profile.summary", { columns: profile.data.columns.length, rows: profile.data.row_count })}</p>}
       {profile.status === "error" && <p role="alert">{studioErrorMessage(profile.error)} <button type="button" className="studio-btn" onClick={() => setRetry((n) => n + 1)}>{msg("studio.aggregation.profile.retry")}</button></p>}
       <footer>
         <button type="button" className="studio-btn" onClick={onCancel}>{msg("studio.dialog.settings.cancel")}</button>
-        <button type="submit" className="studio-btn studio-btn--primary" disabled={requestMissing || !source || !headerOk || profileLoading || loading}>{msg("studio.dialog.settings.submit")}</button>
+        <button type="submit" className="studio-btn studio-btn--primary" disabled={blocked}>{msg("studio.dialog.settings.submit")}</button>
       </footer>
     </form>
   </Modal>;

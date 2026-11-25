@@ -409,6 +409,26 @@ class WorkerWiringTests(unittest.TestCase):
             with patch.dict("os.environ", {**env, "DAON_OBJECT_ACCESS_KEY_FILE": str(Path(folder, "missing"))}):
                 self.assertIsNone(studio_v2_worker._object_storage_from_env())
 
+    def test_table_profile_keeps_sheets_when_chosen_sheet_is_not_a_table(self):
+        """검토 Ruling: 시트 목록은 읽었는데 고른 시트가 표가 아니면 200 + 시트 목록 + error_code(다른 시트를 고를 수 있게)."""
+        from daon2_user_api.studio_v2_service import table_profile_from_original
+        from test_table_reader import sheet_xml, workbook
+        content = workbook([("표지", sheet_xml([])), ("청구", sheet_xml([["지역", "금액"], ["서울", 1]]))])
+        first = table_profile_from_original(content, "a.xlsx", "xlsx", None, 1)
+        self.assertEqual(set(first), {"sheets", "columns", "row_count", "error_code"})
+        self.assertEqual(first["sheets"], ["표지", "청구"])
+        self.assertEqual((first["columns"], first["row_count"]), ([], 0))
+        self.assertTrue(first["error_code"].startswith("TABLE_"), first["error_code"])
+        missing = table_profile_from_original(content, "a.xlsx", "xlsx", "없는 시트", 1)
+        self.assertEqual((missing["sheets"], missing["error_code"]), (["표지", "청구"], "TABLE_SHEET_NOT_FOUND"))
+        second = table_profile_from_original(content, "a.xlsx", "xlsx", "청구", 1)
+        self.assertEqual(second, {"sheets": ["표지", "청구"], "columns": [{"name": "지역", "kind": "text"}, {"name": "금액", "kind": "number"}],
+                                  "row_count": 1})
+        # 시트 목록 자체를 못 읽으면(깨진 파일) 지금처럼 오류 응답.
+        with self.assertRaises(StudioError) as caught:
+            table_profile_from_original(b"not a zip", "a.xlsx", "xlsx", None, 1)
+        self.assertEqual(caught.exception.status, 422)
+
     def test_table_profile_helper_maps_table_errors(self):
         from daon2_user_api.studio_v2_service import table_profile_from_original
         with self.assertRaises(StudioError) as caught:
@@ -480,6 +500,16 @@ class TableProfileTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.calls[-1], ("notebook-001", SVID, "Sheet1", 2))
         unauthenticated = await self.client.get(base, params={"source_version_id": SVID})
         self.assertEqual(unauthenticated.status_code, 401)
+
+    async def test_table_profile_route_returns_sheets_with_error_code(self):
+        from test_identity_support import identity_session_view
+        base = "/api/v1/workspaces/workspace-001/notebooks/notebook-001/studio/table-profile"
+        payload = {"sheets": ["표지", "청구"], "columns": [], "row_count": 0, "error_code": "TABLE_HEADER_INVALID"}
+        with patch.object(type(self.dependencies.studio_v2_service), "table_profile", lambda *_a: payload), \
+                patch.object(self.identity, "describe_access", return_value=identity_session_view(self.principal)):
+            response = await self.client.get(base, params={"source_version_id": SVID, "sheet": "표지"}, cookies=self.cookies)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["data"], payload)
 
     async def test_table_profile_route_preserves_public_codes(self):
         from test_identity_support import identity_session_view

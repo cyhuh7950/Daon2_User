@@ -108,6 +108,7 @@ async function mount(Component, props) {
   await act(async () => { reactRoot.render(createElement(Component, props)); });
   await wait(15);
   return { dom, container, click: (node) => act(async () => { node.dispatchEvent(new MinimalEvent("click")); }),
+    rerender: (next) => act(async () => { reactRoot.render(createElement(Component, next)); }),
     close: async () => { await act(async () => reactRoot.unmount()); dom.restore(); } };
 }
 
@@ -432,4 +433,112 @@ test("데이터 집계 출력 상세는 웹 어댑터 검사를 통과한다", a
     revision: { revision_no: 1, content: { schema: "studio.data_aggregation.v1", language: "ko", body: BODY, warnings: [] } }, evidence: [], assets: [] };
   const data = await getStudioOutput("ws-1", OID("d"), { notebookId: "nb-1", fetchImpl: okFetch(detail) });
   assert.equal(data.revision.content.body.chart.kind, "bar");
+});
+
+// ---------------------------------------------------------------- 검토 보강 1차
+const openAggregationDialog = async (view) => {
+  await view.click(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "데이터 집계")[0]);
+  return findElements(view.container, (n) => n.getAttribute?.("role") === "dialog")[0];
+};
+
+test("고른 시트가 표가 아니면(TABLE_* error_code) 시트 목록은 남고 다른 시트로 바꿀 수 있으며, 그동안 만들기가 꺼진다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-panel.jsx", "studio-panel-aggregation-sheet-error");
+  const studio = fakeStudio({ profile: ({ sheet }) => (!sheet || sheet === "표지"
+    ? { sheets: ["표지", "청구"], columns: [], row_count: 0, error_code: "TABLE_HEADER_INVALID" }
+    : { sheets: ["표지", "청구"], columns: [{ name: "상품", kind: "text" }], row_count: 5 }) });
+  const view = await mount(module.StudioPanel, panelProps(studio));
+  try {
+    const dialog = await openAggregationDialog(view);
+    await act(async () => { reactProps(byId(dialog, "studio-aggregation-request")).onChange({ target: { value: "건수" } }); });
+    await wait(400);
+    await wait(400);
+    const alert = findElements(dialog, (n) => n.getAttribute?.("role") === "alert")[0];
+    assert.ok(alert && alert.textContent.includes(STUDIO_ERRORS.TABLE_HEADER_INVALID), alert?.textContent);
+    const sheet = byId(dialog, "studio-aggregation-sheet");
+    assert.equal(reactProps(sheet).disabled, false, "시트 목록이 있으면 시트 칸은 켜져 있다");
+    assert.deepEqual(findElements(sheet, (n) => n.tagName === "OPTION").map((n) => n.getAttribute("value")), ["표지", "청구"]);
+    assert.equal(reactProps(submitButton(dialog)).disabled, true, "TABLE_* 오류가 있으면 만들기가 꺼진다");
+    await act(async () => { reactProps(sheet).onChange({ target: { value: "청구" } }); });
+    await wait(400);
+    assert.equal(findElements(dialog, (n) => n.getAttribute?.("role") === "alert").length, 0);
+    assert.ok(dialog.textContent.includes("열 1개 · 행 5개"));
+    assert.equal(reactProps(submitButton(dialog)).disabled, false);
+    assert.deepEqual(studio.calls.filter(([kind]) => kind === "profile").at(-1)[1], { sourceVersionId: "ver-xlsx", sheet: "청구", headerRow: 1 });
+  } finally { await view.close(); await cleanup(); }
+});
+
+test("표 정보 503(바쁨)은 다시 읽기만 보이고 만들기는 끄지 않는다, 오류 응답 뒤에도 시트 목록은 남는다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-panel.jsx", "studio-panel-aggregation-busy");
+  let busy = false;
+  const studio = fakeStudio({ profile: () => {
+    if (busy) { const error = new Error("busy"); error.code = "STUDIO_SERVICE_UNAVAILABLE"; throw error; }
+    return { sheets: ["청구내역", "요약"], columns: [{ name: "상품", kind: "text" }], row_count: 3 };
+  } });
+  const view = await mount(module.StudioPanel, panelProps(studio));
+  try {
+    const dialog = await openAggregationDialog(view);
+    await act(async () => { reactProps(byId(dialog, "studio-aggregation-request")).onChange({ target: { value: "건수" } }); });
+    await wait(400);
+    busy = true;
+    await act(async () => { reactProps(byId(dialog, "studio-aggregation-sheet")).onChange({ target: { value: "요약" } }); });
+    await wait(400);
+    const alert = findElements(dialog, (n) => n.getAttribute?.("role") === "alert")[0];
+    assert.ok(alert.textContent.includes(STUDIO_ERRORS.STUDIO_SERVICE_UNAVAILABLE));
+    assert.ok(findElements(alert, (n) => n.tagName === "BUTTON").length === 1);
+    const sheet = byId(dialog, "studio-aggregation-sheet");
+    assert.deepEqual(findElements(sheet, (n) => n.tagName === "OPTION").map((n) => n.getAttribute("value")), ["청구내역", "요약"]);
+    assert.equal(reactProps(sheet).disabled, false);
+    assert.equal(reactProps(submitButton(dialog)).disabled, false, "바쁨(503)은 만들기를 끄지 않는다");
+  } finally { await view.close(); await cleanup(); }
+});
+
+test("설정 변경 후 다시 생성에서는 표 소스를 바꿀 수 없다(지금 소스를 보이고 잠근다)", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-panel.jsx", "studio-panel-aggregation-lock");
+  const studio = fakeStudio({ outputs: [aggItem()], settings: { aggregation_request: "지난 요청", table_source_version_id: "ver-csv", header_row: 1 } });
+  const view = await mount(module.StudioPanel, panelProps(studio));
+  try {
+    await view.click(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "더보기: 데이터 집계")[0]);
+    const menu = findElements(view.container, (n) => n.getAttribute?.("role") === "menu")[0];
+    await view.click(findElements(menu, (n) => n.getAttribute?.("role") === "menuitem" && n.textContent.trim() === "설정 변경 후 다시 생성")[0]);
+    await wait(450);
+    const dialog = findElements(view.container, (n) => n.getAttribute?.("role") === "dialog")[0];
+    const select = byId(dialog, "studio-aggregation-source");
+    assert.equal(reactProps(select).disabled, true);
+    assert.equal(reactProps(select).value, "ver-csv");
+  } finally { await view.close(); }
+  // 새로 만들 때는 바꿀 수 있다.
+  const fresh = await mount(module.StudioPanel, panelProps(fakeStudio()));
+  try {
+    const dialog = await openAggregationDialog(fresh);
+    assert.notEqual(reactProps(byId(dialog, "studio-aggregation-source")).disabled, true);
+  } finally { await fresh.close(); await cleanup(); }
+});
+
+test("보기: 내용(판)이 바뀌면 고른 칸을 지운다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-data-aggregation-viewer.jsx", "studio-aggregation-reset");
+  const view = await mount(module.DataAggregationViewer, { content: { body: BODY } });
+  try {
+    const td = findElements(view.container, (n) => n.tagName === "TD" && n.getAttribute("data-computed") === "true")[0];
+    await view.click(findElements(td, (n) => n.tagName === "BUTTON")[0]);
+    const pane = () => findElements(view.container, (n) => n.tagName === "ASIDE")[0];
+    assert.ok(findElements(pane(), (n) => n.getAttribute?.("data-evidence-id") === "e1").length === 1);
+    await view.rerender({ content: { body: { ...BODY, evidence: { ...BODY.evidence } } } });
+    assert.ok(pane().textContent.includes("계산값 칸을 누르면"), pane().textContent);
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("aria-pressed") === "true").length, 0);
+  } finally { await view.close(); await cleanup(); }
+});
+
+test("어댑터 표 정보 검사는 선택 error_code(코드 문자열)를 받는다", async () => {
+  const good = { sheets: ["표지", "청구"], columns: [], row_count: 0, error_code: "TABLE_HEADER_INVALID" };
+  assert.deepEqual(await getStudioTableProfile("ws-1", { notebookId: "nb-1", sourceVersionId: "ver-1", fetchImpl: okFetch(good) }), good);
+  for (const bad of [{ ...good, error_code: 3 }, { ...good, error_code: "table bad" }, { ...good, error_code: null }]) {
+    await assert.rejects(getStudioTableProfile("ws-1", { notebookId: "nb-1", sourceVersionId: "ver-1", fetchImpl: okFetch(bad) }), (e) => e.code === "STUDIO_RESPONSE_INVALID", JSON.stringify(bad));
+  }
+});
+
+test("OpenAPI 계약의 표 정보에 선택 error_code가 있다", async () => {
+  const contract = JSON.parse(await read("packages/contracts/openapi/v1/studio-v2.openapi.json"));
+  const schema = contract.components.schemas.StudioV2TableProfile;
+  assert.ok(schema.properties.error_code, "error_code 속성");
+  assert.ok(!schema.required.includes("error_code"), "error_code는 선택");
 });

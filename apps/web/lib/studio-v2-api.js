@@ -110,7 +110,9 @@ export async function getStudioOutput(workspaceId, outputId, { notebookId, revis
 
 // 데이터 집계(WO-N9) 표 정보: 시트 이름·열 이름과 종류·행 수만(셀 값 없음). API는 한 번에 하나만 읽어 겹치면 503 STUDIO_SERVICE_UNAVAILABLE.
 const TABLE_COLUMN_KINDS = new Set(["date", "number", "text"]);
-export const validTableProfile = (d) => exact(d, ["sheets", "columns", "row_count"])
+// error_code(선택): 시트 목록은 읽었지만 고른 시트를 표로 못 읽음(TABLE_*). 화면은 다른 시트를 고르게 한다.
+export const validTableProfile = (d) => (exact(d, ["sheets", "columns", "row_count"])
+    || (exact(d, ["sheets", "columns", "row_count", "error_code"]) && typeof d.error_code === "string" && ERROR_CODE.test(d.error_code)))
   && Array.isArray(d.sheets) && d.sheets.every((name) => typeof name === "string" && name.length <= 255)
   && Array.isArray(d.columns) && d.columns.every((c) => exact(c, ["name", "kind"]) && typeof c.name === "string" && TABLE_COLUMN_KINDS.has(c.kind))
   && Number.isSafeInteger(d.row_count) && d.row_count >= 0;

@@ -170,7 +170,10 @@ export function DataAggregationViewer({ content }) {
   const columns = asArray(body.columns);
   const rows = asArray(body.rows);
   const { skipped, notes } = useMemo(() => splitWarnings(body.warnings), [body.warnings]);
-  const [selected, setSelected] = useState(null);
+  // 고른 칸은 그 내용(판)에만 붙는다. 내용이 바뀌면(새 판·다시 읽기) 고른 칸은 지워진다.
+  const [selection, setSelection] = useState({ content: null, cell: null });
+  const selected = selection.content === content ? selection.cell : null;
+  const setSelected = (cell) => setSelection({ content, cell });
   return <div className="studio-aggregation">
     <div className="studio-aggregation__main">
       {body.conditions_text && <section className="studio-aggregation__conditions">

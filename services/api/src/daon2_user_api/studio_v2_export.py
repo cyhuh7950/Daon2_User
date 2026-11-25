@@ -207,12 +207,16 @@ def _col(index: int) -> str:
     return name
 
 
+# XML 1.0에 넣을 수 없는 글자(탭·줄바꿈 외 C0, 짝 없는 대리 문자, U+FFFE·U+FFFF).
+_XML_UNSAFE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
 def _sheet(rows: Sequence[Sequence[object]], *, header_style: int = 1) -> str:
     out = []
     for r, row in enumerate(rows, 1):
         cells = []
         for c, value in enumerate(row):
-            text = escape("".join(ch for ch in str(value) if ch in "\t\n\r" or ord(ch) >= 32))
+            text = escape(_XML_UNSAFE.sub("", str(value)))
             style = f' s="{header_style}"' if r == 1 else ""
             cells.append(f'<c r="{_col(c)}{r}" t="inlineStr"{style}><is><t xml:space="preserve">{text}</t></is></c>')
         out.append(f'<row r="{r}">{"".join(cells)}</row>')
@@ -273,7 +277,7 @@ def _xlsx_package(sheets: Sequence[tuple[str, str]]) -> bytes:
 
 # ------------------------------------------------------------------ 데이터 집계(xlsx/csv, WO-N9)
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
-_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CONTROL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff\ufffe\uffff]")
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 _COMPUTED_MARK = "계산값"
 

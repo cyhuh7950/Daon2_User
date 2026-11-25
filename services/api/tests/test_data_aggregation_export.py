@@ -154,6 +154,27 @@ class DataAggregationExportTest(unittest.TestCase):
             self.assertFalse(value[:1] in ("=", "+", "@", "\t", "\r") or (value.startswith("-") and not re.fullmatch(r"-\d+(\.\d+)?", value)), value)
             self.assertIsNone(re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", value), value)
 
+    def test_noncharacters_stripped_and_xlsx_well_formed(self):
+        data = body()
+        data["columns"][1]["label"] = "지급￿액￾ 합계"
+        data["warnings"].append("￿ 이상한 글자")
+        content = export_v2("xlsx", output(data)).content
+        names, sheets, raw = workbook(content)  # ElementTree가 읽으면 XML이 올바르다
+        self.assertEqual(sheets[0][0][1], ("s", "지급액 합계"))
+        self.assertNotIn("￿".encode("utf-8"), raw)
+        self.assertNotIn("￾".encode("utf-8"), raw)
+        text = export_v2("csv", output(data)).content.decode("utf-8-sig")
+        self.assertNotIn("￿", text)
+        self.assertNotIn("￾", text)
+        # 데이터 표 XLSX(_sheet)도 같은 규칙.
+        table = {**output(), "type_id": "data_table", "revision": {"revision_no": 1, "content": {"body": {
+            "columns": [{"key": "a", "label": "항￿목"}], "rows": [{"cells": {"a": {"value": "x￾", "refs": []}}}]}}}}
+        archive = zipfile.ZipFile(io.BytesIO(export_v2("xlsx", table).content))
+        sheet = archive.read("xl/worksheets/sheet1.xml")
+        ElementTree.fromstring(sheet)
+        self.assertNotIn("￿".encode("utf-8"), sheet)
+        self.assertNotIn("￾".encode("utf-8"), sheet)
+
     def test_csv_tab_and_cr_prefixed(self):
         data = body()
         data["rows"][0][0] = cell("\tx", "\tx")

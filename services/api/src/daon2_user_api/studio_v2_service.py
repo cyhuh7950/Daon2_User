@@ -28,6 +28,8 @@ TABLE_PROFILE_SECONDS = 60.0
 TABLE_PROFILE_WAIT_SECONDS = 5.0
 # API 프로세스에서 표 정보 읽기는 한 번에 하나만(큰 표가 동시에 메모리에 올라오지 않게). 오래 기다리지 않고 503으로 돌려준다.
 _TABLE_PROFILE_SLOTS = threading.BoundedSemaphore(1)
+_SHEET_RECOVERABLE = frozenset({"TABLE_TOO_LARGE", "TABLE_HEADER_INVALID", "TABLE_SHEET_NOT_FOUND", "TABLE_FORMAT_UNSUPPORTED",
+                                "TABLE_ENCODING_UNSUPPORTED", "TABLE_TIMEOUT"})
 
 
 def table_profile_from_original(content: bytes, file_name: str, source_format: str, sheet: str | None, header_row: int,
@@ -37,9 +39,15 @@ def table_profile_from_original(content: bytes, file_name: str, source_format: s
     deadline = time.monotonic() + seconds
     try:
         sheets = list_sheets(content, deadline=deadline) if source_format == "xlsx" else []
+    except TableReadError as error:
+        raise StudioError(error.code, 422) from None  # 시트 목록조차 못 읽으면 오류 응답
+    try:
         table = read_table(content, file_name=file_name, source_format=source_format, sheet=sheet, header_row=header_row,
                            limits=TableLimits(), deadline=deadline)
     except TableReadError as error:
+        # 검토 Ruling: 시트 목록은 읽었는데 고른 시트를 표로 못 읽으면, 다른 시트를 고를 수 있게 목록과 코드를 200으로 돌려준다.
+        if sheets and error.code in _SHEET_RECOVERABLE:
+            return {"sheets": sheets, "columns": [], "row_count": 0, "error_code": error.code}
         raise StudioError(error.code, 422) from None
     info = profile(table)
     return {"sheets": sheets, "columns": info["columns"], "row_count": info["row_count"]}

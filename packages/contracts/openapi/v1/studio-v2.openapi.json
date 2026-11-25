@@ -4659,6 +4659,17 @@
           "row_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "TABLE_TOO_LARGE",
+              "TABLE_HEADER_INVALID",
+              "TABLE_SHEET_NOT_FOUND",
+              "TABLE_FORMAT_UNSUPPORTED",
+              "TABLE_ENCODING_UNSUPPORTED",
+              "TABLE_TIMEOUT"
+            ]
           }
         }
       },

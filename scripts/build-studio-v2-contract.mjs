@@ -161,11 +161,13 @@ Object.assign(schemas, {
 
 const envelope = (name) => ({ type: "object", additionalProperties: false, required: ["data", "meta"], properties: { data: ref(name), meta: ref("StudioV2Meta") } });
 // WO-N9 데이터 집계 표 정보: 시트 이름·열 이름과 종류·행 수만. 셀 값은 없다.
+// error_code(선택): 시트 목록은 읽었지만 고른 시트를 표로 읽지 못했을 때(TABLE_*). 이때 columns는 비고 row_count는 0이다.
 schemas.StudioV2TableProfile = exact({
   sheets: { type: "array", items: { type: "string" } },
   columns: { type: "array", items: exact({ name: { type: "string" }, kind: { type: "string", enum: ["date", "number", "text"] } }) },
   row_count: { type: "integer", minimum: 0 },
-});
+  error_code: { type: "string", enum: ["TABLE_TOO_LARGE", "TABLE_HEADER_INVALID", "TABLE_SHEET_NOT_FOUND", "TABLE_FORMAT_UNSUPPORTED", "TABLE_ENCODING_UNSUPPORTED", "TABLE_TIMEOUT"] },
+}, ["sheets", "columns", "row_count"]);
 for (const name of ["TableProfile", "EditTurnReceipt", "EditTurnApplyReceipt", "EditTurnList", "AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
   "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt", "MemoSourceReceipt", "MemoSourceReflectReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
 

@@ -452,7 +452,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
     {dialog?.kind === "regenerate" && dialog.output.type_id === "data_aggregation" && <AggregationSettingsDialog typeLabel={label(dialog.output.type_id)} sources={aggregationSources}
       initial={{ aggregation_request: regenSettings?.aggregation_request, table_source_version_id: regenSettings?.table_source_version_id,
-        sheet: regenSettings?.sheet, header_row: regenSettings?.header_row }} loading={regenLoading} loadProfile={loadTableProfile} onCancel={() => setDialog(null)}
+        sheet: regenSettings?.sheet, header_row: regenSettings?.header_row }} loading={regenLoading} lockSource loadProfile={loadTableProfile} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings); }} />}
     {dialog?.kind === "settings" && dialog.typeId !== "data_aggregation" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
