@@ -2,6 +2,7 @@
 // 답변 과정(NB1-U1, WO-N1 N1-1). 서버가 준 answer_process.v1 블록의 값만 단계별로 보인다.
 // 모델의 생각을 흉내 낸 문장은 만들지 않는다. 문구는 notebook-messages.ko.js의 notebook.process.* 키만 쓴다.
 import { useId, useState } from "react";
+import { numberDuplicateLabels } from "./answer-presentation.js";
 import { msg } from "./studio-messages.ko.js";
 import "./answer-process.css";
 
@@ -94,8 +95,8 @@ function ProcessSteps({ block, onOpenEvidence, canOpenEvidence }) {
           {selected.length ? (
             <li className="answer-process-evidence">
               <ul>
-                {selected.map((item, index) => {
-                  const label = evidenceLabel(item);
+                {numberDuplicateLabels(selected.map(evidenceLabel)).map((label, index) => {
+                  const item = selected[index];
                   const origin = ORIGINS.has(item.origin) ? msg(`notebook.process.origin.${item.origin}`) : null;
                   const openable = typeof onOpenEvidence === "function" && typeof canOpenEvidence === "function" && canOpenEvidence(item) === true;
                   return (
@@ -129,8 +130,10 @@ function ProcessSteps({ block, onOpenEvidence, canOpenEvidence }) {
       </Step>
       <Step name="verification" title="notebook.process.step.verification" emphasis={verification?.insufficient === true}>
         {verification ? <>
-          <Fact>{msg("notebook.process.verification.citations", { count: count(verification.citations) })}</Fact>
-          <Fact>{msg(verification.valid === false ? "notebook.process.verification.invalid" : "notebook.process.verification.valid")}</Fact>
+          {count(verification.citations) === 0 ? <Fact>{msg("notebook.process.verification.no_citations")}</Fact> : <>
+            <Fact>{msg("notebook.process.verification.citations", { count: count(verification.citations) })}</Fact>
+            <Fact>{msg(verification.valid === false ? "notebook.process.verification.invalid" : "notebook.process.verification.valid")}</Fact>
+          </>}
           <Fact>{verification.insufficient === true
             ? <strong>{msg("notebook.process.verification.insufficient")}</strong> : msg("notebook.process.verification.sufficient")}</Fact>
           <Fact>{msg(verification.retried === true ? "notebook.process.verification.retried" : "notebook.process.verification.not_retried")}</Fact>

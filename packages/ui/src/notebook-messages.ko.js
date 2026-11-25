@@ -85,6 +85,7 @@ export const NOTEBOOK_MESSAGES = {
   "notebook.process.step.verification": "검증",
   "notebook.process.verification.citations": "인용 {count}개 확인",
   "notebook.process.verification.valid": "인용이 근거 구간과 맞습니다",
+  "notebook.process.verification.no_citations": "인용 없음",
   "notebook.process.verification.invalid": "인용 일부가 근거 구간과 맞지 않습니다",
   "notebook.process.verification.insufficient": "근거 부족",
   "notebook.process.verification.sufficient": "근거 있음",

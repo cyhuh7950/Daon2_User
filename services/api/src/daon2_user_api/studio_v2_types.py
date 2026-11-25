@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -117,6 +118,14 @@ def available_types(*, tts_enabled: bool = False, authoring_enabled: bool = Fals
 
 
 # ------------------------------------------------------------------ 생성 전 구성 확인(WO-N1 NB3-F1)
+_REF_LABEL = re.compile(r"\s*[\[(（]\s*S\d+(?:\s*[,，]\s*S\d+)*\s*[\])）]")
+
+
+def strip_ref_labels(text: str) -> str:
+    """구성 목록 글에 모델이 붙인 근거 표시("[S1]", "[S1, S2]", "(S3)")를 지운다(후속 A-3). 다른 괄호 글은 그대로 둔다."""
+    return re.sub(r"[ \t]{2,}", " ", _REF_LABEL.sub("", text)).strip()
+
+
 OUTLINE_LIMITS: Mapping[str, int] = {"slides": 30, "video_overview": 20}
 _OUTLINE_KEY = {"slides": "slides", "video_overview": "scenes"}
 _TITLE_MAX = 100

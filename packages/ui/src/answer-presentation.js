@@ -70,3 +70,16 @@ export function parseAnswerBlocks(text) {
   }
   return blocks;
 }
+
+/** 이름이 같은 근거 칩·근거 항목에만 순번(" 1", " 2")을 붙인다(후속 A-4). 칩마다 열리는 위치는 그대로다. */
+export function numberDuplicateLabels(labels) {
+  const total = new Map();
+  for (const label of labels) total.set(label, (total.get(label) ?? 0) + 1);
+  const seen = new Map();
+  return labels.map((label) => {
+    if (total.get(label) < 2) return label;
+    const n = (seen.get(label) ?? 0) + 1;
+    seen.set(label, n);
+    return `${label} ${n}`;
+  });
+}

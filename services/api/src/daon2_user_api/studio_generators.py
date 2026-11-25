@@ -11,7 +11,7 @@ from .studio_source_reader import StudioSourceReader
 from .studio_workspace import StudioError
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
 from .studio_v2_generation import GenerationContext, GenerationResult, GeneratorRegistry
-from .studio_v2_types import OUTLINE_LIMITS, OutlineInvalid, parse_confirmed_outline
+from .studio_v2_types import OUTLINE_LIMITS, OutlineInvalid, parse_confirmed_outline, strip_ref_labels
 from . import studio_validation as V
 
 SYSTEM_RULES = (
@@ -287,13 +287,13 @@ class SlidesGenerator(_Base):
                               "title은 장 제목(100자 이내), points는 그 장에서 다룰 요지 0~5개(각 120자 이내)입니다.", self.OUTLINE, pack, tokens=1500)
         review: list[dict[str, object]] = []
         for item in V.as_list(data.get("slides"), OUTLINE_LIMITS["slides"]):
-            title = V.text_field(item.get("title"), 100) if isinstance(item, Mapping) else ""
+            title = strip_ref_labels(V.text_field(item.get("title"), 100)) if isinstance(item, Mapping) else ""
             if title:
-                points = [V.text_field(p, 120) for p in V.as_list(item.get("points"), 5) if isinstance(p, str) and p.strip()]
+                points = [point for point in (strip_ref_labels(V.text_field(p, 120)) for p in V.as_list(item.get("points"), 5) if isinstance(p, str)) if point]
                 review.append({"title": title, "points": points})
         if not review:
             raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-        return self._finish(ctx, pack, {"title": V.text_field(data.get("title"), 160), "slides": [], "outline_review": review}, [], [])
+        return self._finish(ctx, pack, {"title": strip_ref_labels(V.text_field(data.get("title"), 160)), "slides": [], "outline_review": review}, [], [])
 
     def _from_confirmed(self, ctx: GenerationContext, pack: ContextPack, confirmed: Mapping[str, Any]) -> GenerationResult:
         """사람이 확정한 장 목록 그대로(순서·제목 고정) 본문을 채운다. 모델이 빠뜨린 장은 확정한 요지로 채운다."""

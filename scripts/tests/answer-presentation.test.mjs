@@ -5,6 +5,7 @@ import {
   approvedKnowledgeCitationDetail,
   approvedKnowledgeCitationLabel,
   citationOriginLabel,
+  numberDuplicateLabels,
   parseAnswerBlocks,
   shouldSubmitOnEnter,
   usesApprovedKnowledge,
@@ -79,4 +80,12 @@ test("Enter만 전송하고 Shift+Enter와 한글 조합 중 Enter는 전송하�
   assert.equal(shouldSubmitOnEnter({ key: "Enter", shiftKey: false, nativeEvent: { isComposing: true, keyCode: 13 } }), false);
   assert.equal(shouldSubmitOnEnter({ key: "Enter", shiftKey: false, nativeEvent: { isComposing: false, keyCode: 229 } }), false);
   assert.equal(shouldSubmitOnEnter({ key: "a", shiftKey: false, nativeEvent: { isComposing: false, keyCode: 65 } }), false);
+});
+
+
+// 후속 A-4: 같은 소스의 다른 구간 2개가 똑같은 이름의 칩으로 두 번 보였다.
+test("이름이 같은 근거 칩에만 순번을 붙인다", () => {
+  assert.deepEqual(numberDuplicateLabels(["약관.txt · 지식 구간", "규정.pdf · 3쪽", "약관.txt · 지식 구간"]), ["약관.txt · 지식 구간 1", "규정.pdf · 3쪽", "약관.txt · 지식 구간 2"]);
+  assert.deepEqual(numberDuplicateLabels(["a", "b"]), ["a", "b"]);
+  assert.deepEqual(numberDuplicateLabels([]), []);
 });
