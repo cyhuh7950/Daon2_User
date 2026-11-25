@@ -20,6 +20,7 @@ import { approvedKnowledgeCitationDetail, approvedKnowledgeCitationLabel, citati
 import { ManualHubView } from "./manual-hub-view.jsx";
 import { AnswerProcess } from "./answer-process.jsx";
 import { MemoOriginBadge } from "./memo-source.jsx";
+import { AggregationOnlyBadge } from "./studio-data-aggregation-viewer.jsx";
 import { SourceGroupsList } from "./source-groups.jsx";
 import { SourceDiscoveryPanel } from "./source-discovery.jsx";
 import "./workspace.css";
@@ -2228,11 +2229,12 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   checked={source.ready && !uncheckedSourceVersionIds.has(source.sourceVersionId)} disabled={!source.ready}
                   onChange={()=>setUncheckedSourceVersionIds(current=>{const next=new Set(current);if(next.has(source.sourceVersionId))next.delete(source.sourceVersionId);else next.add(source.sourceVersionId);return next;})} /> : null}
                 <button type="button" aria-pressed={viewState.selectedSource?.sourceVersionId === source.sourceVersionId} onClick={() => selectSource(source)} disabled={!source.ready}>
-                  <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}{source.aggregationOnly ? " · 집계 전용" : ""}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
+                  <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
                 {groupControl}
                 <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
                 <MemoOriginBadge origin={source.memoOrigin} name={source.filename ?? source.sourceId} onOpen={openMemoFromSource} />
+                {source.aggregationOnly && <AggregationOnlyBadge />}
                 {(new Set(["failed", "waiting_model"]).has(source.sourceState)
                   || (typeof source.filename === "string" && /\.(docx|pptx)$/u.test(source.filename.toLowerCase())
                     && source.sourceState === "needs_review" && source.processingState === "completed" && source.jobState === "completed")) && typeof adapter?.reprocessSource === "function"

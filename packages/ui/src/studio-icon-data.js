@@ -79,6 +79,14 @@ const RAW = {
     ["line", { x1: 7.5, y1: 13.5, x2: 16.5, y2: 13.5 }],
     ["line", { x1: 7.5, y1: 16.5, x2: 12.5, y2: 16.5 }],
   ],
+  // 데이터 집계(WO-N9): 표 머리줄 + 막대 세 개.
+  data_aggregation: [
+    ["rect", { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }],
+    ["line", { x1: 3, y1: 8.5, x2: 21, y2: 8.5 }],
+    ["line", { x1: 8, y1: 17, x2: 8, y2: 14 }],
+    ["line", { x1: 12, y1: 17, x2: 12, y2: 11.5 }],
+    ["line", { x1: 16, y1: 17, x2: 16, y2: 12.8 }],
+  ],
   memo: [
     ["rect", { x: 4, y: 3, width: 16, height: 18, rx: 3 }],
     ["line", { x1: 8, y1: 8, x2: 16, y2: 8 }],
@@ -203,11 +211,12 @@ export const STUDIO_TYPE_STYLE = Object.freeze({
   infographic: Object.freeze({ icon: "infographic", accent: "infographic", labelKey: "studio.tile.infographic" }),
   data_table: Object.freeze({ icon: "data_table", accent: "table", labelKey: "studio.tile.data_table" }),
   web_page: Object.freeze({ icon: "web_page", accent: "report", labelKey: "studio.tile.web_page" }),
+  data_aggregation: Object.freeze({ icon: "data_aggregation", accent: "table", labelKey: "studio.tile.data_aggregation" }),
   memo: Object.freeze({ icon: "memo", accent: "memo", labelKey: "studio.tile.memo" }),
 });
 
 // 타일 표시 순서(참조 화면의 2열 배치: 좌→우, 위→아래).
 export const STUDIO_TILE_ORDER = Object.freeze([
   "audio_overview", "slides", "video_overview", "mind_map", "report",
-  "flashcards", "quiz", "infographic", "data_table", "web_page",
+  "flashcards", "quiz", "infographic", "data_table", "web_page", "data_aggregation",
 ]);

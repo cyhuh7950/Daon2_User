@@ -2,7 +2,7 @@
 
 import {
   cancelStudioOutput, createStudioMemo, createMemoSource, reflectMemoSource, createStudioOutput, applyStudioEditTurn, createStudioEditTurn, discardStudioEditTurn, listStudioEditTurns, createStudioRevision, deleteStudioOutput, downloadStudioExport, getStudioAudio, getStudioVideo, getStudioEvidenceContent,
-  getStudioOutput, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
+  getStudioOutput, getStudioTableProfile, getStudioProvenance, getStudioSharing, listLearningAttempts, listStudioOutputs, listStudioTypes, recordLearningAttempt,
   regenerateStudioOutput, renameStudioOutput, getStudioCustomization, saveStudioCustomization,
   copyNotebook, clearChatHistory, listChatTurns, getModelSelection, saveModelSelection, getQuestionTools, saveQuestionTools, getNotebookOverview, regenerateNotebookOverview,
   listSourceGroups, createSourceGroup, updateSourceGroup, deleteSourceGroup, setSourceGroupMembers, searchSourceDiscovery, addSourceDiscovery, createStudioResearch, studioResearchOf, issueExportStepUp,
@@ -25,6 +25,8 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     exportFormats: (typeId) => exportFormatsByType.get(typeId) ?? [],
     listOutputs: (options) => listStudioOutputs(workspaceId, scope(options)),
     getOutput: (outputId, options) => getStudioOutput(workspaceId, outputId, scope(options)),
+    // 데이터 집계(WO-N9) 설정 창의 표 정보: { sourceVersionId, sheet, headerRow } → { sheets, columns, row_count }.
+    getTableProfile: (options) => getStudioTableProfile(workspaceId, scope(options)),
     createOutput: (input) => createStudioOutput(workspaceId, scope(input)),
     renameOutput: (outputId, title, options) => renameStudioOutput(workspaceId, outputId, title, scope(options)),
     deleteOutput: (outputId, options) => deleteStudioOutput(workspaceId, outputId, scope(options)),

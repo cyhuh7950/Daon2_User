@@ -11,7 +11,7 @@ const read = (file) => readFileSync(path.join(root, file), "utf8");
 
 test("web_page 타일이 순서·아이콘·문구에 연결된다", () => {
   assert.ok(TILE_ORDER.includes("web_page"));
-  assert.equal(TILE_ORDER.at(-1), "web_page");
+  assert.equal(TILE_ORDER.at(-2), "web_page"); // 맨 끝은 데이터 집계(WO-N9)
   assert.equal(STUDIO_TYPE_STYLE.web_page.labelKey, "studio.tile.web_page");
   assert.ok(Object.hasOwn(STUDIO_ICONS, STUDIO_TYPE_STYLE.web_page.icon));
   assert.ok(STUDIO_MESSAGES["studio.tile.hint.web_page"]);
@@ -62,7 +62,8 @@ test("출처 목록 넣기 메뉴 항목은 키보드 초점 테두리가 보인
 
 test("요청 글이 필요한 유형은 타일을 눌러도 바로 만들지 않고 설정 창을 연다", () => {
   const panel = read("packages/ui/src/studio-panel.jsx");
-  assert.match(panel, /settings_schema\?\.properties\?\.page_request\) setDialog\(\{ kind: "settings", typeId \}\)/u);
+  assert.match(panel, /if \(needsSettingsDialog\(type\)\) setDialog\(\{ kind: "settings", typeId \}\)/u);
+  assert.match(read("packages/ui/src/studio-panel-model.js"), /Boolean\(properties\?\.page_request \|\| properties\?\.aggregation_request\)/u);
 });
 
 test("노트북 화면은 포커스가 앱 안 웹 페이지 iframe으로 옮겨 갈 때 화면을 가리지 않는다", () => {

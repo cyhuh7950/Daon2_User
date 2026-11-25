@@ -31,6 +31,7 @@ test("Studio v2 읽기 경로는 정확한 세그먼트로만 전달된다", asy
   const proxy = makeProxy(captured);
   const cases = [
     [get("/types"), seg("types"), "/types"],
+    [get("/table-profile", "?source_version_id=ver-1&header_row=2"), seg("table-profile"), "/table-profile?source_version_id=ver-1&header_row=2"],
     [get("/outputs", "?limit=10&cursor=abc"), seg("outputs"), "/outputs?limit=10&cursor=abc"],
     [get("/outputs/sv2-1", "?revision=2"), seg("outputs", "sv2-1"), "/outputs/sv2-1?revision=2"],
     [get("/outputs/sv2-1/provenance"), seg("outputs", "sv2-1", "provenance"), "/outputs/sv2-1/provenance"],
@@ -95,6 +96,9 @@ test("Studio v2는 허용하지 않는 메서드·쿼리·형식을 upstream 전
   assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=2"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
   assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=true"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
   assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=0&include_sources=1"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
+  // 데이터 집계 표 정보(WO-N9): source_version_id·sheet·header_row 세 개만.
+  assert.equal((await proxy(get("/table-profile", "?source_version_id=ver-1&revision=1"), seg("table-profile"))).status, 400);
+  assert.equal((await proxy(get("/table-profile"), seg("table-profile"))).status, 400);
   assert.equal((await proxy(get("/unknown"), seg("unknown"))).status, 404);
   assert.equal((await proxy(get("/outputs/bad%20id"), seg("outputs", "bad id"))).status, 404);
   assert.equal(captured.length, 0);

@@ -108,6 +108,23 @@ export async function getStudioOutput(workspaceId, outputId, { notebookId, revis
   return { ...data, etag };
 }
 
+// 데이터 집계(WO-N9) 표 정보: 시트 이름·열 이름과 종류·행 수만(셀 값 없음). API는 한 번에 하나만 읽어 겹치면 503 STUDIO_SERVICE_UNAVAILABLE.
+const TABLE_COLUMN_KINDS = new Set(["date", "number", "text"]);
+export const validTableProfile = (d) => exact(d, ["sheets", "columns", "row_count"])
+  && Array.isArray(d.sheets) && d.sheets.every((name) => typeof name === "string" && name.length <= 255)
+  && Array.isArray(d.columns) && d.columns.every((c) => exact(c, ["name", "kind"]) && typeof c.name === "string" && TABLE_COLUMN_KINDS.has(c.kind))
+  && Number.isSafeInteger(d.row_count) && d.row_count >= 0;
+
+export async function getStudioTableProfile(workspaceId, { notebookId, sourceVersionId, sheet, headerRow = 1, signal, fetchImpl } = {}) {
+  if (!SAFE_ID.test(sourceVersionId ?? "") || (sheet !== undefined && (typeof sheet !== "string" || sheet.length > 120))
+    || !Number.isSafeInteger(headerRow) || headerRow < 1 || headerRow > 50) throw new StudioV2Error("STUDIO_INPUT_INVALID", 0);
+  const query = new URLSearchParams({ source_version_id: sourceVersionId });
+  if (sheet) query.set("sheet", sheet);
+  query.set("header_row", String(headerRow));
+  const { data } = await json(await request("GET", `${base(workspaceId, notebookId)}/table-profile?${query}`, { signal, fetchImpl }), validTableProfile);
+  return data;
+}
+
 export async function createStudioOutput(workspaceId, { notebookId, typeId, formatId, settings, sourceVersionIds, idempotencyKey, signal, fetchImpl } = {}) {
   const body = { type_id: typeId };
   if (formatId) body.format_id = formatId;

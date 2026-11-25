@@ -236,24 +236,32 @@ def render_xlsx(output: Mapping[str, Any]) -> bytes:
             refs_for = _refs((cells.get(c["key"]) or {}).get("refs"))
             if refs_for:
                 refs.append([r, columns[c_index].get("label", c["key"]), " ".join(f"[{x}]" for x in refs_for)])
+    return _xlsx_package([("데이터", _sheet(data)), ("근거", _sheet(refs))])
+
+
+def _xlsx_package(sheets: Sequence[tuple[str, str]]) -> bytes:
+    """(시트 이름, 시트 XML) 목록으로 XLSX 묶음을 만든다. 시트 이름은 코드가 정한 고정 문구만 쓴다."""
     ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
     rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    numbers = range(1, len(sheets) + 1)
+    overrides = "".join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for i in numbers)
+    sheet_list = "".join(f'<sheet name="{escape(name)}" sheetId="{i}" r:id="rId{i}"/>' for i, (name, _) in zip(numbers, sheets))
+    sheet_rels = "".join(f'<Relationship Id="rId{i}" Type="{rel}/worksheet" Target="worksheets/sheet{i}.xml"/>' for i in numbers)
     entries = {
         "[Content_Types].xml": f'{xml}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        f'{overrides}'
         '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
         "_rels/.rels": f'{xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>',
-        "xl/workbook.xml": f'{xml}<workbook xmlns="{ns}" xmlns:r="{rel}"><sheets><sheet name="데이터" sheetId="1" r:id="rId1"/><sheet name="근거" sheetId="2" r:id="rId2"/></sheets></workbook>',
-        "xl/_rels/workbook.xml.rels": f'{xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{rel}/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="{rel}/styles" Target="styles.xml"/></Relationships>',
+        "xl/workbook.xml": f'{xml}<workbook xmlns="{ns}" xmlns:r="{rel}"><sheets>{sheet_list}</sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": f'{xml}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{sheet_rels}<Relationship Id="rId{len(sheets) + 1}" Type="{rel}/styles" Target="styles.xml"/></Relationships>',
         "xl/styles.xml": f'{xml}<styleSheet xmlns="{ns}"><fonts count="2"><font><sz val="11"/><name val="맑은 고딕"/></font><font><b/><sz val="11"/><name val="맑은 고딕"/></font></fonts>'
         '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>',
-        "xl/worksheets/sheet1.xml": _sheet(data),
-        "xl/worksheets/sheet2.xml": _sheet(refs),
     }
+    for i, (_, content) in zip(numbers, sheets):
+        entries[f"xl/worksheets/sheet{i}.xml"] = content
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries.items():
@@ -261,6 +269,130 @@ def render_xlsx(output: Mapping[str, Any]) -> bytes:
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, content.encode("utf-8"))
     return buffer.getvalue()
+
+
+# ------------------------------------------------------------------ 데이터 집계(xlsx/csv, WO-N9)
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+_COMPUTED_MARK = "계산값"
+
+
+@dataclass(frozen=True, slots=True)
+class _Num:
+    """숫자 칸. 저장값 문자열을 그대로 쓴다(수식이 아니다)."""
+    text: str
+
+
+def _clean_text(value: object) -> str:
+    return _CONTROL.sub("", "" if value is None else str(value))
+
+
+def _number_or_text(value: object) -> object:
+    """계산값: 저장값이 정확한 숫자 문자열일 때만 숫자 칸, 아니면 글자 칸."""
+    if isinstance(value, str) and _NUMBER.fullmatch(value):
+        return _Num(value)
+    return _clean_text(value)
+
+
+def _typed_sheet(rows: Sequence[Sequence[object]]) -> str:
+    """글자는 모두 inlineStr(수식으로 해석되지 않음), _Num·int는 숫자 칸. 수식(<f>)은 쓰지 않는다."""
+    out = []
+    for r, row in enumerate(rows, 1):
+        cells = []
+        for c, value in enumerate(row):
+            ref = f"{_col(c)}{r}"
+            if isinstance(value, _Num):
+                cells.append(f'<c r="{ref}"><v>{value.text}</v></c>')
+            elif isinstance(value, int) and not isinstance(value, bool):
+                cells.append(f'<c r="{ref}"><v>{value}</v></c>')
+            else:
+                style = ' s="1"' if r == 1 else ""
+                cells.append(f'<c r="{ref}" t="inlineStr"{style}><is><t xml:space="preserve">{escape(_clean_text(value))}</t></is></c>')
+        out.append(f'<row r="{r}">{"".join(cells)}</row>')
+    width = max((len(r) for r in rows), default=1)
+    cols = "".join(f'<col min="{i}" max="{i}" width="24" customWidth="1"/>' for i in range(1, width + 1))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f'<cols>{cols}</cols><sheetData>{"".join(out)}</sheetData></worksheet>')
+
+
+def _aggregation_body(output: Mapping[str, Any]) -> Mapping[str, Any]:
+    body = _content(output).get("body")
+    if not isinstance(body, Mapping) or not isinstance(body.get("columns"), list) or not isinstance(body.get("rows"), list):
+        raise StudioError("RESOURCE_UNAVAILABLE", 404)
+    return body
+
+
+def _aggregation_tables(body: Mapping[str, Any]) -> tuple[list[list[object]], list[list[object]], list[list[object]]]:
+    """(집계표, 계산 근거, 적용한 조건) 행 목록. 계산값 칸 옆에는 "계산값" 표시 열을 둔다."""
+    columns = [c for c in body.get("columns", []) if isinstance(c, Mapping)]
+    computed_cols = [c.get("role") in ("measure", "growth") for c in columns]
+    header: list[object] = []
+    for column, computed in zip(columns, computed_cols):
+        label = _clean_text(column.get("label", column.get("key")))
+        header.append(label)
+        if computed:
+            header.append(f"{label} {_COMPUTED_MARK} 표시")
+    source = body.get("source") if isinstance(body.get("source"), Mapping) else {}
+    file_name, sheet = _clean_text(source.get("file_name")), _clean_text(source.get("sheet"))
+    evidence = body.get("evidence") if isinstance(body.get("evidence"), Mapping) else {}
+    table: list[list[object]] = [header]
+    proof: list[list[object]] = [["행", "열", "값", "파일", "시트", "범위", "필터", "계산식", "대상 행 수", "제외(숫자 아님)", "제외(빈칸)", "계산 불가 이유"]]
+    for r_index, row in enumerate(body.get("rows", []), 2):
+        out: list[object] = []
+        for column, computed, item in zip(columns, computed_cols, row if isinstance(row, list) else []):
+            item = item if isinstance(item, Mapping) else {}
+            if not computed:
+                out.append(_clean_text(item.get("display", item.get("value"))))
+                continue
+            ok = item.get("status") == "ok" and item.get("value") is not None
+            reason = _clean_text(item.get("reason"))
+            out.append(_number_or_text(item.get("value")) if ok else "계산 불가")
+            out.append(_COMPUTED_MARK if ok else (f"계산 불가: {reason}" if reason else "계산 불가"))
+            entry = evidence.get(item.get("evidence_id")) if item.get("evidence_id") else None
+            if isinstance(entry, Mapping):
+                excluded = entry.get("excluded") if isinstance(entry.get("excluded"), Mapping) else {}
+                ranges = entry.get("ranges") if isinstance(entry.get("ranges"), list) else []
+                proof.append([r_index, _clean_text(column.get("label", column.get("key"))), _clean_text(item.get("display")), file_name, sheet,
+                              ", ".join(_clean_text(x) for x in ranges), _clean_text(entry.get("filter_text")), _clean_text(entry.get("formula")),
+                              *(_count(v) for v in (entry.get("row_count"), excluded.get("not_number"), excluded.get("blank"))),
+                              "" if ok else reason])
+        table.append(out)
+    stats = body.get("stats") if isinstance(body.get("stats"), Mapping) else {}
+    conditions: list[list[object]] = [["항목", "내용"], ["요청 글", _clean_text(body.get("request"))],
+                                      ["적용한 조건", _clean_text(body.get("conditions_text"))], ["파일", file_name], ["시트", sheet],
+                                      ["머리글 행", _count(source.get("header_row"))], ["원본 해시(SHA-256)", _clean_text(source.get("sha256"))],
+                                      ["읽은 행 수", _count(stats.get("rows_read"))]]
+    conditions += [["요약", _clean_text(text)] for text in body.get("summary") or []]
+    conditions += [["경고", _clean_text(text)] for text in body.get("warnings") or []]
+    return table, proof, conditions
+
+
+def _count(value: object) -> object:
+    return value if isinstance(value, int) and not isinstance(value, bool) else _clean_text(value)
+
+
+def render_aggregation_xlsx(output: Mapping[str, Any]) -> bytes:
+    table, proof, conditions = _aggregation_tables(_aggregation_body(output))
+    return _xlsx_package([("집계표", _typed_sheet(table)), ("계산 근거", _typed_sheet(proof)), ("적용한 조건", _typed_sheet(conditions))])
+
+
+def _csv_safe(value: object) -> str:
+    """CSV 수식 주입 막기: 글자 칸이 수식 시작 문자로 시작하면 작은따옴표를 붙인다. 숫자 칸은 저장값 그대로."""
+    if isinstance(value, _Num):
+        return value.text
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    text = _clean_text(value)
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
+def render_aggregation_csv(output: Mapping[str, Any]) -> bytes:
+    table, proof, conditions = _aggregation_tables(_aggregation_body(output))
+    rows = [*table, [], ["계산 근거"], *proof, [], ["적용한 조건"], *conditions[1:]]
+    buffer = StringIO()
+    csv.writer(buffer, lineterminator="\r\n").writerows([[_csv_safe(v) for v in row] for row in rows])
+    return b"\xef\xbb\xbf" + buffer.getvalue().encode("utf-8")
 
 
 # ------------------------------------------------------------------ 마인드맵(svg/png)
@@ -452,6 +584,8 @@ register_renderer("md", lambda stem, output: _bundle(stem, "md", render_markdown
 register_renderer("txt", lambda stem, output: _bundle(stem, "txt", render_markdown(output).encode("utf-8")))
 register_renderer("csv", lambda stem, output: _bundle(stem, "csv", render_csv(output)))
 register_renderer("xlsx", lambda stem, output: _bundle(stem, "xlsx", render_xlsx(output)))
+register_renderer("xlsx", lambda stem, output: _bundle(stem, "xlsx", render_aggregation_xlsx(output)), type_id="data_aggregation")
+register_renderer("csv", lambda stem, output: _bundle(stem, "csv", render_aggregation_csv(output)), type_id="data_aggregation")
 register_renderer("svg", lambda stem, output: _bundle(stem, "svg", render_svg(output)), type_id="mind_map")
 register_renderer("png", lambda stem, output: _bundle(stem, "png", render_png(output)), type_id="mind_map")
 register_renderer("pdf", lambda stem, output: _bundle(stem, "pdf", render_pdf(output)))
