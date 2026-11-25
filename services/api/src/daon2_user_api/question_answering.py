@@ -316,6 +316,13 @@ class OpenAICompatibleTextGenerationAdapter:
             usage = {key: int(value) for key, value in raw_usage.items() if isinstance(value, int)}
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
+        return self._grounded_result(request, answer, cited, insufficient, usage, response.get("usage"))
+
+    def _grounded_result(
+        self, request: GroundedQuestionRequest, answer: str, cited: tuple[str, ...], insufficient: bool,
+        usage: Mapping[str, int], raw_usage: object,
+    ) -> GroundedTextResult:
+        """근거 검증·보정(N1-B01·B08·B14)과 실패 이유 로그. 기본 경로와 OmniRoute 경로가 함께 쓴다."""
         allowed = {item.chunk_id for item in request.evidence}
         answer = strip_citation_labels(answer, allowed)
         if self._reconcile_citations:
@@ -360,7 +367,7 @@ class OpenAICompatibleTextGenerationAdapter:
             logging.getLogger(__name__).warning(
                 "text_grounding_failure reason=%s cited_count=%d evidence_count=%d%s", reason, len(cited), len(request.evidence), detail)
             raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
-        return GroundedTextResult(answer, cited, insufficient, usage,reported_cost_from_usage(response.get("usage")))
+        return GroundedTextResult(answer, cited, insufficient, usage, reported_cost_from_usage(raw_usage))
 
     def _post(self, selection: TextModelSelection, payload: dict[str, object]) -> dict[str, object]:
         if self._api_key is None:

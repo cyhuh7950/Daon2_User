@@ -16,7 +16,6 @@ from typing import ContextManager, Mapping, Protocol, cast
 from .answer_process import blocked_answer_process, build_answer_process, policy_ref
 from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
-from .question_answering import reconcile_citations, strip_citation_labels
 from .question_external_evidence import (
     ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt, run_planned,
     default_requests, merge_evidence, parse_plan, rewrite_plan_payload, FACTS_SYSTEM, build_facts_prompt, parse_facts,
@@ -339,19 +338,8 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
         except (KeyError, TypeError):
             self._log_unreadable("missing_keys", response, parsed)
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
-        allowed = {item.chunk_id for item in request.evidence}
-        answer = strip_citation_labels(answer, allowed)
-        # 후속 A-2: N1-B14 보정을 OmniRoute 경로에도 적용한다(근거 검증은 그대로).
-        answer, cited = reconcile_citations(answer, cited, allowed)
-        cited_text = "\n".join(item.text for item in request.evidence if item.chunk_id in set(cited))
-        if (
-            not answer or len(answer) > 8_000 or len(cited) != len(set(cited))
-            or not set(cited).issubset(allowed) or (insufficient and cited)
-            or (not insufficient and not cited)
-            or not _evidence_anchors(answer).issubset(_evidence_anchors(cited_text))
-        ):
-            raise ValueError("TEXT_GENERATION_GROUNDING_INVALID")
-        return GroundedTextResult(answer, cited, insufficient, {})
+        # 기본 경로와 같은 근거 검증·보정(N1-B01·B08·B14)과 실패 이유 로그를 쓴다.
+        return self._grounded_result(request, answer, cited, insufficient, {}, response.get("usage") if isinstance(response, Mapping) else None)
 
 
 class QuestionAnsweringError(RuntimeError):
