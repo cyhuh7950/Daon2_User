@@ -24,6 +24,14 @@ export function excludedItems(body = {}) {
   return items;
 }
 
+/** iframe 이름표에 쓸 제목. 근거 부족 제목은 쓰지 않고 근거 확인된 첫 절 제목, 그것도 없으면 유형 이름. */
+export function frameTitle(body = {}) {
+  const own = body.title_insufficient === true ? "" : String(body.title ?? "").trim();
+  const heading = (body.sections ?? []).find((section) => (section?.blocks ?? []).some((block) => block && block.insufficient !== true))?.heading;
+  const title = own || String(heading ?? "").trim();
+  return title ? msg("studio.web_page.frame", { title }) : msg("studio.tile.web_page");
+}
+
 /** 격리 iframe. 보기·고친 안 미리보기가 같은 것을 쓴다. */
 export function WebPageFrame({ html, title, frameRef }) {
   return <iframe ref={frameRef} className="studio-web-page__frame" srcDoc={html} sandbox="allow-scripts" referrerPolicy="no-referrer" title={title} />;
@@ -69,7 +77,7 @@ export function WebPageViewer({ content, evidence = [], onOpenEvidence }) {
 
   return <div className="studio-web-page">
     <div className="studio-web-page__page">
-      <WebPageFrame html={html} title={msg("studio.web_page.frame", { title: body.title ?? "" }).trim()} frameRef={frameRef} />
+      <WebPageFrame html={html} title={frameTitle(body)} frameRef={frameRef} />
     </div>
     <aside ref={paneRef} className="studio-web-page__evidence" aria-label={msg("studio.dialog.provenance.evidence")}>
       {excluded.length > 0 && <div className="studio-web-page__excluded">

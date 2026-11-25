@@ -155,7 +155,18 @@ test("웹 페이지 뷰어: 뺀 내용이 없으면 안내 줄이 없고, 제목
     assert.equal(module.paneScrollTop({ itemTop: 50, itemHeight: 30, scrollTop: 100, paneHeight: 200 }), 50);
     assert.equal(module.paneScrollTop({ itemTop: 500, itemHeight: 30, scrollTop: 0, paneHeight: 200 }), 330);
     const view = await mount(module.WebPageViewer, { content: clean, evidence, onOpenEvidence: () => {} });
-    try { assert.ok(!view.container.textContent.includes("근거 부족으로 뺀 내용")); } finally { await view.unmount(); view.restore(); }
+    try {
+      assert.ok(!view.container.textContent.includes("근거 부족으로 뺀 내용"));
+      const [ok] = findElements(view.container, (n) => n.tagName === "IFRAME");
+      assert.ok(attr(ok, "title").includes("안내 페이지"));
+    } finally { await view.unmount(); view.restore(); }
+    // 근거 부족 제목은 iframe title에도 쓰지 않는다(최종 검토 I1).
+    const weak = await mount(module.WebPageViewer, { content: { body: withTitle }, evidence, onOpenEvidence: () => {} });
+    try {
+      const [iframe] = findElements(weak.container, (n) => n.tagName === "IFRAME");
+      assert.ok(attr(iframe, "title"));
+      assert.ok(!attr(iframe, "title").includes("안내 페이지"), attr(iframe, "title"));
+    } finally { await weak.unmount(); weak.restore(); }
   } finally { await cleanup(); }
 });
 

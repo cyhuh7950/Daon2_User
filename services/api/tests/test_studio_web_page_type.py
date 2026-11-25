@@ -36,3 +36,15 @@ def test_migration_0088_sql_constraint_lists_all_types_and_downgrade_guards():
     assert "WEB_PAGE_FORWARD_RECOVERY_REQUIRED" in down
     assert "DROP COLUMN preview_json" in down
     assert "'web_page'" not in down[down.index("ADD CONSTRAINT"):]
+
+
+def test_type_labels_cover_web_page_and_default_title_pattern():
+    # 최종 검토 I4: 기본 제목은 "웹 페이지 YYYY-MM-DD HH:MM"이고 자동 제목의 기본 제목 판정도 같은 이름을 쓴다.
+    import re
+
+    from daon2_user_api.studio_v2_postgres import TYPE_LABELS
+
+    assert TYPE_LABELS["web_page"] == "웹 페이지"
+    assert set(STUDIO_V2_TYPES) <= set(TYPE_LABELS)
+    default = re.compile(re.escape(TYPE_LABELS["web_page"]) + r" \d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+    assert default.fullmatch("웹 페이지 2026-11-25 10:00")

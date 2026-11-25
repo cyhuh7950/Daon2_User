@@ -24,6 +24,11 @@ def derive_title(content: Mapping[str, Any]) -> str:
     body = content.get("body") if isinstance(content, Mapping) else None
     if not isinstance(body, Mapping):
         return ""
+    if content.get("schema") == "studio.web_page.v1" or "title_insufficient" in body:
+        # 웹 페이지(WO-N8): 근거 부족 제목·근거 부족 블록만 있는 절 제목은 쓰지 않는다.
+        from .studio_web_page import verified_body
+
+        body = verified_body(body)
     candidates: list[object] = [body.get("title"), _first_sentence(body.get("summary"))]
     nodes = body.get("nodes")
     if isinstance(nodes, list):

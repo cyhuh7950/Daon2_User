@@ -21,6 +21,18 @@ class TitleTests(unittest.TestCase):
         self.assertEqual(derive_title({}), "")
         self.assertEqual(derive_title({"body": "x"}), "")
 
+    def test_web_page_insufficient_title_never_used(self):
+        # 최종 검토 I1: 근거 부족 제목·근거 부족 절 제목은 카드 제목(→ 내려받기 파일 이름)에 쓰지 않는다.
+        weak = {"type": "paragraph", "text": "x", "refs": [], "insufficient": True}
+        ok = {"type": "paragraph", "text": "y", "refs": ["S1"], "insufficient": False}
+        body = {"title": "2027년 보험료 12% 인상 안내", "title_insufficient": True, "request": "r", "html": "",
+                "sections": [{"heading": "근거 없는 절", "blocks": [weak]}, {"heading": "보장 안내", "blocks": [ok]}]}
+        content = {"schema": "studio.web_page.v1", "body": body}
+        self.assertEqual(derive_title(content), "보장 안내")
+        self.assertEqual(derive_title({"schema": "studio.web_page.v1", "body": {**body, "sections": [body["sections"][0]]}}), "")
+        self.assertEqual(derive_title({"schema": "studio.web_page.v1", "body": {**body, "title_insufficient": False}}),
+                         "2027년 보험료 12% 인상 안내")
+
 
 if __name__ == "__main__":
     unittest.main()
