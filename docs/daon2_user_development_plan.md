@@ -89,7 +89,7 @@
 | WO-A1 | `docs/work_orders/WO-A1-authoring.md` | F6-*, S4-*, S5-05 (작성 엔진) | WO-F2, WO-M0 완료 후 |
 | WO-K2 | `docs/work_orders/WO-K2-notebook-daon-knowledge-scopes.md` | 노트북 Daon 승인 지식 업무 패키지 선택(팝업·다중 선택·승인된 지식만) | 2026-11-09 승인. Daon2-RAG·Daon2 선행 회신 필요 |
 | WO-K4 | `docs/work_orders/WO-K4-knowledge-agent.md` | 승인 지식을 LLM이 판단해 쓰는 공용 엔진(자료 계획·검색·근거 정리). 노트북 채팅 → Daon2 지식 → 문서 작성 → 스튜디오 순 | 2026-11-09 승인. 1단계 구현. ysna 배포와 스위치 켜기는 별도 승인 |
-| WO-N1 | `docs/work_orders/WO-N1-gemini-notebook-parity.md` (실행 계획 `NOTEBOOK_WORK_PLAN.md`, 진도 `NOTEBOOK_WORK_CHECK.md`) | Gemini Notebook 기능 도입 N1-1~N1-7(답변 과정·메모 소스·질문 도구·개요·구성 확인·소스 묶음·자료 찾기) | 2026-11-23 승인. 단계별 ysna 배포 사전 승인 |
+| WO-N1 | `docs/work_orders/WO-N1-gemini-notebook-parity.md` (실행 계획 `NOTEBOOK_WORK_PLAN.md`, 진도 `NOTEBOOK_WORK_CHECK.md`) | Gemini Notebook 기능 도입 N1-1~N1-7(답변 과정·메모 소스·질문 도구·개요·구성 확인·소스 묶음·자료 찾기) | 2026-11-23 승인. 단계별 ysna 배포 사전 승인. 2026-11-25 완료(43/43 단위, 신산님 인수 UAT-01~14 통과, ysna 4dad10f·DB 0087). 최종 보고 `docs/04_test_reports/n1/WO-N1-final-report.md` |
 
 권장 착수 순서: **WO-T0(기준선 결함 수정) → WO-D·WO-F1·WO-M0 병행 → WO-F2·WO-S1 → WO-A1.**
 
