@@ -232,7 +232,7 @@ test("HTTP QA Studio version과 review action은 randomUUID 없이 secure key로
 test("Product Studio는 11개 실제 산출물과 생성 전 확인을 강제한다", () => {
   assert.deepEqual(OUTPUT_TYPES.map((item) => item.id), [
     "evidence_report", "compliance_checklist", "comparison_table", "knowledge_map", "business_draft",
-    "slides", "infographic", "flashcards", "quiz", "web_page", "audio", "video",
+    "slides", "infographic", "flashcards", "quiz", "audio", "video",
   ]);
   let state = createProductStudioState({ grounded });
   state = selectOutputType(state, "evidence_report");
