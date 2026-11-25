@@ -2207,6 +2207,28 @@ class OmniRouteResponseShapeTests(unittest.TestCase):
             selection.release()
 
 
+    def test_grounded_answer_corrects_miscopied_citation_and_removes_echoed_internal_id(self):
+        # 후속 A-2: N1-B14 보정을 OmniRoute 경로에도 적용한다.
+        import json as _json
+        from daon2_user_api.question_answering import GroundedQuestionRequest
+        chunk_id = "ext-" + "a1b2c3d4" * 4
+        chunk = IndexedEvidenceChunk(chunk_id, "doc-1", "ver-1", 1, "기술평가 점수가 배점의 85% 이상", "blk-1", 1.0)
+        request = GroundedQuestionRequest("요건은?", (chunk,), "trace-a2")
+        output = _json.dumps({"answer": f"협상적격자는 85% 이상이다 ({chunk_id}).", "cited_chunk_ids": [chunk_id.upper()[:20]], "insufficient": False}, ensure_ascii=False)
+        adapter, selection = self._adapter(output)
+        try:
+            result = adapter.generate(request, selection)
+        finally:
+            selection.release()
+        self.assertEqual(result.cited_chunk_ids, (chunk_id,))
+        self.assertNotIn("ext-", result.answer)
+        bad, selection = self._adapter(_json.dumps({"answer": "협상적격자는 90% 이상이다.", "cited_chunk_ids": [chunk_id], "insufficient": False}, ensure_ascii=False))
+        try:
+            with self.assertRaisesRegex(ValueError, "TEXT_GENERATION_GROUNDING_INVALID"):
+                bad.generate(request, selection)
+        finally:
+            selection.release()
+
 class AnswerProcessServiceTests(unittest.TestCase):
     """NB1-F1: 시스템이 실제로 한 일만 담은 process 블록을 저장 인자·차단 오류에 싣는다."""
 

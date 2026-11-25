@@ -654,7 +654,8 @@ class QuestionAnsweringContractTests(unittest.TestCase):
                         adapter.generate(request,selection,provider_payload=prepared)
         self.assertIsNone(calls[3]['timeout_seconds'])
 
-    def test_docx_internal_chunk_id_echo_is_still_rejected_while_original_identifier_is_valid(self):
+    def test_docx_internal_chunk_id_echo_is_removed_while_original_identifier_is_valid(self):
+        # 후속 A-2: N1-B14와 같이 Ollama 경로도 본문에 섞인 내부 근거 ID를 지우고 계속한다(예전 계약: 되풀이하면 거부).
         chunk_id = 'chunk-a72cd9210f48b63e'
         request = GroundedQuestionRequest('Read reference', (
             IndexedEvidenceChunk(chunk_id,'source-doc','version-doc',1,'REF-17','span-ref',0.0,
@@ -666,15 +667,18 @@ class QuestionAnsweringContractTests(unittest.TestCase):
                 return {'message':{'content':json.dumps(response)}}
         adapter = OllamaTextGenerationAdapter(transport=Transport())
         for response, valid in [
-            ({'answer':f'REF-17 (from {chunk_id})','cited_chunk_ids':[chunk_id],'insufficient':False},False),
+            ({'answer':f'REF-17 (from {chunk_id})','cited_chunk_ids':[chunk_id],'insufficient':False},True),
+            ({'answer':'REF-17','cited_chunk_ids':[chunk_id.upper()],'insufficient':False},True),
             ({'answer':'REF-17','cited_chunk_ids':[chunk_id],'insufficient':False},True),
+            ({'answer':'REF-17','cited_chunk_ids':['chunk-ffffffffffffffff'],'insufficient':False},False),
             ({'answer':'Insufficient evidence.','cited_chunk_ids':[],'insufficient':True},True),
         ]:
             with self.subTest(response=response):
                 if valid:
                     result=adapter.generate(request,selection)
-                    self.assertEqual(result.answer,response['answer'])
-                    self.assertEqual(result.cited_chunk_ids,tuple(response['cited_chunk_ids']))
+                    self.assertNotIn('chunk-', result.answer)
+                    self.assertTrue(result.answer.startswith(response['answer'].split(' (from')[0]))
+                    self.assertEqual(result.cited_chunk_ids,tuple(chunk_id for _ in response['cited_chunk_ids']) if response['cited_chunk_ids'] else ())
                 else:
                     with self.assertRaisesRegex(ValueError,'TEXT_GENERATION_GROUNDING_INVALID'):
                         adapter.generate(request,selection)
@@ -1182,7 +1186,8 @@ class QuestionAnsweringContractTests(unittest.TestCase):
                         GroundedQuestionRequest("내용은?", evidence, "trace-strict"), selection,
                     )
 
-    def test_ollama_duplicate_citations_remain_grounding_invalid(self) -> None:
+    def test_ollama_duplicate_citations_are_merged_into_one(self) -> None:
+        # 후속 A-2: N1-B14 보정과 같이 같은 인용 ID가 되풀이되면 하나로 합친다(예전 계약: 거부). 근거 대조는 그대로다.
         request = self.cell_request()
         selection = TextModelSelection(
             "OLLAMA", "http://models.example.com", "fixture", "fixture:revision",
@@ -1197,8 +1202,8 @@ class QuestionAnsweringContractTests(unittest.TestCase):
                     "insufficient": False,
                 })}}
 
-        with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
-            OllamaTextGenerationAdapter(transport=Transport()).generate(request, selection)
+        result = OllamaTextGenerationAdapter(transport=Transport()).generate(request, selection)
+        self.assertEqual(result.cited_chunk_ids, (request.evidence[0].chunk_id,))
 
     def test_work_support_and_source_modes_are_classified_without_refusal(self) -> None:
         self.assertEqual(classify_question_intent("다음 작업을 어떻게 진행할까?"), "work_support")
