@@ -64,6 +64,13 @@ class XlsxWorkbook:
         object.__setattr__(self, 'sheets', _freeze(self.sheets))
 
 
+class XlsxIndexLimitExceeded(SourceRejected):
+    """The workbook is structurally valid but exceeds the question-index limits
+    (2,048 non-empty cells / 32 KB structure). WO-N9: such a workbook is kept as
+    an aggregation-only source instead of failing processing. The code stays
+    UNSUPPORTED_FORMAT so callers that only know SourceRejected keep failing closed."""
+
+
 def _reject(code='CORRUPTED_SOURCE'):
     raise SourceRejected(code)
 
@@ -195,8 +202,11 @@ def _xml_records(stream, total):
                     record['inline'] = ''.join(node.text or '' for node in values['is'].iter() if _local(node.tag) == 't') if 'is' in values else None
                     record['row'] = dict(parent.attrib) if parent is not None and _local(parent.tag) == 'row' else None
                     raw_cell_bytes += len(_dump(record['attrs']).encode('utf-8'))
-                    if raw_cell_bytes > _MAX_NATIVE_BYTES: _reject('UNSUPPORTED_FORMAT')
-                records.append(record)
+                    # Question-index limit, not corruption: keep validating each cell's
+                    # markup but stop keeping cell/row records (bounded memory), and keep
+                    # parsing so every other structural and security check still runs.
+                    if raw_cell_bytes > _MAX_NATIVE_BYTES: total[1] = True
+                if not (total[1] and tag in {'c', 'row'}): records.append(record)
             stack.pop()
             if not inside_value:
                 if parent is not None: parent.remove(elem)
@@ -206,7 +216,8 @@ def _xml_records(stream, total):
 
 
 def _parts(content):
-    result = {}; total = [0]
+    """Return (parts, over_index_limit). total = [uncompressed bytes, cell budget exceeded]."""
+    result = {}; total = [0, False]
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         members = archive.infolist()
         if len(members) > 128: _reject('UNSUPPORTED_FORMAT')
@@ -240,7 +251,7 @@ def _parts(content):
                 if attrs.get('TargetMode', 'Internal') != 'Internal' or not target or ':' in target or '\\' in target or '#' in target or attrs.get('Type', '').endswith('/hyperlink'): _reject('UNSUPPORTED_FORMAT')
                 resolved = posixpath.normpath(target.lstrip('/') if target.startswith('/') else posixpath.join(base, target))
                 if resolved.startswith('../') or resolved not in names: _reject()
-    return result
+    return result, total[1]
 
 
 def _get_part(parts, name, root):
@@ -334,7 +345,7 @@ def _cell(record, strings, formats, date1904, hidden_columns):
 def read_xlsx(content: bytes) -> XlsxWorkbook:
     try:
         if not isinstance(content, bytes) or not content.startswith(b'PK\x03\x04'): _reject()
-        parts = _parts(content)
+        parts, over_limit = _parts(content)
         types = parts.get('[Content_Types].xml')
         if types is None or types[0] != f'{{{_CONTENT_TYPES}}}Types': _reject()
         if any('macroEnabled' in r['attrs'].get('ContentType', '') for r in types[2]): _reject('UNSUPPORTED_FORMAT')
@@ -401,13 +412,16 @@ def read_xlsx(content: bytes) -> XlsxWorkbook:
                 if cell['address'] in addresses: _reject()
                 addresses.add(cell['address']); col, row = _coordinate(cell['address']); max_col = max(max_col, col); max_row = max(max_row, row)
                 if cell['raw_value'] not in {None, ''} or cell['formula'] is not None: nonempty += 1
-                if nonempty > 2048: _reject('UNSUPPORTED_FORMAT')
+                if nonempty > 2048: over_limit = True
                 cells.append(cell)
             for value in merged:
                 _, _, col, row = _bounds(value); max_col = max(max_col, col); max_row = max(max_row, row)
             sheets.append({'sheet_name': name, 'sheet_visibility': visibility, 'cells': cells, 'merged_ranges': merged, 'hidden_rows': hidden_rows, 'hidden_columns': hidden_columns, 'used_range': f'A1:{_address(max_col, max_row)}' if (max_col, max_row) != (1, 1) else 'A1'})
+        # Index limits are decided only after every structural check above passed,
+        # so a corrupted or unsupported workbook never becomes aggregation-only.
+        if over_limit: raise XlsxIndexLimitExceeded('UNSUPPORTED_FORMAT')
         native_json = _dump({'serialization_version': 'xlsx-structure-v1', 'date1904': date1904, 'sheets': sheets})
-        if len(native_json.encode('utf-8')) > _MAX_NATIVE_BYTES: _reject('UNSUPPORTED_FORMAT')
+        if len(native_json.encode('utf-8')) > _MAX_NATIVE_BYTES: raise XlsxIndexLimitExceeded('UNSUPPORTED_FORMAT')
         return XlsxWorkbook(hashlib.sha256(content).hexdigest(), tuple(sheets), native_json)
     except SourceRejected: raise
     except (zipfile.BadZipFile, zipfile.LargeZipFile, ET.ParseError, OSError, EOFError, ValueError, TypeError, KeyError, RuntimeError, NotImplementedError, UnicodeError, zlib.error):

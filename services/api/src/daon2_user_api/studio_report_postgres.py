@@ -134,7 +134,10 @@ class PostgresStudioReportRepository:
                     "THEN iv.canonical_json->'chunks' ELSE '[]'::jsonb END) chunk "
                     "WHERE chunk->>'evidence_span_id'=es.record_id AND chunk->>'source_id'=s.record_id "
                     "AND chunk->>'source_version_id'=sv.record_id "
-                    "AND length(chunk->>'text')>0 AND chunk->>'text'=es.canonical_json->>'text')))) AS approved_knowledge,oq.last_safe_error_code "
+                    "AND length(chunk->>'text')>0 AND chunk->>'text'=es.canonical_json->>'text')))) AS approved_knowledge,oq.last_safe_error_code,"
+                    "EXISTS (SELECT 1 FROM index_versions agg WHERE agg.tenant_id=sv.tenant_id "
+                    "AND agg.workspace_id=sv.workspace_id AND agg.source_version_id=sv.record_id "
+                    "AND agg.canonical_json->'lineage'->>'aggregation_only'='true') AS aggregation_only "
                     "FROM sources s "
                     "JOIN source_versions sv ON sv.tenant_id=s.tenant_id AND sv.workspace_id=s.workspace_id "
                     "AND sv.source_id=s.record_id JOIN notebook_bindings nb ON nb.tenant_id=sv.tenant_id "
@@ -173,6 +176,7 @@ class PostgresStudioReportRepository:
             *(('completed', 'completed') if len(row) >= 7 and row[6] is True and row[3] == 'ready'
               else (str(row[4]), str(row[5]))),
             str(row[7]) if len(row) >= 8 and row[7] and row[3] != 'ready' else None,
+            True if len(row) >= 9 and row[8] is True and row[3] == 'ready' else None,
         ) for row in rows)
 
     def create_report(self, context: StudioReportContext, request: StudioReportCreateRequest,

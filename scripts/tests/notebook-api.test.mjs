@@ -344,6 +344,25 @@ test("Source 목록은 메모로 만든 소스에만 memo_origin을 받아들인
   }
 });
 
+test("Source 목록은 집계 전용 표에만 aggregation_only: true를 받아들인다 (WO-N9)", async () => {
+  const base = {
+    source_id: "source-1", source_version_id: "source-version-1", filename: "매출.xlsx",
+    source_state: "ready", processing_state: "completed", job_state: "completed",
+  };
+  const aggregation = { ...base, aggregation_only: true };
+  const memoAggregation = { ...base, source_id: "source-2", aggregation_only: true,
+    memo_origin: { memo_output_id: `sv2-${"c".repeat(32)}`, memo_exists: true } };
+  const fetchImpl = async () => json({ data: { sources: [aggregation, base, memoAggregation] }, meta: META }, { status: 200 });
+  assert.deepEqual(await listWorkspaceSources("workspace-1", { notebookId: "notebook-1", fetchImpl }), [aggregation, base, memoAggregation]);
+  for (const value of [false, null, "true", 1]) {
+    await assert.rejects(
+      () => listWorkspaceSources("workspace-1", { notebookId: "notebook-1",
+        fetchImpl: async () => json({ data: { sources: [{ ...base, aggregation_only: value }] }, meta: META }, { status: 200 }) }),
+      /SOURCE_LIST_RESPONSE_INVALID/u,
+    );
+  }
+});
+
 test('승인 지식 답변이 저장된 노트북도 다시 열리고 문서명이 유지된다', async () => {
   const external = { citation_id:'extcit-1', source_id:'doc-1', source_version_id:'ver-1', evidence_span_id:'block-1', page:3,
     origin:'mcp_daon_rag', context_item_id:'wp-1', locator:{ kind:'section', value:'block-1' }, document_name:'제안요청서.pdf' };

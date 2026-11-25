@@ -1156,6 +1156,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             processingState: source.processing_state,
             jobState: source.job_state,
             safeErrorCode: source.safe_error_code ?? null,
+            // WO-N9: 질문 색인 한도를 넘어 데이터 집계에만 쓰는 표.
+            aggregationOnly: source.aggregation_only === true,
             // 메모로 만든 소스(NB1-F2 memo_origin)만 값이 있다. 메모가 지워져도 소스는 남는다(D-10).
             memoOrigin: source.memo_origin ? { memoOutputId: source.memo_origin.memo_output_id, memoExists: source.memo_origin.memo_exists === true } : null,
             websiteSnapshot,
@@ -2226,7 +2228,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   checked={source.ready && !uncheckedSourceVersionIds.has(source.sourceVersionId)} disabled={!source.ready}
                   onChange={()=>setUncheckedSourceVersionIds(current=>{const next=new Set(current);if(next.has(source.sourceVersionId))next.delete(source.sourceVersionId);else next.add(source.sourceVersionId);return next;})} /> : null}
                 <button type="button" aria-pressed={viewState.selectedSource?.sourceVersionId === source.sourceVersionId} onClick={() => selectSource(source)} disabled={!source.ready}>
-                  <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
+                  <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}{source.aggregationOnly ? " · 집계 전용" : ""}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
                 {groupControl}
                 <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
@@ -2439,7 +2441,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
               return <div className="conversation-turn" key={turn.id} data-turn-state={turn.pending ? "pending" : turn.error ? "failed" : "answered"}>
                 {turn.question ? <article className="user-message"><div><span className="message-author">나</span><p>{turn.question}</p></div></article> : null}
                 {turn.pending ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
-                {turn.error ? <div className="inline-alert compact" role="alert">{turn.error === "QUESTION_CANCELLED" ? "질문이 중단되었습니다." : turn.error === "CONVERSATION_TURN_UNAVAILABLE" ? "이 답변은 접근 권한이 바뀌어 표시할 수 없습니다." : turn.error === "SELECTED_MODEL_UNAVAILABLE" ? "선택한 모델을 사용할 수 없어 답변하지 못했습니다. 다른 모델로 자동 전환하지 않습니다. 모델을 다시 고르거나 기본 모델로 되돌려 주세요." : `질문 실행에 실패했습니다. (${turn.error}) 입력을 확인한 뒤 다시 제출해 주세요.`}{turn.errorProcess ? renderProcess(null, turn.errorProcess) : null}</div> : null}
+                {turn.error ? <div className="inline-alert compact" role="alert">{turn.error === "QUESTION_CANCELLED" ? "질문이 중단되었습니다." : turn.error === "CONVERSATION_TURN_UNAVAILABLE" ? "이 답변은 접근 권한이 바뀌어 표시할 수 없습니다." : turn.error === "SELECTED_MODEL_UNAVAILABLE" ? "선택한 모델을 사용할 수 없어 답변하지 못했습니다. 다른 모델로 자동 전환하지 않습니다. 모델을 다시 고르거나 기본 모델로 되돌려 주세요." : turn.error === "SOURCE_AGGREGATION_ONLY" ? "이 표는 데이터 집계에만 쓸 수 있습니다." : `질문 실행에 실패했습니다. (${turn.error}) 입력을 확인한 뒤 다시 제출해 주세요.`}{turn.errorProcess ? renderProcess(null, turn.errorProcess) : null}</div> : null}
                 {turn.answer ? <article className="assistant-message"><div className="assistant-avatar" aria-hidden="true">D</div><div><span className="message-author">Daon</span><AnswerText text={turn.answer.answer} />
                   <div className="answer-actions" role="group" aria-label="답변 작업">
                     {adapter?.studioV2 ? <button type="button" className="answer-action" disabled={turn.answer.insufficient === true || memoSave.pending} onClick={() => void saveAnswerToMemo(turn.answer)}>메모에 저장</button> : null}

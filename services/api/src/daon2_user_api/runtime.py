@@ -3286,6 +3286,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             "PROVIDER_MODEL_NOT_READY", "PROVIDER_CAPABILITY_UNSUPPORTED", "PROVIDER_EXECUTION_NOT_READY",
             "WORKSPACE_MODEL_DEFAULT_UNAVAILABLE", "WORKSPACE_MODEL_RESOLUTION_UNAVAILABLE",
             "TEXT_ADAPTER_CONFIG_INVALID", "EGRESS_DESTINATION_DENIED", "QUESTION_TOOLS_UNAVAILABLE",
+            "SOURCE_AGGREGATION_ONLY",
         }
         # 원인을 서버 로그에 남긴다(화면에는 안전한 코드만 보인다).
         _runtime_logger.warning(

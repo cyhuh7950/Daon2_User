@@ -14,7 +14,59 @@ from .document_understanding_adapter import (
 from .question_answering import OllamaTextGenerationAdapter, TextModelSelection
 from .source_ingest import SourceRejected
 from .workspace_model_defaults import ResolvedModel
-from .xlsx_source import read_xlsx, encode_sheet_cell, decode_sheet_cell, read_sheet_cell_view
+from .xlsx_source import read_xlsx, encode_sheet_cell, decode_sheet_cell, read_sheet_cell_view, XlsxIndexLimitExceeded
+
+AGGREGATION_ONLY_MESSAGE = '이 표는 데이터 집계에만 쓸 수 있습니다'
+
+
+def xlsx_aggregation_only(content: bytes) -> bool:
+    """WO-N9: True only for a structurally valid workbook over the question-index limits.
+
+    A small workbook (False) keeps the existing native path; any other rejection also
+    returns False so the existing path keeps failing closed exactly as before.
+    """
+    try:
+        read_xlsx(content)
+    except XlsxIndexLimitExceeded:
+        return True
+    except SourceRejected:
+        return False
+    return False
+
+
+def aggregation_only_result(document: StoredSourceDocument, context: DocumentProcessingContext) -> DocumentUnderstandingResult:
+    """Completed understanding with no question evidence for an aggregation-only workbook.
+
+    No model is called and no cell text is stored: the original stays the only data and is
+    read later only by the data-aggregation generator. The flag lives in the lineage, which
+    complete() stores in understanding_results and index_result() copies to index_versions.
+    """
+    return DocumentUnderstandingResult(document.source_id, document.source_version_id, 'ready',
+        ('vision_llm_understanding', 'parser_ocr_validation', 'evidence_reconciliation'),
+        SemanticUnderstanding(document.filename, AGGREGATION_ONLY_MESSAGE, ()),
+        ParserValidation('', '', '', (), role='validation_only', cell_evidence=()),
+        {'source_format': 'xlsx', 'source_digest': hashlib.sha256(document.content).hexdigest(),
+         'aggregation_only': 'true', 'serialization_version': 'xlsx-structure-v1',
+         'parser_role': 'validation_only', 'prompt_version': 'xlsx-aggregation-only-v1',
+         'policy_version': context.policy_version, 'trace_id': context.trace_id,
+         'reconciliation': 'matched'})
+
+
+def is_aggregation_only_result(result: DocumentUnderstandingResult) -> bool:
+    return result.lineage.get('source_format') == 'xlsx' and result.lineage.get('aggregation_only') == 'true'
+
+
+def validate_aggregation_only_result(result: DocumentUnderstandingResult, original: StoredSourceDocument) -> None:
+    """The flag is accepted only for an empty result whose bound original really is over the limits."""
+    parser = result.parser
+    if (result.status != 'ready' or result.conflict is not None or result.semantic.key_facts
+            or parser.text or parser.markdown or parser.html or parser.pages or parser.page_texts or parser.regions
+            or parser.cell_evidence or parser.block_evidence or parser.slide_evidence or parser.audio_evidence
+            or parser.role != 'validation_only' or original.source_version_id != result.source_version_id
+            or result.lineage.get('source_digest') != hashlib.sha256(original.content).hexdigest()
+            or not xlsx_source_format(original.filename, original.content_type)
+            or not xlsx_aggregation_only(original.content)):
+        raise DocumentUnderstandingError('UNDERSTANDING_RESULT_MISMATCH', status=409)
 
 def _generation_schema(workbook):
     # Literal syntax choices only, not semantic ranking or evidence generation.

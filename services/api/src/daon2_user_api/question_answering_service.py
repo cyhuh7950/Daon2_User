@@ -1079,9 +1079,10 @@ class QuestionAnsweringService:
         Database failures and other repository errors still propagate.
         """
         ready: list[QuestionInputSource] = []
+        aggregation_only = 0
         for item in sources:
             try:
-                self._repository.load_ready_source(
+                loaded = self._repository.load_ready_source(
                     context, item.source_id, item.source_version_id,
                 )
             except QuestionRepositoryError as error:
@@ -1090,7 +1091,13 @@ class QuestionAnsweringService:
                 if error.code == "QUESTION_SOURCE_UNAVAILABLE":
                     continue
                 raise
+            if getattr(loaded, "aggregation_only", False) is True:
+                # WO-N9: 집계 전용 표는 근거가 없으므로 질문 근거에서 뺀다.
+                aggregation_only += 1
+                continue
             ready.append(item)
+        if aggregation_only and not ready:
+            raise QuestionAnsweringError("SOURCE_AGGREGATION_ONLY", status=409)
         return tuple(ready)
 
     def prepare_authorization(

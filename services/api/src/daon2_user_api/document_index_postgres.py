@@ -126,6 +126,8 @@ class PostgresDocumentIndex:
         block_source = result.lineage.get('source_format') == 'docx'
         slide_source = result.lineage.get('source_format') == 'pptx'
         audio_source = result.lineage.get('source_format') == 'wav'
+        # WO-N9 집계 전용 XLSX: 근거 구간 0개로 색인판만 만들고 판을 준비 완료로 바꾼다.
+        aggregation_only = cell_source and result.lineage.get('aggregation_only') == 'true'
         if not page_texts and not cell_source and not block_source and not slide_source and not audio_source:
             raise DocumentUnderstandingError("PAGE_EVIDENCE_UNAVAILABLE", status=409)
 
@@ -190,7 +192,11 @@ class PostgresDocumentIndex:
                     'source_version_id': result.source_version_id, 'page': 1, 'text': block['text'],
                     'evidence_span_id': self._opaque_id('span', chunk_id, block['locator_value']),
                     'evidence_kind': 'pptx_block_fact', 'locator_value': block['locator_value']})
-        if cell_source:
+        if aggregation_only:
+            if (result.semantic.key_facts or result.parser.cell_evidence or result.parser.pages or result.parser.page_texts
+                    or result.parser.regions or result.parser.text or result.parser.markdown or result.parser.html):
+                raise DocumentUnderstandingError('UNDERSTANDING_RESULT_MISMATCH', status=409)
+        elif cell_source:
             from .xlsx_document_understanding import validate_cell_evidence
             validate_cell_evidence(result.parser.cell_evidence, result.semantic.key_facts)
             if result.parser.pages or result.parser.page_texts or result.parser.regions:
@@ -263,7 +269,7 @@ class PostgresDocumentIndex:
                     "evidence_span_id": evidence_span_id,
                     "evidence_kind": "parser_page_grounded_fallback",
                 })
-        if not chunks:
+        if not chunks and not aggregation_only:
             raise DocumentUnderstandingError("DOCUMENT_SEMANTIC_CHUNKS_EMPTY", status=409)
 
         try:
@@ -343,7 +349,7 @@ class PostgresDocumentIndex:
                         raise DocumentUnderstandingError('UNDERSTANDING_RESULT_MISMATCH', status=409)
                 if cell_source or isinstance(canonical_lineage, dict) and canonical_lineage.get('source_format') == 'xlsx':
                     parser_payload = understanding_payload.get('parser_validation')
-                    if not cell_source or understanding_payload.get('source_version_id') != result.source_version_id or not isinstance(parser_payload, dict) or parser_payload.get('cell_evidence') != list(result.parser.cell_evidence) or canonical_lineage != dict(result.lineage) or any(not re.fullmatch(r'[0-9a-f]{64}', str(result.lineage.get(key, ''))) for key in ('source_digest', 'native_input_digest')) or result.lineage.get('reconciliation') != 'matched':
+                    if not cell_source or understanding_payload.get('source_version_id') != result.source_version_id or not isinstance(parser_payload, dict) or parser_payload.get('cell_evidence') != list(result.parser.cell_evidence) or canonical_lineage != dict(result.lineage) or any(not re.fullmatch(r'[0-9a-f]{64}', str(result.lineage.get(key, ''))) for key in (('source_digest',) if aggregation_only else ('source_digest', 'native_input_digest'))) or result.lineage.get('reconciliation') != 'matched':
                         raise DocumentUnderstandingError('UNDERSTANDING_RESULT_MISMATCH', status=409)
                     extraction = connection.execute(
                         'SELECT canonical_json FROM extraction_evidence WHERE source_version_id=%s AND understanding_result_id=%s ORDER BY created_at DESC,record_id DESC LIMIT 1',

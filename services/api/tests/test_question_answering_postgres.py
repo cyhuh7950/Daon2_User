@@ -537,7 +537,7 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                     CREATE TABLE sources(tenant_id,workspace_id,record_id,state,canonical_json);
                     CREATE TABLE source_versions(tenant_id,workspace_id,record_id,source_id,object_id,version,canonical_json);
                     CREATE TABLE object_records(tenant_id,workspace_id,object_id,content_type,status);
-                    CREATE TABLE index_versions(tenant_id,workspace_id,source_version_id);
+                    CREATE TABLE index_versions(tenant_id,workspace_id,source_version_id,canonical_json DEFAULT '{}');
                     CREATE TABLE deletion_requests(tenant_id,workspace_id,source_id,source_active);
                     CREATE TABLE notebook_bindings(tenant_id,workspace_id,notebook_id,binding_kind,record_id,version_id);
                     CREATE TABLE notebook_source_unbindings(tenant_id,workspace_id,notebook_id,source_id,source_version_id);
@@ -547,7 +547,7 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                 self.db.execute('INSERT INTO sources VALUES(?,?,?,?,?)', (*scope, 'source-cp3', 'ready', json.dumps({'kind': 'uploaded'})))
                 self.db.execute('INSERT INTO source_versions VALUES(?,?,?,?,?,?,?)', (*scope, 'source-version-cp3', 'source-cp3', 'object-xlsx', 1, json.dumps({'filename': 'qa.xlsx'})))
                 self.db.execute('INSERT INTO object_records VALUES(?,?,?,?,?)', (*scope, 'object-xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'completed'))
-                self.db.execute('INSERT INTO index_versions VALUES(?,?,?)', (*scope, 'source-version-cp3'))
+                self.db.execute('INSERT INTO index_versions VALUES(?,?,?,?)', (*scope, 'source-version-cp3', json.dumps({'lineage': {'source_format': 'xlsx'}})))
                 self.db.execute('INSERT INTO notebook_bindings VALUES(?,?,?,?,?,?)', (*scope, 'notebook-cp3', 'source', 'source-cp3', 'source-version-cp3'))
             def execute(self, sql, params=()):
                 cursor = self.db.execute(sql.replace('%s', '?'), params)
@@ -592,8 +592,13 @@ class PostgresQuestionAnsweringRepositoryTests(unittest.TestCase):
                         if pptx:
                             filename, mime = 'qa.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
                         self.assertEqual((source.source_id, source.source_version_id, source.filename), ('source-cp3', 'source-version-cp3', filename))
-                        self.assertEqual(connection.rows[-1], ('source-cp3', 'source-version-cp3', 'ready', filename, 'uploaded', mime, 'completed'))
-                        self.assertEqual(connection.columns[-2:], ('content_type', 'status'))
+                        self.assertEqual(connection.rows[-1], ('source-cp3', 'source-version-cp3', 'ready', filename, 'uploaded', mime, 'completed', 0))
+                        self.assertEqual(connection.columns[5:7], ('content_type', 'status'))
+                        self.assertFalse(source.aggregation_only)
+                        # WO-N9: 색인판 계보의 집계 전용 표시를 실제 SELECT가 읽는다.
+                        connection.db.execute('UPDATE index_versions SET canonical_json=?', (json.dumps({'lineage': {'source_format': 'xlsx', 'aggregation_only': 'true'}}),))
+                        self.repository.load_ready_source(selected_context, 'source-cp3', 'source-version-cp3')
+                        self.assertEqual(connection.rows[-1][7], 1)
                     else:
                         with self.assertRaisesRegex(QuestionRepositoryError, '^QUESTION_SOURCE_UNAVAILABLE$'):
                             self.repository.load_ready_source(selected_context, 'source-cp3', 'source-version-cp3')

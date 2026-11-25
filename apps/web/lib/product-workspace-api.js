@@ -289,6 +289,13 @@ function withoutMemoOrigin(source) {
     && typeof origin.memo_exists === "boolean" ? rest : null;
 }
 
+// 데이터 집계에만 쓰는 큰 표(WO-N9)에만 aggregation_only: true가 붙는다. 다른 값이면 null.
+function withoutAggregationOnly(source) {
+  if (!source || typeof source !== "object" || !Object.hasOwn(source, "aggregation_only")) return source;
+  const { aggregation_only: flag, ...rest } = source;
+  return flag === true ? rest : null;
+}
+
 export async function listWorkspaceSources(workspaceId, { notebookId, websiteSourceVersionId, includeFailureReason = false, fetchImpl = fetch, signal } = {}) {
   const workspace = requiredWorkspace(workspaceId, "SOURCE_LIST_INPUT_INVALID");
   const notebook = requiredWorkspace(notebookId, "SOURCE_LIST_INPUT_INVALID");
@@ -306,7 +313,7 @@ export async function listWorkspaceSources(workspaceId, { notebookId, websiteSou
     && Array.isArray(payload.data.sources)
     && payload.data.sources.length <= 1_000
     && validMeta(payload.meta, workspace)
-    && payload.data.sources.map(withoutMemoOrigin).every((source) => source !== null && (exact(source, SOURCE_KEYS)
+    && payload.data.sources.map(withoutMemoOrigin).map(withoutAggregationOnly).every((source) => source !== null && (exact(source, SOURCE_KEYS)
       || (exact(source, [...SOURCE_KEYS, "safe_error_code"]) && typeof source.safe_error_code === "string" && /^[A-Z][A-Z0-9_]{2,63}$/u.test(source.safe_error_code))
       || (websiteSourceVersionId !== undefined && source.source_version_id === websiteSourceVersionId
         && exact(source, [...SOURCE_KEYS, "website"]) && source.source_state === "ready"

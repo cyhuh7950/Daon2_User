@@ -65,6 +65,8 @@ class ReadyQuestionSource:
     source_id: str
     source_version_id: str
     filename: str
+    # WO-N9: 질문 색인 한도를 넘어 근거 없이 완료된 XLSX(데이터 집계에만 쓴다).
+    aggregation_only: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -813,7 +815,11 @@ class PostgresQuestionAnsweringRepository:
                 row = connection.execute(
                     "SELECT s.record_id,sv.record_id,s.state,"
                     "COALESCE(sv.canonical_json->>'filename',s.canonical_json->>'filename',sv.record_id),"
-                    "s.canonical_json->>'kind',o.content_type,o.status FROM sources s JOIN source_versions sv ON "
+                    "s.canonical_json->>'kind',o.content_type,o.status,"
+                    "EXISTS (SELECT 1 FROM index_versions agg WHERE agg.tenant_id=sv.tenant_id "
+                    "AND agg.workspace_id=sv.workspace_id AND agg.source_version_id=sv.record_id "
+                    "AND agg.canonical_json->'lineage'->>'aggregation_only'='true') "
+                    "FROM sources s JOIN source_versions sv ON "
                     "sv.tenant_id=s.tenant_id AND sv.workspace_id=s.workspace_id "
                     "AND sv.source_id=s.record_id LEFT JOIN object_records o ON "
                     "o.tenant_id=sv.tenant_id AND o.workspace_id=sv.workspace_id "
@@ -841,23 +847,24 @@ class PostgresQuestionAnsweringRepository:
         if row is None:
             raise QuestionRepositoryError("QUESTION_SOURCE_UNAVAILABLE", status=404)
         filename = str(row[3])
-        xlsx_ready = (filename.lower().endswith('.xlsx') and len(row) == 7
+        xlsx_ready = (filename.lower().endswith('.xlsx') and len(row) >= 7
             and str(row[5]) == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             and str(row[6]) == 'completed')
-        docx_ready = (filename.lower().endswith('.docx') and len(row) == 7
+        docx_ready = (filename.lower().endswith('.docx') and len(row) >= 7
             and str(row[5]) == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             and str(row[6]) == 'completed')
-        pptx_ready = (filename.lower().endswith('.pptx') and len(row) == 7
+        pptx_ready = (filename.lower().endswith('.pptx') and len(row) >= 7
             and str(row[5]) == 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
             and str(row[6]) == 'completed')
-        audio_ready = (filename.lower().endswith('.wav') and len(row) == 7
+        audio_ready = (filename.lower().endswith('.wav') and len(row) >= 7
             and str(row[5]) == 'audio/wav' and str(row[6]) == 'completed')
         if str(row[2]) != "ready" or (
             str(row[4]) != "studio_output"
             and not (filename.lower().endswith((".pdf", ".txt", ".md", ".csv", ".png", ".jpg", ".jpeg")) or xlsx_ready or docx_ready or pptx_ready or audio_ready)
         ):
             raise QuestionRepositoryError("QUESTION_SOURCE_UNAVAILABLE", status=404)
-        return ReadyQuestionSource(str(row[0]), str(row[1]), filename)
+        return ReadyQuestionSource(str(row[0]), str(row[1]), filename,
+                                   aggregation_only=xlsx_ready and len(row) >= 8 and row[7] is True)
 
     def read_current_pdf(
         self, context: QuestionContext, source_id: str, source_version_id: str,
