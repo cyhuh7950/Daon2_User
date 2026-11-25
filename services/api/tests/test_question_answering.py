@@ -1488,3 +1488,21 @@ class CitationReconcileTests(unittest.TestCase):
     def test_corrected_citations_still_need_to_support_every_number(self) -> None:
         with self.assertRaisesRegex(ValueError, "^TEXT_GENERATION_GROUNDING_INVALID$"):
             self._generate({"answer": "협상적격자는 기술평가 90% 이상이다.", "cited_chunk_ids": [self.A.upper()], "insufficient": False})
+
+
+class CitationReconcileLabelLineTests(unittest.TestCase):
+    """N1-B14 실서버: 본문 끝 '인용된 근거: <ID>, <ID>'에서 ID만 지워져 '인용된 근거: , , ,'가 남았다."""
+
+    def test_empty_citation_label_line_is_removed(self) -> None:
+        from daon2_user_api.question_answering import reconcile_citations
+        a, b = "ext-" + "a1b2c3d4" * 4, "chunk-a72cd9210f48b63e"
+        answer = f"제안서는 PDF로 제출한다.\n\n인용된 근거: {a}, {b}, [{b}]"
+        cleaned, cited = reconcile_citations(answer, (a, b), {a, b})
+        self.assertEqual(cleaned, "제안서는 PDF로 제출한다.")
+        self.assertEqual(cited, (a, b))
+
+    def test_label_line_with_real_content_stays(self) -> None:
+        from daon2_user_api.question_answering import reconcile_citations
+        b = "chunk-a72cd9210f48b63e"
+        cleaned, _ = reconcile_citations(f"근거: 제3조 {b}", (b,), {b})
+        self.assertEqual(cleaned, "근거: 제3조")

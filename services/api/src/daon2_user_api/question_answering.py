@@ -95,6 +95,10 @@ def reconcile_citations(answer: str, cited: tuple[str, ...], allowed: set[str]) 
         cleaned = re.sub(rf"(?<![\w-]){re.escape(item)}(?![\w-])", "", cleaned)
     if cleaned != answer:
         cleaned = re.sub(r"[(\[（【][\s,，]*[)\]）】]", "", cleaned)
+        # ID를 지운 뒤 '인용된 근거: , , ,'처럼 표지만 남은 줄은 통째로 지운다(내용이 있는 줄은 그대로).
+        cleaned = re.sub(r"(?m)^[^\n:：]{0,20}(?:출처|근거|증거|참고|문헌|자료|citations?|sources?)[ \t]*[:：][\s,，]*$", "", cleaned)
+        cleaned = re.sub(r"[ \t]+(?=\n)", "", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
     return cleaned, tuple(fixed)
 
