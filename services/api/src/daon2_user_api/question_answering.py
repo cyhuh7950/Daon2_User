@@ -848,6 +848,8 @@ class OllamaTextGenerationAdapter:
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
         answer = strip_citation_labels(answer, allowed)
+        # 후속 A-2: N1-B14 보정(잘못 옮겨 적은 근거 ID 바로잡기·본문의 내부 ID 지우기)을 Ollama 경로에도 적용한다.
+        answer, cited = reconcile_citations(answer, cited, allowed)
         cited_text = "\n".join(
             item.text for item in request.evidence if item.chunk_id in set(cited)
         )

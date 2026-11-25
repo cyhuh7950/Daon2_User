@@ -16,7 +16,7 @@ from typing import ContextManager, Mapping, Protocol, cast
 from .answer_process import blocked_answer_process, build_answer_process, policy_ref
 from .data_canon import canonical_json_bytes
 from .document_processing import DocumentProcessingContext
-from .question_answering import strip_citation_labels
+from .question_answering import reconcile_citations, strip_citation_labels
 from .question_external_evidence import (
     ANSWER_FORMAT_RULE, ANSWER_RETRY_RULE, LOCAL_LIMIT_WITH_EXTERNAL, PLAN_OUTPUT_TOKENS, PRIORITY_RULE, ExternalEvidence, ExternalEvidenceError, append_system_rule, build_plan_prompt, run_planned,
     default_requests, merge_evidence, parse_plan, rewrite_plan_payload, FACTS_SYSTEM, build_facts_prompt, parse_facts,
@@ -321,6 +321,8 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
         answer = strip_citation_labels(answer, allowed)
+        # 후속 A-2: N1-B14 보정을 OmniRoute 경로에도 적용한다(근거 검증은 그대로).
+        answer, cited = reconcile_citations(answer, cited, allowed)
         cited_text = "\n".join(item.text for item in request.evidence if item.chunk_id in set(cited))
         if (
             not answer or len(answer) > 8_000 or len(cited) != len(set(cited))
