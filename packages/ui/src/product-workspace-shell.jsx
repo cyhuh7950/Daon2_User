@@ -2064,6 +2064,11 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     }
   }, [modalView, manualManifest, manualDocument, manualPending, manualSafeError]); // eslint-disable-line react-hooks/exhaustive-deps
   const manualTocItems = manualDocument ? filterManualToc(manualToc(manualDocument.text), manualSearch) : [];
+  // 지금 읽는 절이 바뀌면 왼쪽 목차에서도 그 항목이 보이게 한다(목차 칸 안에서만 움직임).
+  useEffect(() => {
+    if (!manualActive) return;
+    globalThis.document?.querySelector(`.manual-toc button[data-section="${manualActive}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [manualActive]);
   const openManualSection = (id) => {
     setManualActive(id);
     manualReaderRef.current?.querySelector(`[id="${id}"]`)?.scrollIntoView({ block: "start" });
@@ -2658,7 +2663,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 </nav>
                 {manualDocument ? <nav className="manual-toc" aria-label="설명서 목차">
                   {manualTocItems.length ? <ol>{manualTocItems.map((item) => <li key={item.id} data-level={item.level}>
-                    <button type="button" aria-current={manualActive === item.id ? "location" : undefined} onClick={() => openManualSection(item.id)}>{item.title}</button>
+                    <button type="button" data-section={item.id} aria-current={manualActive === item.id ? "location" : undefined} onClick={() => openManualSection(item.id)}>{item.title}</button>
                   </li>)}</ol> : <p>찾는 절이 없습니다.</p>}
                 </nav> : null}
               </div>
