@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import zipfile
+from html import escape as html_escape
 from dataclasses import dataclass
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -35,7 +36,7 @@ MEDIA = {
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pdf": "application/pdf", "mp3": "audio/mpeg", "mp4": "video/mp4", "vtt": "text/vtt; charset=utf-8", "png": "image/png", "svg": "image/svg+xml", "json": "application/json",
-    "csv": "text/csv; charset=utf-8", "md": "text/markdown; charset=utf-8", "txt": "text/plain; charset=utf-8",
+    "csv": "text/csv; charset=utf-8", "html": "text/html; charset=utf-8", "md": "text/markdown; charset=utf-8", "txt": "text/plain; charset=utf-8",
 }
 
 
@@ -411,9 +412,19 @@ def render_pdf(output: Mapping[str, Any]) -> bytes:
 _RENDERERS: dict[tuple[str, str | None], Any] = {}
 
 
-def register_renderer(format_name: str, renderer, *, type_id: str | None = None) -> None:
-    """renderer(stem, output) -> StudioV2Export. type_id가 있으면 그 유형에만 적용된다."""
+_OPTION_RENDERERS: set[tuple[str, str | None]] = set()
+
+
+def register_renderer(format_name: str, renderer, *, type_id: str | None = None, options: bool = False) -> None:
+    """renderer(stem, output) -> StudioV2Export. type_id가 있으면 그 유형에만 적용된다.
+
+    options=True면 renderer(stem, output, include_sources=...)로 내려받기 옵션을 키워드로 받는다.
+    """
     _RENDERERS[(format_name, type_id)] = renderer
+    if options:
+        _OPTION_RENDERERS.add((format_name, type_id))
+    else:
+        _OPTION_RENDERERS.discard((format_name, type_id))
 
 
 def _json_renderer(stem, output):  # type: ignore[no-untyped-def]
@@ -460,18 +471,52 @@ register_renderer("pptx", _authored_pptx_renderer, type_id="authored_document")
 register_renderer("pptx", _slides_pptx_renderer, type_id="slides")
 
 
+def _sources_html(evidence: Sequence[Mapping[str, Any]]) -> str:
+    items = "".join(
+        "<li>[{}] {}{}</li>".format(
+            html_escape(str(e.get("ref_id") or ""), quote=True),
+            html_escape(str(e.get("source_name") or e.get("origin") or ""), quote=True),
+            (" · " + html_escape(_where(e), quote=True)) if _where(e) else "")
+        for e in evidence)
+    return f"<section><h2>출처</h2><ol>{items}</ol></section>"
+
+
+def _web_page_html_renderer(stem, output, include_sources=True):  # type: ignore[no-untyped-def]
+    """저장된 완성 HTML에서 연결 스크립트만 빼고, 선택하면 출처 목록을 덧붙인다.
+
+    sanitize_html은 모든 script를 지우므로, 고정 동작 스크립트를 먼저 빼고 정리한 뒤 다시 붙인다.
+    결과: CSP 유지, 동작 스크립트 있음, 연결 스크립트 없음, 외부 주소 없음.
+    """
+    from . import studio_web_page as page
+    body = _content(output).get("body") or {}
+    stored = body.get("html") if isinstance(body, Mapping) else None
+    if not isinstance(stored, str) or not stored.strip():
+        raise StudioError("RESOURCE_UNAVAILABLE", 404)
+    text = page.strip_bridge(stored).replace(page.BEHAVIOR_SCRIPT, "")
+    evidence = [e for e in (output.get("evidence") or []) if isinstance(e, Mapping)]
+    if include_sources and evidence:
+        text = page._insert_before_body_end(text, _sources_html(evidence))
+    return _bundle(stem, "html", page.attach_behavior(page.sanitize_html(text)).encode("utf-8"))
+
+
+register_renderer("html", _web_page_html_renderer, type_id="web_page", options=True)
+
+
 def export_asset(stem: str, extension: str, body: bytes) -> StudioV2Export:
     """저장된 자산(mp3 등)을 내려받기 형식으로 감싼다."""
     return _bundle(stem, extension, body)
 
 
-def export_v2(format_name: str, output: Mapping[str, Any]) -> StudioV2Export:
+def export_v2(format_name: str, output: Mapping[str, Any], *, include_sources: bool = True) -> StudioV2Export:
     """output은 PostgresStudioV2Repository.get_output() 결과(최신 또는 지정 리비전)."""
     if not output.get("revision"):
         raise StudioError("RESOURCE_UNAVAILABLE", 404)
     stem = safe_stem(str(output.get("title", "")))
     type_id = str(output["type_id"])
-    renderer = _RENDERERS.get((format_name, type_id)) or _RENDERERS.get((format_name, None))
+    key = (format_name, type_id) if (format_name, type_id) in _RENDERERS else (format_name, None)
+    renderer = _RENDERERS.get(key)
     if renderer is None:
         raise StudioError("EXPORT_FORMAT_UNSUPPORTED", 400)
+    if key in _OPTION_RENDERERS:
+        return renderer(stem, output, include_sources=include_sources)
     return renderer(stem, output)

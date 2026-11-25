@@ -35,7 +35,7 @@ STUDIO_V2_PUBLIC_CODES = frozenset({
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TURN_ID = re.compile(r"^svt-[0-9a-f]{32}$")
-_EXPORT_FORMATS = frozenset({"docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt"})
+_EXPORT_FORMATS = frozenset({"docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "html", "mp3", "wav", "mp4", "vtt"})
 
 
 class _Strict(BaseModel):
@@ -311,7 +311,8 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
 
     @app.get(base + "/outputs/{output_id}/exports/{format_name}")
     async def studio_v2_export(id: str, notebook_id: str, output_id: str, format_name: str, request: Request) -> Response:
-        _require_query_keys(request, frozenset({"revision"}))
+        _require_query_keys(request, frozenset({"revision", "include_sources"}))
+        include_sources = request.query_params.get("include_sources") != "0"
         if format_name not in _EXPORT_FORMATS:
             raise HTTPException(status_code=400)
         ctx = _ctx(request, id, notebook_id, Action.VIEW)  # 기본은 승인·step-up 없음(D2). 조직이 내보내기 추가 인증을 켠 경우에만 요구한다(ST-T27).
@@ -322,8 +323,8 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
             dependencies.identity_service.consume_step_up(
                 step_up_authorization=request.headers.get("x-daon-step-up-authorization"), access_token=access_token,
                 action_group=EXPORT_STEP_UP_GROUP, target_id=output_id, policy_version=dependencies.settings.policy_version, trace_id=request.state.trace_id)
-        exported = await run(service.export, ctx, _output_id(output_id), format_name, _revision(request))
-        _audit(ctx, "studio_v2.output.export", output_id, metadata={"notebook_id": notebook_id, "format": format_name})
+        exported = await run(service.export, ctx, _output_id(output_id), format_name, _revision(request), include_sources)
+        _audit(ctx, "studio_v2.output.export", output_id, metadata={"notebook_id": notebook_id, "format": format_name, "include_sources": include_sources})
         return Response(exported.content, media_type=exported.media_type, headers={
             "Content-Disposition": f'attachment; filename="{exported.ascii_filename}"; filename*=UTF-8\'\'{exported.quoted_filename}',
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", "ETag": f'"sha256:{exported.sha256}"'})

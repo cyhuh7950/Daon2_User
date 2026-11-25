@@ -68,7 +68,7 @@ class StudioV2Service(PostgresStudioV2Repository):
             if self._knowledge_stale.get((context.tenant_id, context.workspace_id, str(item.get("output_id")))):
                 item["stale"] = True
 
-    def export(self, context: StudioContext, output_id: str, format_name: str, revision: int | None) -> StudioV2Export:
+    def export(self, context: StudioContext, output_id: str, format_name: str, revision: int | None, include_sources: bool = True) -> StudioV2Export:
         output = self.get_output(context, output_id, revision)
         spec = STUDIO_V2_TYPES[str(output["type_id"])]
         if format_name not in spec.export_formats:
@@ -91,7 +91,7 @@ class StudioV2Service(PostgresStudioV2Repository):
                 return export_asset(stem, "vtt", render_vtt(content.get("body") or {}))
             asset = self.get_asset(context, output_id, format_name)
             return export_asset(stem, format_name, asset["content"])  # type: ignore[arg-type]
-        return export_v2(format_name, output)
+        return export_v2(format_name, output, include_sources=include_sources)
 
     def get_media(self, context: StudioContext, output_id: str, type_id: str) -> dict[str, object]:
         """오디오·동영상 개요의 재생용 자산(mp3·mp4). 완료된 해당 유형 산출물만."""
