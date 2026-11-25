@@ -2124,11 +2124,13 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
       <header className="workspace-header workspace-app-bar">
         <div className="workspace-brand"><span className="daon-mark" aria-hidden="true">D</span><div><h1>{notebookTitle || "Workspace"}</h1></div></div>
         <div className="workspace-app-actions">
-          <span className={`workspace-status status-${viewState.status}`} role="status" data-cloud-status={operationsStatus?.overall_status ?? "unknown"}><span className="status-dot" aria-hidden="true" />{sourceCompactState}<span className="status-connection"> · {cloudCompactState}</span></span>
+          <span className={`workspace-status status-${viewState.status}`} role="status" title={`${sourceCompactState} · ${cloudCompactState}`} data-cloud-status={operationsStatus?.overall_status ?? "unknown"}><span className="status-dot" aria-hidden="true" /><span className="status-text">{sourceCompactState}<span className="status-connection"> · {cloudCompactState}</span></span></span>
           {adapter?.studioV2 ? <NotebookTools studio={adapter.studioV2} title={notebookTitle ?? ""} counts={{ sources: Array.isArray(viewState.sources) ? viewState.sources.length : undefined }} onOpenChatSettings={() => openModal("llm", settingsButtonRef.current)} /> : null}
-          <button type="button" onClick={(event) => openModal("operations", event.currentTarget)}>운영상태</button>
+          <button type="button" aria-label="운영상태" title="운영상태" onClick={(event) => openModal("operations", event.currentTarget)}>
+            <StudioIcon name="chart" size={18} className="app-action-icon" /><span className="app-action-label">운영상태</span></button>
           <div className="settings-menu-anchor">
-            <button ref={settingsButtonRef} type="button" aria-haspopup="menu" aria-expanded={settingsMenuOpen} onClick={() => setSettingsMenuOpen((open) => !open)}>설정</button>
+            <button ref={settingsButtonRef} type="button" aria-label="설정" title="설정" aria-haspopup="menu" aria-expanded={settingsMenuOpen} onClick={() => setSettingsMenuOpen((open) => !open)}>
+              <StudioIcon name="settings_sliders" size={18} className="app-action-icon" /><span className="app-action-label">설정</span></button>
             {settingsMenuOpen ? <div className="settings-menu" role="menu" aria-label="Workspace 설정">
               <button type="button" role="menuitem" onClick={() => openModal("llm", settingsButtonRef.current)}><StudioIcon name={ICON_NAMES.model} size={18} className="menu-icon" /><span><strong>LLM 설정</strong><small>Provider와 모델 연결</small></span></button>
               <button type="button" role="menuitem" onClick={() => openModal("output-version", settingsButtonRef.current)}><StudioIcon name={ICON_NAMES.output} size={18} className="menu-icon" /><span><strong>출력·버전</strong><small>기본 형식과 저장 정책</small></span></button>
