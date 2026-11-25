@@ -54,3 +54,7 @@ test("하단 탭 자리는 작업 화면 아래 여백 한 곳에서만 잡는�
   // 1023px 이하 규칙의 칸 묶음 padding-bottom: 52px와 820px 이하 화면 padding-bottom: 64px가 겹쳐 칸 아래에 약 60px 빈 띠가 생겼다.
   assert.match(rule('.adaptive-workspace .workspace-panes[data-layout="source-conversation-studio"]'), /padding-bottom:\s*0/u);
 });
+
+test("하단 탭이 있는 좁은 화면에서는 왼쪽 아래 상태 점을 탭 위로 올려 'Source' 탭 글자와 겹치지 않는다", () => {
+  assert.match(narrow, /body:has\(\.workspace-bottom-tabs\) \.web-shell-runtime \{[^}]*bottom:\s*calc\(\s*6\dpx/u);
+});
