@@ -243,8 +243,12 @@ export async function issueExportStepUp(outputId, password, { signal, fetchImpl 
   return payload.data.step_up_authorization;
 }
 
-export async function downloadStudioExport(workspaceId, outputId, format, { notebookId, revision, stepUp, signal, fetchImpl } = {}) {
-  const suffix = revision ? `?revision=${encodeURIComponent(revision)}` : "";
+export async function downloadStudioExport(workspaceId, outputId, format, { notebookId, revision, includeSources, stepUp, signal, fetchImpl } = {}) {
+  const query = new URLSearchParams();
+  if (revision) query.set("revision", String(revision));
+  // 웹 페이지 HTML 내려받기(WO-N8): 출처 목록을 넣을지(1) 뺄지(0).
+  if (typeof includeSources === "boolean") query.set("include_sources", includeSources ? "1" : "0");
+  const suffix = query.toString() ? `?${query}` : "";
   const response = await request("GET", `${outputPath(workspaceId, notebookId, outputId)}/exports/${encodeURIComponent(format)}${suffix}`,
     { headers: stepUp ? { "x-daon-step-up-authorization": stepUp } : {}, signal, fetchImpl });
   if (!response.ok) throw await failure(response);

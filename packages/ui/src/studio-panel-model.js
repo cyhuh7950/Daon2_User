@@ -1,6 +1,6 @@
 // Studio v2 패널 모델(순수 함수). WO-S1 T-S1-03. DOM·fetch에 의존하지 않는다.
 
-export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table"]);
+export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "web_page"]);
 const ACTIVE = new Set(["queued", "generating"]);
 export const POLL_ACTIVE_MS = 1500;
 export const POLL_HIDDEN_MS = 10000;
@@ -156,7 +156,15 @@ export function researchProgress(output) {
   return null;
 }
 
-/** 진행 막대 너비(%): 서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */
+const WEB_PAGE_NOTES = new Map([["내용 만드는 중", "studio.progress.web_page.content"], ["페이지 만드는 중", "studio.progress.web_page.html"]]);
+
+/** 웹 페이지(WO-N8) 생성 중 카드 문구 키. 서버 진행 메모가 두 단계 중 하나일 때만, 아니면 null(기존 문구). */
+export function webPageProgressKey(output) {
+  if (output?.type_id !== "web_page" || !ACTIVE.has(output.status)) return null;
+  return WEB_PAGE_NOTES.get(output.progress?.note) ?? null;
+}
+
+/** 진행 막대 너비(%):서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */
 export function progressPercent(output) {
   const pct = output?.progress?.pct ?? output?.progress_pct;
   return Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 20;

@@ -13,7 +13,7 @@ const css = readFileSync(path.join(root, "packages/ui/src/studio-icon.css"), "ut
 const LABELS = {
   audio_overview: "AI 오디오 오버뷰", slides: "슬라이드 자료", video_overview: "동영상 개요",
   mind_map: "마인드맵", report: "보고서", flashcards: "플래시카드", quiz: "퀴즈",
-  infographic: "인포그래픽", data_table: "데이터 표", memo: "메모",
+  infographic: "인포그래픽", data_table: "데이터 표", web_page: "웹 페이지", memo: "메모",
 };
 const SAMPLE_CARDS = [
   { type: "infographic", title: "2026년 AI 혁명과 미래 과제", sub: "소스 97개 · 93일 전" },

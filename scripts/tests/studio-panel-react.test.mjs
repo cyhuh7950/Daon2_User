@@ -73,17 +73,17 @@ const reactProps = (node) => node[Object.keys(node).find((key) => key.startsWith
 const byLabel = (container, label) => findElements(container, (n) => n.getAttribute?.("aria-label") === label)[0];
 const text = (container) => container.textContent;
 
-test("패널은 타일 9종과 산출물 카드를 렌더하고 비활성 타일은 aria-disabled로 표시한다", async () => {
+test("패널은 타일 10종과 산출물 카드를 렌더하고 비활성 타일은 aria-disabled로 표시한다", async () => {
   const studio = fakeStudio();
   const view = await mount(studio);
   try {
     const tiles = findElements(view.container, (n) => n.tagName === "BUTTON" && n.getAttribute("class")?.includes("studio-tile") && !n.getAttribute("class").includes("edit"));
-    assert.equal(tiles.length, 9);
+    assert.equal(tiles.length, 10);
     assert.equal(byLabel(view.container, "보고서").getAttribute("aria-disabled"), "false");
     assert.equal(byLabel(view.container, "오디오 개요").getAttribute("aria-disabled"), "true");
     assert.ok(text(view.container).includes("보고서 1"));
     assert.ok(text(view.container).includes("요약 · 소스 2개"));
-    assert.ok(findElements(view.container, (n) => n.getAttribute?.("role") === "tooltip").length >= 9);
+    assert.ok(findElements(view.container, (n) => n.getAttribute?.("role") === "tooltip").length >= 10);
   } finally { await view.close(); }
 });
 
@@ -667,6 +667,23 @@ test("심층 조사 카드 진행 문구 3단계: 계획 → 찾기 n/m → 작�
   } finally { await view.close(); }
 });
 
+test("웹 페이지 카드 진행 문구: 내용 만드는 중 → 페이지 만드는 중, 다른 메모는 기존 문구(WO-N8 최종 검토 I3)", async () => {
+  const studio = fakeStudio([
+    item({ output_id: OID("1"), title: "웹 1", type_id: "web_page", status: "generating", progress: { pct: 15, note: "내용 만드는 중" } }),
+    item({ output_id: OID("2"), title: "웹 2", type_id: "web_page", status: "generating", progress: { pct: 55, note: "페이지 만드는 중" } }),
+    item({ output_id: OID("3"), title: "웹 3", type_id: "web_page", status: "generating", progress: { pct: 95, note: "검증 완료" } }),
+    item({ output_id: OID("4"), title: "보고 4", type_id: "report", status: "generating", progress: { pct: 55, note: "페이지 만드는 중" } })]);
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    assert.match(cardOf(view.container, "웹 1").textContent, /내용 만드는 중/u);
+    assert.match(cardOf(view.container, "웹 2").textContent, /페이지 만드는 중/u);
+    assert.match(cardOf(view.container, "웹 3").textContent, /생성 중…/u);
+    assert.match(cardOf(view.container, "보고 4").textContent, /생성 중…/u, "웹 페이지가 아니면 웹 페이지 문구를 쓰지 않는다");
+    assert.ok(buttonByText(cardOf(view.container, "웹 1"), "취소"));
+  } finally { await view.close(); }
+});
+
 test("진행 문구가 없거나 조사 형식이 아니면 기존 문구를 그대로 쓰고, 폴링으로 단계가 바뀌면 문구도 바뀐다", async () => {
   const studio = fakeStudio([
     item({ output_id: OID("1"), title: "일반 보고서", status: "generating", progress: null }),
@@ -790,4 +807,67 @@ test("조사 보고서가 아니면(research 없음) 사용한 자료를 그리�
     assert.equal(findElements(view.container, (n) => n.tagName === "SECTION" && n.getAttribute?.("aria-label") === "사용한 자료")[0], undefined);
     assert.deepEqual(findElements(view.container, (n) => n.getAttribute?.("class") === "studio-ref").map((n) => n.textContent), ["[1]"]);
   } finally { await view.close(); }
+});
+
+// 웹 페이지 보기(WO-N8): 상세 본문은 web_page일 때만 칸 배치 클래스를 받는다(다른 유형 배치는 그대로).
+test("웹 페이지 상세만 본문에 web_page 칸 배치 클래스를 붙인다", async () => {
+  const page = item({ output_id: OID("e"), type_id: "web_page", title: "웹 페이지 1" });
+  const studio = fakeStudio([page, item()]);
+  const base = studio.getOutput;
+  studio.getOutput = async (id) => id === OID("e")
+    ? { ...page, settings: {}, assets: [], evidence: [], revision: { content: { body: { title: "페이지", request: "r", sections: [], html: "<!DOCTYPE html><p>x</p>" }, warnings: [] } } }
+    : base(id);
+  const view = await mount(studio);
+  const bodyClass = () => findElements(view.container, (n) => n.getAttribute?.("class")?.startsWith("studio-detail__body"))[0]?.getAttribute("class");
+  try {
+    await view.click(byLabel(view.container, "열기: 웹 페이지 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.equal(bodyClass(), "studio-detail__body studio-detail__body--web-page");
+    await view.click(byLabel(view.container, "목록으로"));
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.equal(bodyClass(), "studio-detail__body");
+  } finally { await view.close(); }
+});
+
+test("html 내려받기 메뉴의 '출처 목록 넣기'는 menuitemcheckbox이고 클릭·Enter·Space로 바뀌어 내려받기에 실린다", async () => {
+  const page = item({ output_id: OID("e"), type_id: "web_page", title: "웹 페이지 1" });
+  const studio = fakeStudio([page]);
+  studio.exportFormats = () => ["html"];
+  studio.getOutput = async () => ({ ...page, settings: {}, assets: [], evidence: [], revision: { content: { body: { title: "페이지", sections: [], html: "<p>x</p>" }, warnings: [] } } });
+  const downloads = [];
+  studio.downloadExport = async (id, format, options) => { downloads.push([id, format, options]); return { bytes: new Uint8Array([60]), contentType: "text/html", disposition: "" }; };
+  const priorCreate = globalThis.URL.createObjectURL; const priorRevoke = globalThis.URL.revokeObjectURL;
+  globalThis.URL.createObjectURL = () => "blob:fake"; globalThis.URL.revokeObjectURL = () => {};
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "열기: 웹 페이지 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await view.click(buttonByText(view.container, "다운로드"));
+    const check = () => findElements(view.container, (n) => n.getAttribute?.("role") === "menuitemcheckbox")[0];
+    assert.ok(check(), "menuitemcheckbox가 있다");
+    assert.ok(check().textContent.includes("출처 목록 넣기"));
+    assert.equal(check().getAttribute("aria-checked"), "true");
+    assert.equal(check().getAttribute("tabindex") ?? check().getAttribute("tabIndex"), "0");
+    await view.click(check());
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    const key = async (name) => { let prevented = false; await view.act(async () => reactProps(check()).onKeyDown({ key: name, preventDefault() { prevented = true; }, stopPropagation() {} })); return prevented; };
+    assert.equal(await key("Enter"), true);
+    assert.equal(check().getAttribute("aria-checked"), "true");
+    assert.equal(await key(" "), true);
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    assert.equal(await key("Tab"), false);
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    await view.click(findElements(view.container, (n) => n.getAttribute?.("role") === "menuitem" && n.textContent === "HTML")[0]);
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.deepEqual(downloads, [[OID("e"), "html", { includeSources: false }]]);
+    // Escape로 메뉴 닫기는 그대로 동작한다
+    await view.click(buttonByText(view.container, "다운로드"));
+    const menu = findElements(view.container, (n) => n.getAttribute?.("role") === "menu")[0];
+    await view.act(async () => reactProps(menu).onKeyDown({ key: "Escape" }));
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("role") === "menu").length, 0);
+  } finally {
+    globalThis.URL.createObjectURL = priorCreate; globalThis.URL.revokeObjectURL = priorRevoke;
+    await view.close();
+  }
 });

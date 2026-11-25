@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { StudioIcon, STUDIO_TYPE_STYLE } from "./studio-icon.js";
 import {
-  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds,
+  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds, webPageProgressKey,
 } from "./studio-panel-model.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 import { ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDialog, SettingsDialog, ShareDialog } from "./studio-dialogs.jsx";
@@ -60,8 +60,11 @@ function Card({ output, now, waiting = false, outlinePending = false, confirmedO
   let subtitle = cardSubtitle(output, { now });
   // 동시 생성 한도 때문에 시작을 기다리는 산출물은 "대기 중"으로 구분한다(낙관적 카드와 실행 중 카드는 "생성 중").
   // 심층 조사(NB4-U2)는 서버 진행 메모로 단계(계획 → 찾기 n/m → 작성)를 보인다. 조사는 구성 확인을 쓰지 않아 확정 문구와 겹치지 않는다.
+  // 웹 페이지(WO-N8)는 서버 진행 메모로 "내용 만드는 중" → "페이지 만드는 중"을 보인다.
   const research = generating && !waiting ? researchProgress(output) : null;
+  const webPageKey = generating && !waiting ? webPageProgressKey(output) : null;
   if (generating) subtitle = waiting ? msg("studio.card.queued") : research ? msg(`studio.research.progress.${research.step}`, research)
+    : webPageKey ? msg(webPageKey)
     : confirmedOutline ? msg("studio.card.generating_confirmed") : msg("studio.card.generating");
   else if (state === "failed") subtitle = studioErrorMessage(output.error_code) || msg("studio.card.failed");
   else if (state === "cancelled") subtitle = msg("studio.card.cancelled");
@@ -97,6 +100,7 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
   const [output, setOutput] = useState(null);
   const [error, setError] = useState(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [includeSources, setIncludeSources] = useState(true);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -110,7 +114,8 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
   const [stepUp, setStepUp] = useState(null); // { format, pending, error } — 조직이 내보내기 추가 인증을 켠 경우
   const download = async (format, grant) => {
     try {
-      const { bytes, contentType, disposition } = await studio.downloadExport(outputId, format, grant ? { stepUp: grant } : undefined);
+      const options = { ...(grant ? { stepUp: grant } : {}), ...(format === "html" ? { includeSources } : {}) };
+      const { bytes, contentType, disposition } = await studio.downloadExport(outputId, format, Object.keys(options).length ? options : undefined);
       setStepUp(null);
       const blob = new Blob([bytes], { type: contentType });
       const url = globalThis.URL.createObjectURL(blob);
@@ -168,10 +173,15 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
       {exportFormats.length > 0 && !reviewing && <span style={{ position: "relative" }}>
         <button type="button" className="studio-btn" aria-haspopup="menu" aria-expanded={downloadOpen} onClick={() => setDownloadOpen((v) => !v)}>{msg("studio.menu.download")}</button>
         {downloadOpen && <div className="studio-menu" role="menu" style={{ top: 44 }} onKeyDown={(event) => { if (event.key === "Escape") setDownloadOpen(false); }}>
-          {exportFormats.map((format) => <button key={format} type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button>)}</div>}
+          {exportFormats.map((format) => <Fragment key={format}>
+            {format === "html" && <div role="menuitemcheckbox" aria-checked={includeSources} tabIndex={0} className="studio-menu__check"
+              onClick={() => setIncludeSources((value) => !value)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setIncludeSources((value) => !value); } }}>
+              <span className="studio-menu__box" aria-hidden="true" data-checked={includeSources}>{includeSources ? "✓" : ""}</span>{msg("studio.web_page.include_sources")}</div>}
+            <button type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button></Fragment>)}</div>}
       </span>}
     </div>
-    <div className="studio-detail__body">
+    <div className={output?.type_id === "web_page" && !editing ? "studio-detail__body studio-detail__body--web-page" : "studio-detail__body"}>
       {stepUp && <ExportStepUpDialog pending={stepUp.pending} error={stepUp.error} onSubmit={(password) => void submitStepUp(password)} onCancel={() => setStepUp(null)} />}
       {error && <p className="studio-alert" role="alert">{studioErrorMessage(error)}</p>}
       {!output && !error && <p role="status">…</p>}
@@ -298,6 +308,22 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
 
   const stats = { sourceCount: 0, checkedCount: checkedSourceVersionIds.length, readySourceCount: 0, processingCount: 0, ...sourceStats };
   const typeById = new Map(state.types.map((t) => [t.type_id, t]));
+  // 다시 만들기 대화상자: 목록 항목에는 settings가 없으므로 요청 글이 필요한 유형만 출력 상세를 읽어 채운다.
+  const [regenSettings, setRegenSettings] = useState(null);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const regenTarget = dialog?.kind === "regenerate" ? dialog.output : null;
+  const regenNeedsRequest = Boolean(regenTarget && typeById.get(regenTarget.type_id)?.settings_schema?.properties?.page_request);
+  useEffect(() => {
+    setRegenSettings(null);
+    if (!regenTarget || !regenNeedsRequest) { setRegenLoading(false); return undefined; }
+    let alive = true;
+    setRegenLoading(true);
+    Promise.resolve(studio.getOutput(dialog.output.output_id))
+      .then((detail) => { if (alive) setRegenSettings(detail?.settings ?? null); })
+      .catch(() => {})
+      .finally(() => { if (alive) setRegenLoading(false); });
+    return () => { alive = false; };
+  }, [regenTarget?.output_id, regenNeedsRequest]);
 
   const create = async (typeId, { formatId, settings } = {}) => {
     if (stateRef.current.pendingCreate.includes(typeId)) return;
@@ -410,7 +436,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     }} />}
     {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
-    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id }} onCancel={() => setDialog(null)}
+    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: regenSettings?.page_request }} loading={regenLoading} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings, values.formatId); }} />}
     {dialog?.kind === "provenance" && <ProvenanceDialog load={() => studio.getProvenance(dialog.output.output_id)} onClose={() => setDialog(null)}
       onOpenEvidence={(ref) => openEvidence(dialog.output, ref)} onRegenerate={(settings) => { const target = dialog.output; setDialog(null); regenerate(target, settings); }} />}

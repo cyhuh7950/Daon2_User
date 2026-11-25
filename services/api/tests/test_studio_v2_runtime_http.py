@@ -65,8 +65,9 @@ class FakeV2:
         self._record("cancel", ctx, output_id)
         return {"output_id": output_id, "cancel_requested": True}
 
-    def export(self, ctx, output_id, fmt, revision):
+    def export(self, ctx, output_id, fmt, revision, include_sources=True):
         self._record("export", ctx, output_id, fmt, revision)
+        self.include_sources_seen = include_sources
         return StudioV2Export(b"# memo", "text/markdown; charset=utf-8", "memo.md", "memo.md", "0" * 64)
 
     def provenance(self, ctx, output_id, revision=None):
@@ -160,7 +161,7 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
             deleted = await self.client.delete(BASE + "/outputs/" + OID, cookies=self.cookies)
         self.assertEqual([r.status_code for r in (types, created, listed, got, renamed, cancelled, exported, deleted)],
                          [200, 202, 200, 200, 200, 202, 200, 204])
-        self.assertEqual(len(types.json()["data"]["types"]), 11)
+        self.assertEqual(len(types.json()["data"]["types"]), 12)
         self.assertEqual(created.json()["data"], {"output_id": OID, "job_id": "svj-1", "status": "queued"})
         self.assertEqual(self.v2.calls[0][2], {"type_id": "report"})
         self.assertEqual(self.v2.calls[2][3], 2)
@@ -168,6 +169,21 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exported.content, b"# memo")
         self.assertEqual(exported.headers["cache-control"], "no-store")
         self.assertIn("attachment", exported.headers["content-disposition"])
+
+    async def test_route_passes_include_sources_and_audits(self):
+        url = BASE + "/outputs/" + OID + "/exports/html"
+        with self.authenticated():
+            default = await self.client.get(url, cookies=self.cookies)
+            default_seen = self.v2.include_sources_seen
+            off = await self.client.get(url + "?include_sources=0", cookies=self.cookies)
+            off_seen = self.v2.include_sources_seen
+            on = await self.client.get(url + "?include_sources=1", cookies=self.cookies)
+            on_seen = self.v2.include_sources_seen
+        self.assertEqual([r.status_code for r in (default, off, on)], [200, 200, 200])
+        self.assertEqual((default_seen, off_seen, on_seen), (True, False, True))
+        events = self.audit.list(tenant_id="tenant-001", action="studio_v2.output.export", limit=10).items
+        self.assertEqual([e.metadata.get("include_sources") for e in events], [True, False, True])
+        self.assertTrue(all(e.metadata.get("format") == "html" for e in events))
 
     async def test_edit_turn_requires_idempotency_key(self):
         with self.authenticated():

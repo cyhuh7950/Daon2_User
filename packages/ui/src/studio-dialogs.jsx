@@ -48,7 +48,7 @@ export function ConfirmDeleteDialog({ onConfirm, onCancel }) {
 }
 
 // 유형별 settings_schema로 입력란을 만든다. 모두 선택 입력이며 빈 값은 보내지 않는다.
-export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCancel }) {
+export function SettingsDialog({ type, typeLabel, initial = {}, loading = false, onSubmit, onCancel }) {
   const properties = type?.settings_schema?.properties ?? {};
   const [focus, setFocus] = useState(String(initial.focus ?? ""));
   const [language, setLanguage] = useState(String(initial.language ?? "ko"));
@@ -57,6 +57,10 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
   const [difficulty, setDifficulty] = useState(String(initial.difficulty ?? ""));
   const [length, setLength] = useState(String(initial.length ?? ""));
   const [custom, setCustom] = useState(String(initial.custom_instruction ?? ""));
+  const [pageRequest, setPageRequest] = useState(String(initial.page_request ?? ""));
+  const pageRequestTouched = useRef(false);
+  // 다시 만들기: 출력 상세를 읽어 온 뒤 지난 요청 글을 한 번 채운다(직접 입력했으면 덮어쓰지 않는다).
+  useEffect(() => { if (!pageRequestTouched.current) setPageRequest(String(initial.page_request ?? "")); }, [initial.page_request]);
   const [confirmOutline, setConfirmOutline] = useState(initial.confirm_outline === "yes");
   const [engine, setEngine] = useState(String(initial.engine ?? ""));
   const [voiceA, setVoiceA] = useState(String(initial.voice_a ?? ""));
@@ -72,12 +76,14 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
     if (engine) settings.engine = engine;
     if (voiceA) settings.voice_a = voiceA;
     if (voiceB) settings.voice_b = voiceB;
+    if (properties.page_request && pageRequest.trim()) settings.page_request = pageRequest.trim();
     if (format === "custom" && custom.trim()) settings.custom_instruction = custom.trim();
     // 구성 확인을 켜면 지난 확정 목록을 지운다(빈 값 = 지움). 남아 있으면 서버가 확정 목록을 먼저 써서 다시 멈추지 않는다.
     if (confirmOutline) { settings.confirm_outline = "yes"; settings.confirmed_outline = ""; }
     onSubmit({ formatId: format || undefined, settings });
   };
   const countRule = properties.count;
+  const pageRequestMissing = Boolean(properties.page_request) && !pageRequest.trim();
   return <Modal labelledBy="studio-settings-title" onClose={onCancel}>
     <form onSubmit={submit}>
       <h2 id="studio-settings-title">{msg("studio.dialog.settings.title", { type: typeLabel })}</h2>
@@ -91,6 +97,11 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
           <label htmlFor="studio-custom">{msg("dialog.custom_instruction")}</label>
           <textarea id="studio-custom" maxLength={1000} required value={custom} onChange={(event) => setCustom(event.target.value)} />
         </>}
+      </>}
+      {properties.page_request && <>
+        <label htmlFor="studio-page-request">{msg("studio.web_page.request")}</label>
+        <textarea id="studio-page-request" maxLength={2000} required value={pageRequest} onChange={(event) => { pageRequestTouched.current = true; setPageRequest(event.target.value); }} aria-describedby="studio-page-request-hint" />
+        <small id="studio-page-request-hint">{msg("studio.web_page.request.hint")} ({pageRequest.length}/2000)</small>
       </>}
       {countRule && <>
         <label htmlFor="studio-count">{msg("studio.dialog.settings.count")}</label>
@@ -136,7 +147,7 @@ export function SettingsDialog({ type, typeLabel, initial = {}, onSubmit, onCanc
       <small id="studio-focus-hint">{msg("studio.dialog.settings.focus.hint")} ({focus.length}/500)</small>
       <footer>
         <button type="button" className="studio-btn" onClick={onCancel}>{msg("studio.dialog.settings.cancel")}</button>
-        <button type="submit" className="studio-btn studio-btn--primary">{msg("studio.dialog.settings.submit")}</button>
+        <button type="submit" className="studio-btn studio-btn--primary" disabled={pageRequestMissing || loading}>{msg("studio.dialog.settings.submit")}</button>
       </footer>
     </form>
   </Modal>;

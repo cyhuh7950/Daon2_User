@@ -6,13 +6,13 @@ from typing import Any, Mapping, Sequence
 
 from psycopg.types.json import Jsonb
 
-from .studio_chat_edit import AUTHORED_TYPE, CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes, authored_known_refs
+from .studio_chat_edit import AUTHORED_TYPE, CHAT_EDIT_TYPES, WEB_PAGE_TYPE, ChatEditInvalid, apply_changes, authored_known_refs
 from .studio_v2_queue import CHAT_EDIT_MODE
 from .studio_workspace import StudioContext, StudioError
 
 MAX_INSTRUCTION_CHARS = 2000
 COLUMNS = ("turn_id", "output_id", "job_id", "base_revision", "instruction", "state", "reply", "changes_json", "new_evidence_json",
-           "error_code", "applied_revision", "created_at")
+           "error_code", "applied_revision", "created_at", "preview_json")
 _SELECT = "SELECT " + ",".join(COLUMNS) + " FROM studio_v2_edit_turns WHERE tenant_id=%s AND workspace_id=%s AND "
 _PUBLIC_CHANGE = ("op", "id", "before_text", "after_text", "reason", "anchor_text")
 
@@ -25,7 +25,14 @@ def _public(record: Mapping[str, Any]) -> dict[str, Any]:
     created = record["created_at"]
     return {"turn_id": record["turn_id"], "output_id": record["output_id"], "base_revision": record["base_revision"], "instruction": record["instruction"],
             "state": record["state"], "reply": record["reply"], "changes": [{key: change.get(key, "" if key == "anchor_text" else None) for key in _PUBLIC_CHANGE} for change in record["changes_json"]],
-            "error_code": record["error_code"], "applied_revision": record["applied_revision"], "created_at": created.isoformat() if hasattr(created, "isoformat") else created}
+            "error_code": record["error_code"], "applied_revision": record["applied_revision"], "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+            "preview_html": _preview_html(record.get("preview_json")) if record["state"] == "ready" else None}
+
+
+def _preview_html(preview: object) -> str | None:
+    """웹 페이지 고친 안의 미리 만든 HTML. 다른 유형이나 미리보기가 없으면 None."""
+    html = preview.get("html") if isinstance(preview, Mapping) else None
+    return html if isinstance(html, str) and html else None
 
 
 class StudioV2EditTurnsMixin:
@@ -104,9 +111,12 @@ class StudioV2EditTurnsMixin:
     def mark_edit_turn_working(self, context: StudioContext, turn_id: str) -> None:
         self._update_active_turn(context, turn_id, "state='working'", ())
 
-    def save_edit_turn_result(self, context: StudioContext, turn_id: str, *, reply: str, changes: Sequence[Mapping[str, Any]], new_evidence: Sequence[Mapping[str, Any]]) -> None:
+    def save_edit_turn_result(self, context: StudioContext, turn_id: str, *, reply: str, changes: Sequence[Mapping[str, Any]], new_evidence: Sequence[Mapping[str, Any]],
+                              preview: Mapping[str, Any] | None = None) -> None:
+        """preview는 웹 페이지 고친 안의 {"html", "body"}다. 다른 유형은 {}로 저장한다."""
         state = "ready" if changes else "no_change"
-        self._update_active_turn(context, turn_id, "state=%s,reply=%s,changes_json=%s,new_evidence_json=%s", (state, reply, Jsonb(list(changes)), Jsonb(list(new_evidence))))
+        self._update_active_turn(context, turn_id, "state=%s,reply=%s,changes_json=%s,new_evidence_json=%s,preview_json=%s",
+                                 (state, reply, Jsonb(list(changes)), Jsonb(list(new_evidence)), Jsonb(dict(preview or {}))))
 
     def fail_edit_turn(self, context: StudioContext, turn_id: str, code: str) -> None:
         self._update_active_turn(context, turn_id, "state='failed',error_code=%s", (code,))
@@ -164,10 +174,21 @@ class StudioV2EditTurnsMixin:
             content = apply_changes(type_id, previous[0], turn["changes_json"], known)
         except ChatEditInvalid:
             raise StudioError("CHAT_EDIT_INVALID", 422) from None
+        if type_id == WEB_PAGE_TYPE:
+            content = self._web_page_preview_content(content, turn.get("preview_json"))
         number = self.add_revision(context, output_id, "user_edit", content, warnings=[], evidence=evidence, connection=connection,  # type: ignore[attr-defined]
                                    generated_with={"edited_by": "llm_chat", "change_reason": str(turn["instruction"])[:200]})
         self._copy_lineage(connection, context, output_id, number, current)  # type: ignore[attr-defined]
         return number
+
+    @staticmethod
+    def _web_page_preview_content(content: Mapping[str, Any], preview: object) -> dict[str, Any]:
+        """웹 페이지는 고친 안을 만들 때 저장한 본문·HTML로 판을 만든다. 적용 때 모델을 부르지 않는다."""
+        body = preview.get("body") if isinstance(preview, Mapping) else None
+        html = preview.get("html") if isinstance(preview, Mapping) else None
+        if not isinstance(body, Mapping) or not isinstance(html, str) or not html:
+            raise StudioError("CHAT_EDIT_INVALID", 422)
+        return {**content, "body": {**body, "html": html}}
 
     def discard_edit_turn(self, context: StudioContext, output_id: str, turn_id: str) -> None:
         with self._cloud_store._transaction(self._cloud(context, "studio.v2.write")) as connection:  # type: ignore[attr-defined]

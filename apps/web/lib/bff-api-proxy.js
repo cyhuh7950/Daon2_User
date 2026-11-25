@@ -149,9 +149,11 @@ export function browserSessionCookieName(profile = "production") {
   return profile === "wsl_http_qa" ? WSL_HTTP_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
 }
 
-const STUDIO_V2_EXPORT_FORMATS = new Set(["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt"]);
+const STUDIO_V2_EXPORT_FORMATS = new Set(["docx", "pdf", "md", "txt", "xlsx", "csv", "json", "svg", "png", "pptx", "mp3", "wav", "mp4", "vtt", "html"]);
 const STUDIO_V2_EXPORT_BYTES = 32 * 1024 * 1024;
 const STUDIO_V2_REVISION_QUERY = new Set(["revision"]);
+// 웹 페이지 HTML 내려받기(WO-N8): 출처 목록 넣기 선택을 API로 넘긴다.
+const STUDIO_V2_EXPORT_QUERY = new Set(["revision", "include_sources"]);
 const STUDIO_V2_ACTIONS = new Map([
   ["edit-turns", ["GET", "POST"]], ["revisions", ["POST"]], ["regenerate", ["POST"]], ["cancel", ["POST"]], ["provenance", ["GET"]],
   ["sharing", ["GET"]], ["learning-attempts", ["GET", "POST"]], ["source", ["POST"]],
@@ -202,7 +204,9 @@ function studioV2Route(method, segments) {
     return make(`/outputs/${id}/edit-turns/${encodeURIComponent(rest[3])}/${rest[4]}`, ["POST"]);
   }
   if (rest.length === 4 && rest[2] === "exports" && STUDIO_V2_EXPORT_FORMATS.has(rest[3])) {
-    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: STUDIO_V2_REVISION_QUERY, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
+    // include_sources는 웹 페이지 HTML에서만 받는다. 다른 형식은 revision만.
+    const html = rest[3] === "html";
+    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: html ? STUDIO_V2_EXPORT_QUERY : STUDIO_V2_REVISION_QUERY, includeSourcesQuery: html, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
   }
   if (rest.length === 3 && rest[2] === "audio") {
     return make(`/outputs/${id}/audio`, ["GET"], { timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES });
@@ -1486,6 +1490,9 @@ export function createBffProxy({
       if (route.operationsStatus && ((query.has("scope") && !["self","workspace_visible"].includes(query.get("scope")))
           || (query.has("include_readiness") && query.get("include_readiness")!=="1")
           || (query.has('include_capacity') && query.get('include_capacity')!=='1'))) {
+        return createBffSafeError(400, "INVALID_REQUEST", trace);
+      }
+      if (route.includeSourcesQuery && query.has("include_sources") && !["0", "1"].includes(query.get("include_sources"))) {
         return createBffSafeError(400, "INVALID_REQUEST", trace);
       }
     }

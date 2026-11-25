@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .studio_user_edit import validate_user_edit
+from .studio_web_page import clean_edited_body
 from .studio_workspace import StudioError
 
-CHAT_EDIT_TYPES = frozenset({"report", "slides", "flashcards", "quiz", "authored_document"})
+CHAT_EDIT_TYPES = frozenset({"report", "slides", "flashcards", "quiz", "authored_document", "web_page"})
 AUTHORED_TYPE = "authored_document"
+WEB_PAGE_TYPE = "web_page"
 MAX_PARAGRAPHS = 40
 MAX_PARAGRAPH_CHARS = 4000
 MAX_UNIT_TITLE_CHARS = 120
@@ -76,7 +78,20 @@ def _flatten_authored(content: Mapping[str, Any]) -> list[Piece]:
     return pieces
 
 
-_FLATTEN = {"report": _flatten_report, "slides": _flatten_slides, "flashcards": _flatten_cards, "quiz": _flatten_quiz, AUTHORED_TYPE: _flatten_authored}
+def _flatten_web_page(content: Mapping[str, Any]) -> list[Piece]:
+    """보고서와 같은 조각 구조(제목·절·절 제목·블록)이고 요약 칸은 없다. 블록 번호는 원래 자리 그대로 쓴다."""
+    body = _body(content)
+    pieces = [Piece("title", "text", {"text": body.get("title", "")})]
+    for n, section in enumerate(body.get("sections", []), 1):
+        pieces.append(Piece(f"s{n}", "section", section))
+        pieces.append(Piece(f"s{n}.heading", "text", {"text": section.get("heading", "")}))
+        # 표·수치(table·metric)는 숫자를 문장 수정으로 바꾸기 쉬워 조각으로 내지 않는다(고치기 대상에서 뺀다).
+        pieces.extend(Piece(f"s{n}.b{m}", "block", block) for m, block in enumerate(section.get("blocks", []), 1)
+                      if block.get("type") not in ("table", "metric"))
+    return pieces
+
+
+_FLATTEN = {"report": _flatten_report, "slides": _flatten_slides, "flashcards": _flatten_cards, "quiz": _flatten_quiz, AUTHORED_TYPE: _flatten_authored, WEB_PAGE_TYPE: _flatten_web_page}
 
 
 def flatten(type_id: str, content: Mapping[str, Any]) -> list[Piece]:
@@ -219,8 +234,40 @@ def _merge_quiz(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any
     return {**body, "questions": _merge_list(body.get("questions", []), "q", by_id)}
 
 
-_MERGE = {"report": _merge_report, "slides": _merge_slides, "flashcards": _merge_cards, "quiz": _merge_quiz}
-_SIZE = {"report": _report_size, "slides": lambda body: len(body.get("slides", [])), "flashcards": lambda body: len(body.get("cards", [])), "quiz": lambda body: len(body.get("questions", []))}
+_FIXED_KINDS = ("table", "metric")
+
+
+def _has_fixed_block(blocks: object) -> bool:
+    return isinstance(blocks, Sequence) and any(isinstance(b, Mapping) and b.get("type") in _FIXED_KINDS for b in blocks)
+
+
+def _guard_web_page(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> None:
+    """웹 페이지의 표·수치 블록은 대화로 고치지 않는다: 그런 블록이 든 절을 통째로 바꾸거나 지울 수 없고,
+    새로 넣거나 바꾼 내용에 표·수치 블록이 들어갈 수 없다."""
+    sections = _body(content).get("sections", [])
+    for piece_id, change in by_id.items():
+        new = change.get("content") if isinstance(change.get("content"), Mapping) else {}
+        if "." not in piece_id and piece_id.startswith("s"):  # 절 전체 조각
+            original = sections[int(piece_id[1:]) - 1]
+            if change["op"] in ("replace", "delete") and _has_fixed_block(original.get("blocks")):
+                raise ChatEditInvalid(f"{piece_id} 절에는 표·수치가 있어 통째로 바꾸거나 지울 수 없습니다. 문단·목록 조각만 고치세요.")
+            if _has_fixed_block(new.get("blocks")):
+                raise ChatEditInvalid(f"{piece_id} 절에 표·수치 블록을 새로 넣을 수 없습니다.")
+        elif change["op"] != "delete" and new.get("type") in _FIXED_KINDS:
+            raise ChatEditInvalid(f"{piece_id} 조각을 표·수치 블록으로 바꾸거나 표·수치 블록을 새로 넣을 수 없습니다.")
+
+
+def _merge_web_page(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """보고서 끼워 넣기를 쓰되 웹 페이지에 없는 요약 칸은 만들지 않는다. 고치지 않은 블록의 insufficient는 그대로 남는다."""
+    merged = _merge_report(content, by_id)
+    if "summary" not in _body(content):
+        merged.pop("summary", None)
+    return merged
+
+
+_MERGE = {"report": _merge_report, "slides": _merge_slides, "flashcards": _merge_cards, "quiz": _merge_quiz, WEB_PAGE_TYPE: _merge_web_page}
+_SIZE = {"report": _report_size, "slides": lambda body: len(body.get("slides", [])), "flashcards": lambda body: len(body.get("cards", [])), "quiz": lambda body: len(body.get("questions", [])),
+         WEB_PAGE_TYPE: _report_size}
 
 
 def authored_known_refs(content: Mapping[str, Any]) -> set[str]:
@@ -268,11 +315,16 @@ def _apply_authored(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str,
 def apply_changes(type_id: str, content: Mapping[str, Any], changes: Sequence[Mapping[str, Any]], known_refs: set[str]) -> dict[str, Any]:
     """수정안을 끼워 새 내용을 돌려준다. 원본은 바꾸지 않는다. 저장 규칙을 어기면 ChatEditInvalid."""
     by_id = _index(type_id, content, changes)
+    if type_id == WEB_PAGE_TYPE:
+        _guard_web_page(content, by_id)
     if type_id == AUTHORED_TYPE:
         return _apply_authored(content, by_id, known_refs)
     merged = copy.deepcopy(_MERGE[type_id](content, by_id))
     try:
-        cleaned = validate_user_edit(type_id, merged, known_refs, _body(content))
+        if type_id == WEB_PAGE_TYPE:
+            cleaned = clean_edited_body(merged, known_refs)
+        else:
+            cleaned = validate_user_edit(type_id, merged, known_refs, _body(content))
     except StudioError as error:
         raise ChatEditInvalid("자료 저장 규칙에 맞지 않습니다.") from error
     if _SIZE[type_id](cleaned) != _SIZE[type_id](merged):

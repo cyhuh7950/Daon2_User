@@ -64,7 +64,7 @@
 
 ---
 
-### 작업 1: DB 허용값과 유형 등록
+### Task 1 (작업 1): DB 허용값과 유형 등록
 
 **파일:**
 - 새로 만들기: `services/api/migrations/versions/0088_web_page.py`, `0088_web_page.sql`
@@ -113,7 +113,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 2: 1단계 내용 검사
+### Task 2 (작업 2): 1단계 내용 검사
 
 **파일:**
 - 새로 만들기: `services/api/src/daon2_user_api/studio_web_page.py`
@@ -154,7 +154,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 3: HTML 처리(정리·CSP·대조·연결 스크립트)
+### Task 3 (작업 3): HTML 처리(정리·CSP·대조·연결 스크립트)
 
 **파일:**
 - 수정: `services/api/src/daon2_user_api/studio_web_page.py`
@@ -201,7 +201,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 4: WebPageGenerator(두 단계·재시도·진행 문구)
+### Task 4 (작업 4): WebPageGenerator(두 단계·재시도·진행 문구)
 
 **파일:**
 - 수정: `services/api/src/daon2_user_api/studio_generators.py`(새 클래스, `build_registry:341`)
@@ -243,7 +243,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 5: HTML 내려받기와 출처 목록 선택
+### Task 5 (작업 5): HTML 내려받기와 출처 목록 선택
 
 **파일:**
 - 수정:
@@ -281,7 +281,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 6: 대화로 고치기(고친 안에 HTML 함께 만들기)
+### Task 6 (작업 6): 대화로 고치기(고친 안에 HTML 함께 만들기)
 
 **파일:**
 - 수정:
@@ -329,7 +329,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 7: 타일·설정·문구
+### Task 7 (작업 7): 타일·설정·문구
 
 **파일:**
 - 수정:
@@ -361,7 +361,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 8: 웹 페이지 보기(격리 iframe·근거 칸·미리보기·내려받기)
+### Task 8 (작업 8): 웹 페이지 보기(격리 iframe·근거 칸·미리보기·내려받기)
 
 **파일:**
 - 새로 만들기: `packages/ui/src/studio-web-page-viewer.jsx`, `packages/ui/src/studio-web-page-bridge.js`(메시지 판정 순수 함수)
@@ -397,7 +397,7 @@ def test_migration_0088_allows_web_page_and_preview_column():
 
 ---
 
-### 작업 9: 설명서·전체 시험·배포·실서버 확인·기록
+### Task 9 (작업 9): 설명서·전체 시험·배포·실서버 확인·기록
 
 **파일:**
 - 수정: 설명서 원본(2-20 절이 있는 파일)에 새 절 "2-21 웹 페이지", `WORK_STATUS.md`, `docs/work_orders/WO-N8-web-page.md` §9
