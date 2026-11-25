@@ -17,6 +17,14 @@ from .table_reader import Table, parse_number
 MAX_GROUPS = 2
 MAX_LIMIT = 50
 MAX_IN_VALUES = 100
+MAX_ITEMS = 20
+MAX_UNSUPPORTED_TEXT = 200
+_TOP_KEYS = frozenset(('filters', 'group_by', 'measures', 'growth', 'sort', 'limit', 'unsupported'))
+_ITEM_KEYS = {
+    'filters': frozenset(('column', 'op', 'value')), 'group_by': frozenset(('column', 'month')),
+    'measures': frozenset(('id', 'func', 'column')), 'growth': frozenset(('measure_id',)),
+    'sort': frozenset(('by', 'desc')),
+}
 
 _OPS = ('eq', 'ne', 'in', 'gt', 'gte', 'lt', 'lte', 'between', 'date_between')
 _FUNCS = ('count', 'sum', 'avg')
@@ -107,6 +115,29 @@ def _list(raw, key) -> list:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
+def _items(raw, key: str, reasons: list[str]) -> list:
+    """A list field of the proposal: None -> [], non-list or too long -> reason."""
+    value = raw.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        reasons.append(f'{key} 형식 오류')
+        return []
+    if len(value) > MAX_ITEMS:
+        reasons.append(f'{key}는 최대 {MAX_ITEMS}개')
+        return []
+    for item in value:
+        _check_keys(item, key, reasons)
+    return list(value)
+
+
+def _check_keys(item, key: str, reasons: list[str]) -> None:
+    if isinstance(item, Mapping):
+        for extra in item:
+            if extra not in _ITEM_KEYS[key]:
+                reasons.append(f'알 수 없는 항목: {extra}')
+
+
 def _filter(table: Table, item, reasons: list[str], cache: dict[int, set[str]]):
     if not isinstance(item, Mapping):
         reasons.append('필터 형식 오류')
@@ -154,7 +185,7 @@ def _filter(table: Table, item, reasons: list[str], cache: dict[int, set[str]]):
             low, high = (parse_number(v) if isinstance(v, str) else v for v in values)
             if low > high:
                 reasons.append(bad); return None
-        return {'column': name, 'op': op, 'value': value}
+        return {'column': name, 'op': op, 'value': list(value) if op == 'between' else value}
 
     # date_between
     if column.kind != 'date':
@@ -173,34 +204,44 @@ def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
     """
     if not isinstance(raw, Mapping):
         raise SpecInvalid(['조건 형식 오류'])
-    unsupported = [str(u) for u in _list(raw, 'unsupported') if isinstance(u, str) and u.strip()]
+    reasons: list[str] = []
+    for extra in raw:
+        if extra not in _TOP_KEYS:
+            reasons.append(f'알 수 없는 항목: {extra}')
+    raw_unsupported = raw.get('unsupported')
+    if raw_unsupported is None:
+        raw_unsupported = []
+    if not isinstance(raw_unsupported, list) or not all(isinstance(u, str) for u in raw_unsupported):
+        reasons.append('unsupported 형식 오류')
+        raw_unsupported = []
+    unsupported = [u.strip()[:MAX_UNSUPPORTED_TEXT] for u in raw_unsupported if u.strip()]
     warnings = [f'하지 않은 요청: {u}' for u in unsupported]
-    if not _list(raw, 'measures') and unsupported:
+    if not _list(raw, 'measures') and unsupported and not reasons:
         raise SpecUnsupported(unsupported)
 
-    reasons: list[str] = []
     by_name = {c.name: c for c in table.columns}
     cache: dict[int, set[str]] = {}
 
-    filters = [f for f in (_filter(table, item, reasons, cache) for item in _list(raw, 'filters')) if f]
+    filters = [f for f in (_filter(table, item, reasons, cache) for item in _items(raw, 'filters', reasons)) if f]
 
     groups = []
-    for item in _list(raw, 'group_by'):
+    raw_groups = _items(raw, 'group_by', reasons)
+    for item in raw_groups:
         name = item.get('column') if isinstance(item, Mapping) else None
         month = item.get('month', False) if isinstance(item, Mapping) else None
-        if name not in by_name:
+        if not (isinstance(name, str) and name in by_name):
             reasons.append(f'없는 열: {name}'); continue
         if not isinstance(month, bool):
             reasons.append(f'월 묶기 값 형식 오류: {name}'); continue
         if month and by_name[name].kind != 'date':
             reasons.append(f'월 묶기는 날짜 열만 가능: {name}'); continue
         groups.append({'column': name, 'month': month})
-    if len(_list(raw, 'group_by')) > MAX_GROUPS:
+    if len(raw_groups) > MAX_GROUPS:
         reasons.append(f'묶음 열은 최대 {MAX_GROUPS}개')
     group_keys = [f'{g["column"]}(월)' if g['month'] else g['column'] for g in groups]
 
     measures = []
-    raw_measures = _list(raw, 'measures')
+    raw_measures = _items(raw, 'measures', reasons)
     if not raw_measures:
         reasons.append('집계 항목 없음')
     used_ids = {m.get('id') for m in raw_measures if isinstance(m, Mapping) and isinstance(m.get('id'), str) and m.get('id')}
@@ -215,11 +256,13 @@ def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
         if name is None:
             if func != 'count':
                 reasons.append(f'{_FUNC_LABEL[func]}에는 열이 필요함'); continue
-        elif name not in by_name:
+        elif not (isinstance(name, str) and name in by_name):
             reasons.append(f'없는 열: {name}'); continue
         elif func in ('sum', 'avg') and by_name[name].kind != 'number':
             reasons.append(f'숫자 열이 아님: {name} ({_FUNC_LABEL[func]}은 숫자 열만 가능)'); continue
-        if not isinstance(ident, str) or not ident or ident in seen_ids:
+        if ident is not None and not isinstance(ident, str):
+            reasons.append('집계 id 형식 오류'); continue
+        if not ident or ident in seen_ids:
             while True:  # deterministic: m1, m2, ... skipping ids already used
                 counter += 1
                 ident = f'm{counter}'
@@ -230,7 +273,7 @@ def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
 
     growth = []
     month_groups = [g for g in groups if g['month']]
-    for item in _list(raw, 'growth'):
+    for item in _items(raw, 'growth', reasons):
         if len(month_groups) != 1:
             reasons.append('증감률 비교는 월 묶기가 있을 때만 가능'); break
         ident = item.get('measure_id') if isinstance(item, Mapping) else None
