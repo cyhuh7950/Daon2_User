@@ -52,7 +52,7 @@ def test_chart_values_equal_table_values():
     keys = [c['key'] for c in result['columns']]
     cells = {(row[keys.index('청구일(월)')]['value'], row[keys.index('상품')]['value']): row[keys.index('s')]['value']
              for row in result['rows']}
-    points = {(p['x'], s['label']): p['value'] for s in chart['series'] for p in s['points']}
+    points = {(p['x'], s['label']): p['value'] for s in chart['series'] for p in s['points'] if p['value'] is not None}
     assert points == cells
     assert len(points) == len(result['rows'])
 
@@ -77,7 +77,7 @@ def test_summary_numbers_subset_of_table_display():
         shown = re.findall(r'\(([^()]*)\)\s*$', sentence)
         assert shown and shown[-1] in displays
         assert set(re.findall(r'\d[\d,.]*', sentence)) <= {n for d in displays for n in re.findall(r'\d[\d,.]*', d)}
-    assert '합계(지급액)이 가장 큰 묶음: 암보험 · 2026-02 (12,345,000)' in sentences
+    assert '합계(지급액) 가장 큰 묶음: 암보험 · 2026-02 (12,345,000)' in sentences
 
 
 def test_line_for_month_bar_otherwise():
@@ -104,7 +104,7 @@ def test_two_groups_with_month_make_series_per_other_group():
     by_label = {s['label']: [(p['x'], p['value']) for p in s['points']] for s in chart['series']}
     assert set(by_label) == {'암보험', '실손'}
     assert by_label['암보험'] == [('2026-01', '1000000'), ('2026-02', '12345000'), ('2026-03', '300.25')]
-    assert by_label['실손'] == [('2026-01', '500.5'), ('2026-02', '49.5')]
+    assert by_label['실손'] == [('2026-01', '500.5'), ('2026-02', '49.5'), ('2026-03', None)]
 
 
 def test_no_group_column_returns_none_and_no_sentences():
@@ -116,3 +116,39 @@ def test_no_group_column_returns_none_and_no_sentences():
 def test_single_computable_cell_gives_no_sentences():
     result, spec = build(raw_spec([MONTH]), ROWS[:1])
     assert summary_sentences(result, spec) == []
+
+
+def test_line_x_is_ascending_month_even_when_sorted_by_value():
+    raw = raw_spec([PRODUCT, MONTH])
+    raw['sort'] = {'by': 's', 'desc': True}
+    result, spec = build(raw)
+    months_in_rows = [row[1]['display'] for row in result['rows']]
+    assert months_in_rows != sorted(months_in_rows)  # the fixture really is shuffled
+    chart = build_chart(result, spec)
+    xs = [[p['x'] for p in s['points']] for s in chart['series']]
+    assert all(x == ['2026-01', '2026-02', '2026-03'] for x in xs)
+    by_label = {s['label']: [p['value'] for p in s['points']] for s in chart['series']}
+    assert by_label['실손'] == ['500.5', '49.5', None]  # missing month -> null point
+    assert [s['label'] for s in chart['series']] == ['실손', '암보험']  # series: key ascending
+
+
+def test_series_keyed_by_value_not_display():
+    rows = [(date(2026, 1, 5), 'A', D('1')), (date(2026, 1, 6), 'a', D('2'))]
+    result, spec = build(raw_spec([PRODUCT, MONTH]), rows)
+    for r in result['rows']:  # force identical display for distinct values
+        r[0]['display'] = '같음'
+    chart = build_chart(result, spec)
+    assert len(chart['series']) == 2
+    assert len({s['key'] for s in chart['series']}) == 2
+    assert [s['label'] for s in chart['series']] == ['같음', '같음']
+
+
+def test_multi_group_without_month_has_x_label_and_first_group_x_key():
+    result, spec = build(raw_spec([PRODUCT, {'column': '청구일', 'month': False}]))
+    chart = build_chart(result, spec)
+    assert chart['kind'] == 'bar'
+    assert chart['x_key'] == '상품'
+    assert chart['x_label'] == '상품 · 청구일'
+    assert all(' · ' in p['x'] and p['x'].split(' · ')[0] in ('암보험', '실손') for p in chart['series'][0]['points'])
+    single, spec1 = build(raw_spec([PRODUCT]))
+    assert build_chart(single, spec1)['x_label'] == '상품'

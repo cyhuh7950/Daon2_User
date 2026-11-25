@@ -36,38 +36,49 @@ def _join(row, indexes) -> str:
     return _SEPARATOR.join(row[i]['display'] for i in indexes)
 
 
+def _text(cell) -> str:
+    return cell['display'] if cell['value'] is None else cell['value']
+
+
 def build_chart(result: dict, spec: dict) -> dict | None:
+    """Chart of the first measure.
+
+    line (month group present): x categories are the month strings ascending
+    and identical for every series (a month missing from a series is a point
+    with value None); series are ordered by their underlying group value
+    ascending, regardless of the row sort. Series are keyed by the underlying
+    group cell value, labelled by its display.
+    bar: single series in row order; x is the group combination. With several
+    group columns x_key is the FIRST group column key and x_label the joined
+    column labels (the composite x text lives in the points).
+    """
     layout = _layout(result, spec)
     if layout is None:
         return None
     group_idx, month_idx, measure_idx = layout
     columns = result['columns']
     measure = columns[measure_idx]
-    if month_idx is not None:
-        x_idx = [month_idx]
-        series_idx = [i for i in group_idx if i != month_idx]
-    else:
-        x_idx = group_idx
-        series_idx = []
-    series: dict[str, dict] = {}
+    if month_idx is None:
+        points = [{'x': _join(row, group_idx), 'value': row[measure_idx]['value']} for row in result['rows']]
+        return {'kind': 'bar', 'x_key': columns[group_idx[0]]['key'],
+                'x_label': _SEPARATOR.join(columns[i]['label'] for i in group_idx),
+                'series': [{'key': measure['key'], 'label': measure['label'], 'points': points}]}
+    series_idx = [i for i in group_idx if i != month_idx]
+    months = sorted({row[month_idx]['value'] for row in result['rows']})
+    grouped: dict[tuple, dict] = {}
     for row in result['rows']:
-        label = _join(row, series_idx) if series_idx else measure['label']
-        entry = series.get(label)
+        ident = tuple(row[i]['value'] for i in series_idx)
+        entry = grouped.get(ident)
         if entry is None:
-            key = _join(row, series_idx) if series_idx else measure['key']
-            entry = series[label] = {'key': key, 'label': label, 'points': []}
-        entry['points'].append({'x': _join(row, x_idx), 'value': row[measure_idx]['value']})
-    x_key = columns[x_idx[0]]['key'] if len(x_idx) == 1 else _SEPARATOR.join(columns[i]['key'] for i in x_idx)
-    return {'kind': 'line' if month_idx is not None else 'bar', 'x_key': x_key, 'series': list(series.values())}
-
-
-def _particle(label: str) -> str:
-    """이/가 by the last hangul syllable of the label (a trailing ')' is skipped)."""
-    text = label.rstrip(')').rstrip()
-    last = text[-1] if text else ''
-    if '가' <= last <= '힣':
-        return '이' if (ord(last) - 0xAC00) % 28 else '가'
-    return '이'
+            entry = grouped[ident] = {
+                'key': _SEPARATOR.join(_text(row[i]) for i in series_idx) if series_idx else measure['key'],
+                'label': _join(row, series_idx) if series_idx else measure['label'], 'values': {}}
+        entry['values'][row[month_idx]['value']] = row[measure_idx]['value']
+    ordered = sorted(grouped.items(), key=lambda kv: tuple('' if v is None else v for v in kv[0]))
+    series = [{'key': e['key'], 'label': e['label'],
+               'points': [{'x': m, 'value': e['values'].get(m)} for m in months]} for _, e in ordered]
+    return {'kind': 'line', 'x_key': columns[month_idx]['key'], 'x_label': columns[month_idx]['label'],
+            'series': series}
 
 
 def summary_sentences(result: dict, spec: dict) -> list[str]:
@@ -96,6 +107,5 @@ def summary_sentences(result: dict, spec: dict) -> list[str]:
     smallest = min(candidates, key=lambda c: c[0])
     if largest[0] == smallest[0]:
         return []
-    particle = _particle(label)
-    return [f'{label}{particle} {word}: {_join(row, group_idx)} ({display})'
+    return [f'{label} {word}: {_join(row, group_idx)} ({display})'
             for word, (_, row, display) in (('가장 큰 묶음', largest), ('가장 작은 묶음', smallest))]
