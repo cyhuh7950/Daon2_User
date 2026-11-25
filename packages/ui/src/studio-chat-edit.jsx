@@ -6,7 +6,7 @@ import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 
 // 완료 자료 대화 수정(WO-K5): 말로 지시하고, 고치기 전·후를 본 뒤 반영한다.
 
-export const CHAT_EDIT_TYPES = ["report", "slides", "flashcards", "quiz", "authored_document"];
+export const CHAT_EDIT_TYPES = ["report", "slides", "flashcards", "quiz", "authored_document", "web_page"];
 const POLL_MS = 2000;
 const ACTIVE = new Set(["queued", "working"]);
 const STATE_NOTE = { applied: "studio.chat_edit.applied", discarded: "studio.chat_edit.discarded" };

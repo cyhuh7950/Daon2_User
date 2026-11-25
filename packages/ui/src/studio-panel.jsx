@@ -410,7 +410,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     }} />}
     {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
-    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id }} onCancel={() => setDialog(null)}
+    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: dialog.output.settings?.page_request }} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings, values.formatId); }} />}
     {dialog?.kind === "provenance" && <ProvenanceDialog load={() => studio.getProvenance(dialog.output.output_id)} onClose={() => setDialog(null)}
       onOpenEvidence={(ref) => openEvidence(dialog.output, ref)} onRegenerate={(settings) => { const target = dialog.output; setDialog(null); regenerate(target, settings); }} />}

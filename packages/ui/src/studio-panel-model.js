@@ -1,6 +1,6 @@
 // Studio v2 패널 모델(순수 함수). WO-S1 T-S1-03. DOM·fetch에 의존하지 않는다.
 
-export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table"]);
+export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "web_page"]);
 const ACTIVE = new Set(["queued", "generating"]);
 export const POLL_ACTIVE_MS = 1500;
 export const POLL_HIDDEN_MS = 10000;

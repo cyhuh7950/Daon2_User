@@ -10,8 +10,8 @@ const NOW = Date.parse("2026-10-20T12:00:00Z");
 const out = (over = {}) => ({ output_id: `sv2-${"a".repeat(32)}`, type_id: "report", format_id: "summary", title: "보고서", status: "completed", error_code: null,
   source_count: 14, current_revision: 1, created_at: "2026-07-19T12:00:00Z", updated_at: "2026-07-19T12:00:00Z", stale: false, ...over });
 
-test("타일 순서는 NotebookLM 배치(9종)와 같다", () => {
-  assert.equal(TILE_ORDER.length, 9);
+test("타일 순서는 NotebookLM 배치(9종)과 웹 페이지와 같다", () => {
+  assert.equal(TILE_ORDER.length, 10);
   assert.deepEqual(TILE_ORDER.slice(0, 3), ["audio_overview", "slides", "video_overview"]);
   for (const id of TILE_ORDER) assert.ok(STUDIO_MESSAGES[`studio.tile.${id}`], id);
 });

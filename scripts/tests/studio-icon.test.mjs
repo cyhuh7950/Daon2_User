@@ -14,7 +14,7 @@ const css = readFileSync(path.join(root, "packages/ui/src/studio-icon.css"), "ut
 
 const REQUIRED_TYPE_ICONS = [
   "audio_overview", "slides", "video_overview", "mind_map", "report",
-  "flashcards", "quiz", "infographic", "data_table", "memo",
+  "flashcards", "quiz", "infographic", "data_table", "web_page", "memo",
 ];
 const REQUIRED_ACTION_ICONS = [
   "add", "close", "more_vertical", "share", "edit", "download", "info_sparkle", "delete", "play",
@@ -39,7 +39,7 @@ function accents(block) {
 }
 
 test("아이콘 이름은 37개이며 중복 없이 필수 유형·동작 아이콘을 모두 가진다", () => {
-  assert.equal(STUDIO_ICON_NAMES.length, 37);
+  assert.equal(STUDIO_ICON_NAMES.length, 38);
   assert.equal(new Set(STUDIO_ICON_NAMES).size, STUDIO_ICON_NAMES.length);
   for (const name of [...REQUIRED_TYPE_ICONS, ...REQUIRED_ACTION_ICONS]) {
     assert.ok(Object.hasOwn(STUDIO_ICONS, name), name);
@@ -73,7 +73,7 @@ test("유형 스타일은 모든 산출물 유형에 아이콘·강조색·문�
     assert.match(css, new RegExp(`\\.studio-icon--accent-${style.accent}\\s*\\{`, "u"), `${type} 강조색 클래스`);
     assert.match(css, new RegExp(`--studio-accent-${style.accent}:`, "u"), `${type} 라이트 토큰`);
   }
-  assert.equal(STUDIO_TILE_ORDER.length, 9);
+  assert.equal(STUDIO_TILE_ORDER.length, 10);
   assert.ok(!STUDIO_TILE_ORDER.includes("memo"), "메모는 타일이 아니라 하단 버튼");
   for (const type of STUDIO_TILE_ORDER) assert.ok(Object.hasOwn(STUDIO_TYPE_STYLE, type));
 });

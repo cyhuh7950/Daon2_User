@@ -73,17 +73,17 @@ const reactProps = (node) => node[Object.keys(node).find((key) => key.startsWith
 const byLabel = (container, label) => findElements(container, (n) => n.getAttribute?.("aria-label") === label)[0];
 const text = (container) => container.textContent;
 
-test("패널은 타일 9종과 산출물 카드를 렌더하고 비활성 타일은 aria-disabled로 표시한다", async () => {
+test("패널은 타일 10종과 산출물 카드를 렌더하고 비활성 타일은 aria-disabled로 표시한다", async () => {
   const studio = fakeStudio();
   const view = await mount(studio);
   try {
     const tiles = findElements(view.container, (n) => n.tagName === "BUTTON" && n.getAttribute("class")?.includes("studio-tile") && !n.getAttribute("class").includes("edit"));
-    assert.equal(tiles.length, 9);
+    assert.equal(tiles.length, 10);
     assert.equal(byLabel(view.container, "보고서").getAttribute("aria-disabled"), "false");
     assert.equal(byLabel(view.container, "오디오 개요").getAttribute("aria-disabled"), "true");
     assert.ok(text(view.container).includes("보고서 1"));
     assert.ok(text(view.container).includes("요약 · 소스 2개"));
-    assert.ok(findElements(view.container, (n) => n.getAttribute?.("role") === "tooltip").length >= 9);
+    assert.ok(findElements(view.container, (n) => n.getAttribute?.("role") === "tooltip").length >= 10);
   } finally { await view.close(); }
 });
 
