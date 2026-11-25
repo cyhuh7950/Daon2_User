@@ -440,3 +440,28 @@ test("Evidence manifest의 Network 계수는 실제 JSONL row와 unique path를 
   assert.equal(rows.length, 11);
   assert.equal(uniquePaths.size, 4);
 });
+
+// WO-N8: 웹 페이지 절이 원본과 공개 사본에 필수 내용과 함께 있어야 한다.
+test("WO-N8 2-21 웹 페이지 절은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const start = markdown.indexOf("\n### 2-21 웹 페이지\n");
+    assert.ok(start >= 0, `${file}: 2-21`);
+    const rest = markdown.slice(start + 1);
+    const next = rest.slice(1).search(/\n#{2,3} /u);
+    const section = rest.slice(0, next < 0 ? undefined : next + 1);
+    for (const required of [
+      /\*\*요청 글\*\*/u,
+      /최대 2000자/u,
+      /"내용 만드는 중" → "페이지 만드는 중"/u,
+      /근거 부족으로 뺀 내용 N건/u,
+      /\*\*설정 변경 후 다시 생성\*\*/u,
+      /미리 보기/u,
+      /표·수치 카드는 대화로 고칠 수 없/u,
+      /\*\*출처 목록 넣기\*\*\(기본 켬\)/u,
+      /외부 자원 없이 단독으로 열리며/u,
+      /새 숫자를 계산하는 기능/u,
+    ]) assert.match(section, required, `2-21 ${required}`);
+    assert.match(markdown, /\| 소스로 근거 확인된 웹 페이지\(HTML\) 만들기·내려받기 \| 2-21 \|/u, "부록 C 2-21");
+  });
+});
