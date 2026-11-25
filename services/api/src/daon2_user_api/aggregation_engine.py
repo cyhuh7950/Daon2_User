@@ -17,6 +17,7 @@ import re
 import time
 from collections.abc import Mapping, Sequence
 from datetime import date
+from fractions import Fraction
 from decimal import (ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, DivisionByZero, Inexact,
                      InvalidOperation, Overflow)
 
@@ -28,16 +29,15 @@ _DEADLINE_EVERY = 1000
 _EXACT = Context(prec=1000, rounding=ROUND_HALF_EVEN, traps=[Inexact, InvalidOperation, Overflow])
 _WIDE = Context(prec=5000, rounding=ROUND_HALF_UP, traps=[InvalidOperation, Overflow])
 _DIV = Context(prec=28, rounding=ROUND_HALF_EVEN, traps=[InvalidOperation, DivisionByZero, Overflow])
-_TENTH = Decimal('0.1')
 _PLAIN_SHEET = re.compile(r'[^\W\d]\w*')
 
-_REASON_NO_NUMBER = '계산할 숫자 없음'
+_REASON_NO_NUMBER = '숫자 값 없음'
 _REASON_PRECISION = '정밀도 초과'
 _REASON_NO_PREVIOUS = '전월 자료 없음'
 _REASON_PREVIOUS_FAILED = '전월 값 계산 불가'
 _REASON_PREVIOUS_ZERO = '전월 값 0'
 
-_FUNC_LABEL = {'count': '개수', 'sum': '합계', 'avg': '평균'}
+_FUNC_LABEL = {'count': '건수', 'sum': '합계', 'avg': '평균'}
 _OP_SYMBOL = {'eq': '=', 'ne': '≠', 'gt': '>', 'gte': '≥', 'lt': '<', 'lte': '≤'}
 
 
@@ -69,9 +69,14 @@ def _grouped(value: Decimal) -> str:
     return format(value, ',f')
 
 
-def _round1(value: Decimal) -> Decimal:
-    rounded = value.quantize(_TENTH, rounding=ROUND_HALF_UP, context=_WIDE)
-    return abs(rounded) if rounded == 0 else rounded  # no '-0.0'
+def _round1_exact(numerator: Decimal, denominator: Decimal) -> Decimal:
+    """numerator / denominator rounded half up (away from zero) to one
+    decimal place, computed from the exact fraction (no prior rounding)."""
+    tenths = Fraction(numerator) * 10 / Fraction(denominator)
+    magnitude = abs(tenths)
+    rounded = (2 * magnitude.numerator + magnitude.denominator) // (2 * magnitude.denominator)  # floor(x + 1/2)
+    sign = '-' if tenths < 0 and rounded else ''  # no '-0.0'
+    return Decimal(f'{sign}{rounded // 10}.{rounded % 10}')
 
 
 def _month_text(ym) -> str:
@@ -260,7 +265,7 @@ def _parse_spec(table: Table, spec):
             if func != 'count':
                 _invalid()
             position = column = None
-            label = '개수'
+            label = '건수'
         else:
             position, column = _resolve(table, name)
             if func in {'sum', 'avg'} and column.kind != 'number':
@@ -312,11 +317,8 @@ class _Acc:
         self.rows = []; self.total = Decimal(0); self.not_number = 0; self.blank = 0; self.overflow = False
 
     def add(self, func, cell, row_number, has_column):
-        if func == 'count':
-            if has_column and cell is None:
-                self.blank += 1
-            else:
-                self.rows.append(row_number)
+        if func == 'count':  # always the group's row count; the column only locates evidence
+            self.rows.append(row_number)
             return
         if isinstance(cell, Decimal):
             self.rows.append(row_number)
@@ -339,15 +341,15 @@ def _measure_result(measure, acc):
         return {'value': Decimal(count), 'text': str(count), 'display': f'{count:,}', 'status': 'ok', 'reason': None}
     if acc.overflow:
         return {'value': None, 'text': None, 'display': '계산 불가', 'status': 'not_computable', 'reason': _REASON_PRECISION}
-    if func == 'sum':
-        return {'value': acc.total, 'text': _plain(acc.total), 'display': _grouped(acc.total), 'status': 'ok', 'reason': None}
     if not acc.rows:
         return {'value': None, 'text': None, 'display': '계산 불가', 'status': 'not_computable', 'reason': _REASON_NO_NUMBER}
+    if func == 'sum':
+        return {'value': acc.total, 'text': _plain(acc.total), 'display': _grouped(acc.total), 'status': 'ok', 'reason': None}
     try:
         average = _DIV.divide(acc.total, Decimal(len(acc.rows)))
     except (InvalidOperation, Overflow):
         return {'value': None, 'text': None, 'display': '계산 불가', 'status': 'not_computable', 'reason': _REASON_PRECISION}
-    return {'value': average, 'text': _ratio_text(average), 'display': _grouped(_round1(average)), 'status': 'ok', 'reason': None}
+    return {'value': average, 'text': _ratio_text(average), 'display': _grouped(_round1_exact(acc.total, Decimal(len(acc.rows)))), 'status': 'ok', 'reason': None}
 
 
 def _growth_result(current, previous):
@@ -366,7 +368,8 @@ def _growth_result(current, previous):
         rate = _DIV.divide(scaled, previous['value'])
     except (InvalidOperation, Overflow, DivisionByZero):
         return failed(_REASON_PRECISION)
-    return {'value': rate, 'text': _ratio_text(rate), 'display': f'{_grouped(_round1(rate))}%', 'status': 'ok', 'reason': None}
+    shown = _round1_exact(scaled, previous['value'])
+    return {'value': rate, 'text': _ratio_text(rate), 'display': f'{_grouped(shown)}%', 'status': 'ok', 'reason': None}
 
 
 def _sort_component(value):
@@ -439,7 +442,8 @@ def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_group
 
     def sort_value(key):
         if sort_index < len(groups):
-            return _sort_component(key[sort_index])
+            value = key[sort_index]
+            return None if value is None else _sort_component(value)  # blank group goes last
         offset = sort_index - len(groups)
         cell = results[key][offset] if offset < len(measures) else growth_results[key][offset - len(measures)][0]
         return cell['value']

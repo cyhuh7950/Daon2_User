@@ -145,10 +145,11 @@ def test_avg_no_rows_not_computable():
                                          measures=[{'id': 'a', 'func': 'avg', 'column': '지급액'}]))
     cell = by_key(result)[0]['a']
     assert cell['status'] == 'not_computable' and cell['value'] is None and cell['reason']
-    # 아무 행도 맞지 않는 묶음 없는 집계: 한 줄, 개수 0, 평균 계산 불가
+    # 아무 행도 맞지 않는 묶음 없는 집계: 한 줄, 건수 0, 합계·평균 계산 불가
     result = run(make_table(SAMPLE), spec(filters=[{'column': '상품', 'op': 'eq', 'value': 'Z'}], measures=MEASURES3))
     (row,) = by_key(result)
-    assert row['n']['value'] == '0' and row['s']['value'] == '0'
+    assert row['n']['value'] == '0'
+    assert (row['s']['status'], row['s']['reason']) == ('not_computable', '숫자 값 없음')
     assert row['a']['status'] == 'not_computable'
 
 
@@ -361,3 +362,70 @@ def test_spec_validation():
     for item in bad:
         with pytest.raises(ValueError, match='AGGREGATION_SPEC_INVALID'):
             run(t, item)
+
+
+# ------------------------------------------------------------------ fix round 1
+
+def test_count_with_column_counts_all_rows():
+    rows = [(date(2026, 1, 1), 'A', D('1')), (date(2026, 1, 2), 'A', None),
+            (date(2026, 1, 3), 'A', NotNumber('x')), (date(2026, 1, 4), 'A', None)]
+    result = run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': '지급액'}]))
+    (row,) = by_key(result)
+    assert row['n']['value'] == '4'
+    ev = result['evidence'][row['n']['evidence_id']]
+    assert expand(ev['ranges']) == {2, 3, 4, 5}
+    assert ev['ranges'] == ['청구내역!G2:G5']
+    assert ev['row_count'] == 4
+    assert '건수' in ev['formula']
+
+
+def test_sum_without_numbers_not_computable_and_next_growth():
+    rows = [(date(2026, 1, 1), 'A', NotNumber('q')), (date(2026, 1, 2), 'A', None), (date(2026, 2, 1), 'A', D('5'))]
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}]))
+    jan, feb = by_key(result)
+    assert (jan['s']['status'], jan['s']['reason'], jan['s']['value']) == ('not_computable', '숫자 값 없음', None)
+    assert feb['s']['value'] == '5'
+    assert (feb['growth_s']['status'], feb['growth_s']['reason']) == ('not_computable', '전월 값 계산 불가')
+
+
+def test_sum_of_real_zeros_stays_zero():
+    rows = [(date(2026, 1, 1), 'A', D('5')), (date(2026, 1, 2), 'A', D('-5')), (date(2026, 1, 3), 'A', NotNumber('q'))]
+    result = run(make_table(rows), spec(measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}]))
+    (row,) = by_key(result)
+    assert (row['s']['status'], row['s']['value'], row['s']['display']) == ('ok', '0', '0')
+
+
+def test_display_rounds_from_exact_fraction():
+    def avg(values):
+        rows = [(date(2026, 1, 1), 'A', D(v)) for v in values]
+        (row,) = by_key(run(make_table(rows), spec(measures=[{'id': 'a', 'func': 'avg', 'column': '지급액'}])))
+        return row['a']
+    assert avg(['0.0499999999999999999999999999999'])['display'] == '0.0'
+    big = avg(['12345678901234567890123456789.04', '12345678901234567890123456789.06'])
+    assert big['display'] == '12,345,678,901,234,567,890,123,456,789.1'
+    assert avg(['-0.05'])['display'] == '-0.1'
+    assert avg(['1', '2', '2'])['display'] == '1.7'
+    # 증감률: (x − 3) / 3 × 100 이 정확히 −33.35 → −33.4
+    rows = [(date(2026, 1, 1), 'A', D('3')), (date(2026, 2, 1), 'A', D('1.9995'))]
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}]))
+    assert by_key(result)[1]['growth_s']['display'] == '-33.4%'
+    # 전월 3 → 1: −66.666…% (반올림 경계 아님) → −66.7%
+    rows = [(date(2026, 1, 1), 'A', D('3')), (date(2026, 2, 1), 'A', D('1'))]
+    result = run(make_table(rows), spec(group_by=[{'column': '청구일', 'month': True}],
+                                         measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}],
+                                         growth=[{'measure_id': 's'}]))
+    assert by_key(result)[1]['growth_s']['display'] == '-66.7%'
+
+
+def test_blank_group_sorts_last_both_directions():
+    rows = [(date(2026, 1, 1), p, D('1')) for p in ['B', None, 'A', 'C']]
+    for desc, expected in ((False, ['A', 'B', 'C', None]), (True, ['C', 'B', 'A', None])):
+        result = run(make_table(rows), spec(group_by=[{'column': '상품', 'month': False}],
+                                             measures=[{'id': 'n', 'func': 'count', 'column': None}],
+                                             sort={'by': '상품', 'desc': desc}))
+        assert [r['상품']['value'] for r in by_key(result)] == expected
+        assert by_key(result)[-1]['상품']['display'] == '(빈칸)'
