@@ -137,7 +137,10 @@
   .workspace-app-bar .workspace-app-actions .notebook-tools { flex-wrap: nowrap; gap: 4px; }
   .workspace-app-bar .app-action-icon { display: inline-block; }
   .workspace-app-bar .app-action-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .workspace-app-bar .workspace-app-actions button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; }
+  .workspace-app-bar .workspace-app-actions > button, .workspace-app-bar .settings-menu-anchor > button, .workspace-app-bar .notebook-tools > button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; }
+  .adaptive-workspace[data-product-workspace-state] .workspace-app-actions > button,
+  .adaptive-workspace[data-product-workspace-state] .settings-menu-anchor > button,
+  .adaptive-workspace[data-product-workspace-state] .notebook-tools > button { width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; }
   .workspace-app-bar .workspace-status { min-height: 0; padding: 0 4px; border: 0; background: transparent; }
   .workspace-app-bar .workspace-status .status-text { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }

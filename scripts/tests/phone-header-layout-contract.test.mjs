@@ -36,6 +36,19 @@ test("600px 이하: 머리줄 한 줄, 이름 줄임, 상태는 점만, 버튼�
   assert.match(phone, /\.workspace-brand h1[^{]*\{[^}]*text-overflow:\s*ellipsis/u);
   assert.match(phone, /\.workspace-app-bar \.app-action-icon \{[^}]*display:\s*inline-block/u);
   assert.match(phone, /\.workspace-app-bar \.app-action-label[^{]*\{[^}]*clip:\s*rect\(0 0 0 0\)/u);
-  assert.match(phone, /\.workspace-app-actions button[^{]*\{[^}]*width:\s*36px/u);
+  assert.match(phone, /\.workspace-app-actions > button[^{]*\{[^}]*width:\s*36px/u);
   assert.match(phone, /\.workspace-status \.status-text[^{]*\{[^}]*clip:\s*rect\(0 0 0 0\)/u);
+});
+
+test("600px 이하 아이콘 버튼 크기는 넓은 화면 규칙(.adaptive-workspace[data-product-workspace-state] … > button)보다 약하지 않다", () => {
+  const phone = block(css, "@media (max-width: 600px)");
+  assert.match(phone, /\.adaptive-workspace\[data-product-workspace-state\] \.workspace-app-actions > button,[\s\S]{0,200}\.adaptive-workspace\[data-product-workspace-state\] \.settings-menu-anchor > button[\s\S]{0,200}\{[^}]*min-height:\s*36px[^}]*padding:\s*0/u);
+});
+
+test("600px 이하 아이콘 버튼 규칙은 머리줄 버튼 자체에만 걸리고 펼침 메뉴 항목에는 걸리지 않는다", () => {
+  // 배포 뒤 확인: '.workspace-app-actions button'(자손 전체)이 설정·노트북 메뉴 항목까지 36px로 줄였다.
+  const phone = block(css, "@media (max-width: 600px)");
+  assert.doesNotMatch(phone, /\.workspace-app-actions button\b/u);
+  assert.doesNotMatch(phone, /\.notebook-tools button\b/u);
+  assert.match(phone, /\.notebook-tools > button/u);
 });
