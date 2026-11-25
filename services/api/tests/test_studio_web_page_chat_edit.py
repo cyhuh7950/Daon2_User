@@ -5,8 +5,9 @@ import copy
 import unittest
 from contextlib import contextmanager
 
-from daon2_user_api.studio_chat_edit import CHAT_EDIT_TYPES, flatten
+from daon2_user_api.studio_chat_edit import CHAT_EDIT_TYPES, ChatEditInvalid, apply_changes, flatten
 from daon2_user_api.studio_chat_edit_runner import ChatEditRunner
+from daon2_user_api.studio_source_reader import SourceSection, SourceText
 from daon2_user_api.studio_v2_generation import GeneratorRegistry
 from daon2_user_api.studio_v2_queue import StudioV2Job
 from daon2_user_api.studio_v2_worker import StudioV2Worker
@@ -151,6 +152,14 @@ class SaveAndListTests(unittest.TestCase):
         update = repo.updates("preview_json")[0]
         self.assertEqual(update[1][4].obj, preview)
 
+    def test_preview_html_only_for_ready_turns(self):
+        preview = {"html": "<html>새</html>", "body": {}}
+        repo = Repo(type_id="web_page", turns=[turn(turn_id=f"svt-{state}", state=state, preview_json=preview) for state in ("ready", "applied", "discarded", "failed")])
+        turns = {item["turn_id"]: item for item in repo.list_edit_turns(CTX, OID)}
+        self.assertEqual(turns["svt-ready"]["preview_html"], "<html>새</html>")
+        for state in ("applied", "discarded", "failed"):
+            self.assertIsNone(turns[f"svt-{state}"]["preview_html"])
+
     def test_list_turns_has_preview_html(self):
         repo = Repo(type_id="web_page", turns=[turn(preview_json={"html": "<html>새</html>", "body": {}}), turn(turn_id="svt-2", preview_json={})])
         turns = {item["turn_id"]: item for item in repo.list_edit_turns(CTX, OID)}
@@ -158,6 +167,85 @@ class SaveAndListTests(unittest.TestCase):
         self.assertIsNone(turns["svt-2"]["preview_html"])
         self.assertNotIn("preview_json", turns["svt-1"])
         self.assertNotIn("body", turns["svt-1"])
+
+
+class TagReader:
+    """파일 이름·위치에는 숫자가 있고 본문에는 없는 자료."""
+
+    def __init__(self, text="참여 기관 목록을 정리했다."):  # type: ignore[no-untyped-def]
+        self.text = text
+
+    def read(self, context, versions, **kwargs):  # type: ignore[no-untyped-def]
+        return (SourceText("src-1", "sv-1", "2024년_현황.pdf", (SourceSection("sv-1", None, "page", "12", None, self.text),), False),)
+
+
+class MaterialWebRepo(WebRepo):
+    def chat_material_scope(self, context, output_id):  # type: ignore[no-untyped-def]
+        return {"versions": ["sv-1"], "refs": {"S1"}}
+
+
+NEW_FACT = {"reply": "보강했습니다", "changes": [{"op": "insert_after", "id": "s1.b2", "content": {"type": "paragraph", "text": "2024년에 참여 기관은 12곳이다.", "refs": ["S2"]}, "reason": ""}]}
+
+
+class MaterialEvidenceTests(unittest.TestCase):
+    def run_with(self, reader):  # type: ignore[no-untyped-def]
+        llm, repo = FakeLlm({"needs_material": True, "reason": "더 필요"}, NEW_FACT, {"html": PAGE}), MaterialWebRepo()
+        ChatEditRunner(llm, repo, reader=reader).run(CTX, OID, "svt-1", "web_page", cancel_check=lambda: None)
+        self.assertIn('file="2024년_현황.pdf"', llm.prompts[1].user)
+        return repo.saved[0]["preview"]["body"]["sections"][0]["blocks"][2]
+
+    def test_tag_attribute_numbers_are_not_evidence(self):
+        block = self.run_with(TagReader())
+        self.assertEqual((block["text"], block["refs"], block["insufficient"]), ("2024년에 참여 기관은 12곳이다.", ["S2"], True))
+
+    def test_numbers_in_material_body_are_evidence(self):
+        block = self.run_with(TagReader("2024년 참여 기관은 12곳이다."))
+        self.assertFalse(block["insufficient"])
+
+
+TABLE_WEB = {"body": {**WEB["body"], "sections": [
+    WEB["body"]["sections"][0],
+    {"heading": "자료", "blocks": [{"type": "paragraph", "text": "설명", "refs": ["S1"], "insufficient": False},
+                                   {"type": "table", "rows": [["항목", "값"]], "refs": ["S1"], "insufficient": False}]},
+    {"heading": "정리", "blocks": [{"type": "bullets", "items": ["가", "나"], "refs": ["S1"], "insufficient": False}]},
+]}}
+PARA = {"type": "paragraph", "text": "새 문단", "refs": ["S1"]}
+
+
+class TableProtectionTests(unittest.TestCase):
+    def assert_invalid(self, *changes):  # type: ignore[no-untyped-def]
+        with self.assertRaises(ChatEditInvalid):
+            apply_changes("web_page", TABLE_WEB, list(changes), {"S1"})
+
+    def test_section_with_metric_cannot_be_replaced_or_deleted(self):
+        self.assert_invalid({"op": "replace", "id": "s1", "content": {"heading": "개요", "blocks": [PARA]}})
+        self.assert_invalid({"op": "delete", "id": "s1"})
+
+    def test_section_with_table_cannot_be_replaced_or_deleted(self):
+        self.assert_invalid({"op": "replace", "id": "s2", "content": {"heading": "자료", "blocks": [PARA]}})
+        self.assert_invalid({"op": "delete", "id": "s2"})
+
+    def test_block_cannot_become_or_add_table_or_metric(self):
+        self.assert_invalid({"op": "replace", "id": "s2.b1", "content": {"type": "table", "rows": [["a", "b"]], "refs": ["S1"]}})
+        self.assert_invalid({"op": "insert_after", "id": "s1.b1", "content": {"type": "metric", "label": "인원", "value": "40명", "refs": ["S1"]}})
+
+    def test_new_section_cannot_carry_table_or_metric(self):
+        self.assert_invalid({"op": "insert_after", "id": "s3", "content": {"heading": "추가", "blocks": [{"type": "metric", "label": "a", "value": "1", "refs": ["S1"]}]}})
+        self.assert_invalid({"op": "replace", "id": "s3", "content": {"heading": "정리", "blocks": [{"type": "table", "rows": [["a"]], "refs": ["S1"]}]}})
+
+    def test_text_only_section_can_still_be_replaced_or_deleted(self):
+        replaced = apply_changes("web_page", TABLE_WEB, [{"op": "replace", "id": "s3", "content": {"heading": "새 정리", "blocks": [PARA]}}], {"S1"})
+        self.assertEqual(replaced["body"]["sections"][2]["heading"], "새 정리")
+        deleted = apply_changes("web_page", TABLE_WEB, [{"op": "delete", "id": "s3"}], {"S1"})
+        self.assertEqual(len(deleted["body"]["sections"]), 2)
+
+    def test_runner_rejects_table_change_as_invalid_turn(self):
+        bad = {"reply": "x", "changes": [{"op": "delete", "id": "s2"}]}
+        llm, repo = FakeLlm(bad, bad), WebRepo(content=TABLE_WEB)
+        with self.assertRaises(StudioError) as caught:
+            run_web(llm, repo)
+        self.assertEqual(caught.exception.code, "CHAT_EDIT_INVALID")
+        self.assertEqual((len(llm.prompts), repo.saved), (2, []))
 
 
 class FlattenTests(unittest.TestCase):

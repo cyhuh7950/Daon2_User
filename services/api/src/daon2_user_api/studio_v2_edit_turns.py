@@ -26,7 +26,7 @@ def _public(record: Mapping[str, Any]) -> dict[str, Any]:
     return {"turn_id": record["turn_id"], "output_id": record["output_id"], "base_revision": record["base_revision"], "instruction": record["instruction"],
             "state": record["state"], "reply": record["reply"], "changes": [{key: change.get(key, "" if key == "anchor_text" else None) for key in _PUBLIC_CHANGE} for change in record["changes_json"]],
             "error_code": record["error_code"], "applied_revision": record["applied_revision"], "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
-            "preview_html": _preview_html(record.get("preview_json"))}
+            "preview_html": _preview_html(record.get("preview_json")) if record["state"] == "ready" else None}
 
 
 def _preview_html(preview: object) -> str | None:

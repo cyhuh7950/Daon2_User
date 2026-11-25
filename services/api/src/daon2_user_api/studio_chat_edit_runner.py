@@ -46,6 +46,8 @@ NOT_FOUND = "[찾은 자료]\n자료를 찾지 못했습니다."
 class _Material:
     text: str = ""
     rows: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    # 근거 판정용 자료 본문만(태그·파일 이름·위치 글 제외). 파일 이름의 숫자가 근거로 잡히지 않게 한다.
+    plain: str = ""
 
 
 def _data(text: str) -> str:
@@ -115,7 +117,7 @@ class ChatEditRunner:
             merged = apply_changes(WEB_PAGE_TYPE, content, changes, known)
         except ChatEditInvalid:
             raise StudioError("CHAT_EDIT_INVALID", 422) from None
-        body = {**mark_edited_blocks(merged["body"], content["body"], material.text), "html": ""}
+        body = {**mark_edited_blocks(merged["body"], content["body"], material.plain), "html": ""}
         html = render_web_page_html(self._llm, context, body, str(body.get("request", "")), cancel_check=cancel_check)
         return {"html": html, "body": body}
 
@@ -165,7 +167,7 @@ class ChatEditRunner:
             return _Material(NOT_FOUND)
         rows = {row["ref_id"]: row for row in pack.evidence_rows([passage.ref for passage in pack.passages])}
         shown = ContextPack(tuple(replace(passage, text=_data(passage.text), filename=_data(passage.filename)) for passage in pack.passages), pack.truncated, pack.total_sections)
-        return _Material(f"[찾은 자료]\n{shown.render()}", rows)
+        return _Material(f"[찾은 자료]\n{shown.render()}", rows, "\n".join(passage.text for passage in pack.passages))
 
     def _authored_material(self, context: StudioContext, instruction: str, content: Mapping[str, Any], cancel_check: Callable[[], None]) -> _Material:
         from .authoring.pipeline import render_knowledge
@@ -182,7 +184,8 @@ class ChatEditRunner:
                 new_rows[row["ref"]] = row
             material.append(row)
         shown = [{**row, "heading": _data(str(row.get("heading", ""))), "text": _data(str(row.get("text", "")))} for row in material]
-        return _Material(f"[찾은 자료]\n{render_knowledge(shown)}", new_rows) if material else _Material(NOT_FOUND)
+        plain = "\n".join(str(row.get("text", "")) for row in material)
+        return _Material(f"[찾은 자료]\n{render_knowledge(shown)}", new_rows, plain) if material else _Material(NOT_FOUND)
 
     def _answer(self, context: StudioContext, prompt: StudioPrompt, type_id: str, content: Mapping[str, Any], cancel_check: Callable[[], None]) -> tuple[str, list[Mapping[str, Any]]]:
         """형식이 틀리면 사유를 알려 1회만 다시 묻는다."""

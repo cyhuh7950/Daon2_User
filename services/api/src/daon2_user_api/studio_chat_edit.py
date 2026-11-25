@@ -234,6 +234,29 @@ def _merge_quiz(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any
     return {**body, "questions": _merge_list(body.get("questions", []), "q", by_id)}
 
 
+_FIXED_KINDS = ("table", "metric")
+
+
+def _has_fixed_block(blocks: object) -> bool:
+    return isinstance(blocks, Sequence) and any(isinstance(b, Mapping) and b.get("type") in _FIXED_KINDS for b in blocks)
+
+
+def _guard_web_page(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> None:
+    """웹 페이지의 표·수치 블록은 대화로 고치지 않는다: 그런 블록이 든 절을 통째로 바꾸거나 지울 수 없고,
+    새로 넣거나 바꾼 내용에 표·수치 블록이 들어갈 수 없다."""
+    sections = _body(content).get("sections", [])
+    for piece_id, change in by_id.items():
+        new = change.get("content") if isinstance(change.get("content"), Mapping) else {}
+        if "." not in piece_id and piece_id.startswith("s"):  # 절 전체 조각
+            original = sections[int(piece_id[1:]) - 1]
+            if change["op"] in ("replace", "delete") and _has_fixed_block(original.get("blocks")):
+                raise ChatEditInvalid(f"{piece_id} 절에는 표·수치가 있어 통째로 바꾸거나 지울 수 없습니다. 문단·목록 조각만 고치세요.")
+            if _has_fixed_block(new.get("blocks")):
+                raise ChatEditInvalid(f"{piece_id} 절에 표·수치 블록을 새로 넣을 수 없습니다.")
+        elif change["op"] != "delete" and new.get("type") in _FIXED_KINDS:
+            raise ChatEditInvalid(f"{piece_id} 조각을 표·수치 블록으로 바꾸거나 표·수치 블록을 새로 넣을 수 없습니다.")
+
+
 def _merge_web_page(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     """보고서 끼워 넣기를 쓰되 웹 페이지에 없는 요약 칸은 만들지 않는다. 고치지 않은 블록의 insufficient는 그대로 남는다."""
     merged = _merge_report(content, by_id)
@@ -292,6 +315,8 @@ def _apply_authored(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str,
 def apply_changes(type_id: str, content: Mapping[str, Any], changes: Sequence[Mapping[str, Any]], known_refs: set[str]) -> dict[str, Any]:
     """수정안을 끼워 새 내용을 돌려준다. 원본은 바꾸지 않는다. 저장 규칙을 어기면 ChatEditInvalid."""
     by_id = _index(type_id, content, changes)
+    if type_id == WEB_PAGE_TYPE:
+        _guard_web_page(content, by_id)
     if type_id == AUTHORED_TYPE:
         return _apply_authored(content, by_id, known_refs)
     merged = copy.deepcopy(_MERGE[type_id](content, by_id))
