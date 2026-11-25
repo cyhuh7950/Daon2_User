@@ -35,6 +35,12 @@ class StudioV2TypesTests(unittest.TestCase):
         ids = [item["type_id"] for item in items]
         self.assertEqual(ids[ids.index("web_page") - 1], "data_table")
 
+    def test_web_page_requires_page_request_at_create(self):
+        for settings in ({}, {"page_request": ""}, {"page_request": "   "}):
+            with self.assertRaises(ValueError):
+                validate_settings("web_page", None, settings)
+        self.assertEqual(validate_settings("web_page", None, {"page_request": " 안내 페이지 "}), (None, {"page_request": " 안내 페이지 "}))
+
     def test_validate_settings_defaults_and_rejections(self):
         self.assertEqual(validate_settings("report", None, {}), ("summary", {}))
         self.assertEqual(validate_settings("quiz", None, {"count": 10, "focus": "핵심"}), (None, {"count": 10, "focus": "핵심"}))

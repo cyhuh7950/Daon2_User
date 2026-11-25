@@ -59,3 +59,16 @@ test("대화로 고치기 유형에 web_page가 있고, 예전 제품 스튜디�
 test("출처 목록 넣기 메뉴 항목은 키보드 초점 테두리가 보인다(최종 검토 M3)", () => {
   assert.match(read("packages/ui/src/studio-panel.css"), /\.studio-panel \.studio-menu__check:focus-visible \{ outline: 3px solid var\(--studio-focus\); \}/u);
 });
+
+test("요청 글이 필요한 유형은 타일을 눌러도 바로 만들지 않고 설정 창을 연다", () => {
+  const panel = read("packages/ui/src/studio-panel.jsx");
+  assert.match(panel, /settings_schema\?\.properties\?\.page_request\) setDialog\(\{ kind: "settings", typeId \}\)/u);
+});
+
+test("노트북 화면은 포커스가 앱 안 웹 페이지 iframe으로 옮겨 갈 때 화면을 가리지 않는다", () => {
+  const workspace = read("apps/web/components/notebook-product-workspace.jsx");
+  const onBlur = workspace.match(/const onBlur = \(\) => \{[\s\S]*?\n    \};/u)?.[0] ?? "";
+  assert.match(onBlur, /document\.activeElement instanceof HTMLIFrameElement && document\.hasFocus\(\)/u);
+  assert.match(onBlur, /conceal\(\)/u);
+  assert.match(workspace, /if \(document\.visibilityState === "hidden"\) conceal\(\)/u);
+});
