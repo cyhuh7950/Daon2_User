@@ -916,7 +916,7 @@ const measure = () => {
           assert.equal(Math.round(r.after.paneHeight), Math.round(r.before.paneHeight), `${label}: 소스 칸 높이가 그대로여야 한다`);
           assert.ok(r.after.listBottom <= r.after.paneBottom, `${label}: 결과 목록 창은 소스 칸 안에 있다`);
         } else {
-          // 좁은 화면(820px 이하)은 기존 셸이 한 창씩 세로로 쌓는 배치라 찾기 전부터 페이지가 길다(이번 단위에서 바꾸지 않음).
+          // 좁은 화면(820px 이하) 배치는 narrow-workspace-layout-contract.test.mjs가 따로 지킨다(한 면만 보이고 페이지 스크롤 없음).
           // 결과가 아무리 많아도 늘어나는 높이는 결과 목록 창 하나 크기(+안내·버튼 줄)를 넘지 않는다.
           assert.ok(r.after.pageHeight - r.before.pageHeight <= r.after.listHeight + 120, `${label}: 결과 수만큼 페이지가 늘어나지 않는다`);
         }
