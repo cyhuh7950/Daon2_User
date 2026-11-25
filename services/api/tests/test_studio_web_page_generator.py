@@ -50,7 +50,7 @@ class WebPageGeneratorTests(unittest.TestCase):
         self.assertEqual(len(llm.prompts), 2)
         stage2 = llm.prompts[1]
         self.assertEqual(stage2.json_schema["required"], ["html"])
-        self.assertEqual(stage2.max_output_tokens, 16000)
+        self.assertEqual(stage2.max_output_tokens, 8000)
         self.assertNotEqual(stage2.prompt_version, llm.prompts[0].prompt_version)
         self.assertEqual({e["ref_id"] for e in result.evidence}, {"S1", "S2"})
 
@@ -135,6 +135,55 @@ class WebPageGeneratorTests(unittest.TestCase):
         self.assertEqual(len(sizes), len(transport.calls))
         sent = transport.calls[1][2]["response_format"]["json_schema"]["schema"]
         self.assertEqual(json.loads(json.dumps(sent))["required"], ["html"])
+
+
+class _Reply:
+    def __init__(self, data):  # type: ignore[no-untyped-def]
+        self.data, self.usage, self.model_id, self.provider_code, self.connection_short_code = data, {}, "m", "CUSTOM", "MS"
+
+
+class FormatLLM(ScriptedLLM):
+    """응답 자리에 예외를 두면 그 예외를 낸다(2단계 형식 오류 흉내)."""
+
+    def generate(self, context, prompt, cancel_check=None):  # type: ignore[no-untyped-def]
+        self.prompts.append(prompt)
+        data = self.responses.pop(0)
+        if isinstance(data, Exception):
+            raise data
+        return _Reply(data)
+
+
+def run_format(*responses):  # type: ignore[no-untyped-def]
+    llm = FormatLLM(*responses)
+    result = WebPageGenerator(FakeReader(), llm).generate(gen_ctx("web_page", SETTINGS)[0])
+    return result, llm
+
+
+class Stage2FormatErrorTests(unittest.TestCase):
+    """최종 검토 I6: 2단계 응답 형식 오류도 한 번뿐인 재시도 안에서 센다."""
+
+    def test_format_error_then_success(self):
+        result, llm = run_format(STAGE1, StudioError("STUDIO_VALIDATION_FAILED", 502), {"html": GOOD})
+        self.assertEqual(len(llm.prompts), 3)
+        self.assertIn("[직전 결과 검사 실패]", llm.prompts[2].user)
+        self.assertIn("data-daon-bridge", result.content["body"]["html"])
+
+    def test_format_error_twice_fails(self):
+        with self.assertRaises(StudioError) as caught:
+            run_format(STAGE1, StudioError("STUDIO_VALIDATION_FAILED", 502), StudioError("STUDIO_VALIDATION_FAILED", 502))
+        self.assertEqual(caught.exception.code, "STUDIO_VALIDATION_FAILED")
+
+    def test_format_error_then_check_failure_fails_without_third_call(self):
+        llm = FormatLLM(STAGE1, StudioError("STUDIO_VALIDATION_FAILED", 502), {"html": BAD}, {"html": GOOD})
+        with self.assertRaisesRegex(StudioError, "STUDIO_VALIDATION_FAILED"):
+            WebPageGenerator(FakeReader(), llm).generate(gen_ctx("web_page", SETTINGS)[0])
+        self.assertEqual(len(llm.prompts), 3)
+
+    def test_provider_unavailable_is_not_retried(self):
+        llm = FormatLLM(STAGE1, StudioError("PROVIDER_UNAVAILABLE", 503), {"html": GOOD})
+        with self.assertRaises(StudioError) as caught:
+            WebPageGenerator(FakeReader(), llm).generate(gen_ctx("web_page", SETTINGS)[0])
+        self.assertEqual((caught.exception.code, len(llm.prompts)), ("PROVIDER_UNAVAILABLE", 2))
 
 
 if __name__ == "__main__":

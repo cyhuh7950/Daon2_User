@@ -355,12 +355,14 @@ WEB_PAGE_HTML_RULES = (
     "8) 출력은 {\"html\": \"...\"} JSON 객체 하나뿐입니다. html 값에 HTML 문서 전체를 넣습니다.\n"
 )
 WEB_PAGE_HTML_SCHEMA = {"type": "object", "properties": {"html": {"type": "string"}}, "required": ["html"]}
-WEB_PAGE_HTML_TOKENS = 16000
+# 설정·Provider 목록에 모델별 출력 한도 값은 없다. 다른 스튜디오 호출의 최대(6000)보다 조금 큰 값으로 둔다(최종 검토 I6).
+WEB_PAGE_HTML_TOKENS = 8000
 _RETRY_NOTES = {
     "numbers": "페이지 내용 JSON에 없는 숫자·날짜·식별자가 페이지에 있었습니다. 다음 값을 빼고 내용 JSON에 있는 값만 쓰세요",
     "headings": "다음 절 제목이 페이지에 글자 그대로 보이지 않았습니다. 각 절 제목을 그대로 제목 요소로 쓰세요",
     "size": "HTML이 너무 큽니다. 꾸밈을 줄여 더 간결하게 다시 쓰세요",
     "empty": "HTML이 비어 있거나 보이는 글이 없었습니다. 완결된 HTML 문서를 html 값에 넣으세요",
+    "format": "응답이 지정한 JSON 형식이 아니었습니다. {\"html\": \"...\"} 객체 하나만, 간결한 HTML로 다시 쓰세요",
 }
 
 
@@ -395,7 +397,14 @@ def render_web_page_html(llm: StudioTextGenerator, context: StudioContext, body:
         prompt = StudioPrompt(system=WEB_PAGE_HTML_RULES, user=user + note, json_schema=WEB_PAGE_HTML_SCHEMA,
                               max_output_tokens=WEB_PAGE_HTML_TOKENS, prompt_version="studio-v1-web_page-html",
                               schema_name="studio_web_page_html")
-        raw = llm.generate(context, prompt, cancel_check=cancel_check).data.get("html")
+        try:
+            raw = llm.generate(context, prompt, cancel_check=cancel_check).data.get("html")
+        except StudioError as error:
+            # 응답 형식 오류(JSON·스키마)도 한 번뿐인 재시도 안에서 센다. 연결 실패 등 다른 오류는 그대로 올린다.
+            if error.code != "STUDIO_VALIDATION_FAILED":
+                raise
+            note = _retry_note(WebPageCheckFailed("format"))
+            continue
         try:
             return finalize_html(raw if isinstance(raw, str) else "", allowed, request, headings)
         except WebPageCheckFailed as failure:
