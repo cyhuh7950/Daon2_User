@@ -90,6 +90,31 @@ class XlsxAggregationOnlySourceTests(unittest.TestCase):
                 read_xlsx(corrupt)
             self.assertNotIsInstance(other.exception, XlsxIndexLimitExceeded)
 
+    def test_corruption_after_index_limit_still_rejects(self):
+        """검토 보강: 한도(셀 2,048·32 KB)를 넘은 뒤의 셀도 같은 검사를 거쳐 손상이면 집계 전용이 아니다."""
+        corruptions = {
+            'duplicate-address': '<row r="99999"><c r="A1"><v>1</v></c></row>',
+            'duplicate-row': '<row r="5"><c r="B5"><v>1</v></c></row>',
+            'shared-string-out-of-range': '<row r="99999"><c r="A99999" t="s"><v>99999</v></c></row>',
+            'invalid-address': '<row r="99999"><c r="!!"><v>1</v></c></row>',
+            'unsupported-cell-type': '<row r="99999"><c r="A99999" t="zzz"><v>1</v></c></row>',
+            'missing-style-index': '<row r="99999"><c r="A99999" s="999"><v>1</v></c></row>',
+        }
+
+        def sheet(count, tail=''):
+            rows = ''.join(f'<row r="{i}"><c r="A{i}"><v>{i}</v></c></row>' for i in range(1, count + 1))
+            return zipped(parts([('매출', '<sheetData>' + rows + tail + '</sheetData>', 'visible')]))
+
+        # 2,100: 셀 수 한도만 넘음. 6,000: 파싱 중 32 KB 셀 구조 한도도 넘음.
+        for count in (2100, 6000):
+            with self.subTest(count=count, kind='clean'), self.assertRaises(XlsxIndexLimitExceeded):
+                read_xlsx(sheet(count))
+            for kind, tail in corruptions.items():
+                with self.subTest(count=count, kind=kind):
+                    with self.assertRaises(SourceRejected) as raised:
+                        read_xlsx(sheet(count, tail))
+                    self.assertNotIsInstance(raised.exception, XlsxIndexLimitExceeded)
+
     def test_large_xlsx_completes_as_aggregation_only(self):
         content = large_xlsx()
         store, storage = processing_fixture(content)

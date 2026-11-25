@@ -144,7 +144,7 @@ def _local(tag):
     return tag.rsplit('}', 1)[-1]
 
 
-def _xml_records(stream, total):
+def _xml_records(stream, total, on_cell=None):
     """Pull parse with completed records removed; scan UTF-8/16/32 ASCII markup.
 
     Removing NUL bytes only for the security scan covers BOM/endianness without
@@ -202,11 +202,13 @@ def _xml_records(stream, total):
                     record['inline'] = ''.join(node.text or '' for node in values['is'].iter() if _local(node.tag) == 't') if 'is' in values else None
                     record['row'] = dict(parent.attrib) if parent is not None and _local(parent.tag) == 'row' else None
                     raw_cell_bytes += len(_dump(record['attrs']).encode('utf-8'))
-                    # Question-index limit, not corruption: keep validating each cell's
-                    # markup but stop keeping cell/row records (bounded memory), and keep
-                    # parsing so every other structural and security check still runs.
-                    if raw_cell_bytes > _MAX_NATIVE_BYTES: total[1] = True
-                if not (total[1] and tag in {'c', 'row'}): records.append(record)
+                    # Question-index limit, not corruption: stop keeping cell/row records
+                    # (bounded memory) and keep parsing so every other structural and
+                    # security check still runs. read_xlsx then re-streams every worksheet
+                    # through _validate_sheet_stream so no cell escapes the per-cell checks.
+                    if on_cell is None and raw_cell_bytes > _MAX_NATIVE_BYTES: total[1] = True
+                if on_cell is not None and tag in {'c', 'row'}: on_cell(record)
+                elif not (total[1] and tag in {'c', 'row'}): records.append(record)
             stack.pop()
             if not inside_value:
                 if parent is not None: parent.remove(elem)
@@ -252,6 +254,33 @@ def _parts(content):
                 resolved = posixpath.normpath(target.lstrip('/') if target.startswith('/') else posixpath.join(base, target))
                 if resolved.startswith('../') or resolved not in names: _reject()
     return result, total[1]
+
+
+def _validate_sheet_stream(content, target, strings, formats, date1904, hidden_columns):
+    """Validation-only second pass for an over-limit workbook (WO-N9).
+
+    Every cell and row goes through the same checks as the indexed path (_cell,
+    address and row uniqueness), but only integers are kept, never cell records.
+    Any corruption raises a plain SourceRejected, never XlsxIndexLimitExceeded.
+    """
+    addresses = set(); rows = set()
+
+    def check(record):
+        if record['tag'] == 'row':
+            row = _integer(record['attrs'].get('r'), minimum=1)
+            if row in rows: _reject()
+            rows.add(row)
+            return
+        cell = _cell(record, strings, formats, date1904, hidden_columns)
+        col, row = _coordinate(cell['address'])
+        key = row * 16385 + col
+        if key in addresses: _reject()
+        addresses.add(key)
+
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        with archive.open(target) as stream:
+            root, _, _ = _xml_records(stream, [0, False], check)
+    if root != f'{{{_NS}}}worksheet': _reject()
 
 
 def _get_part(parts, name, root):
@@ -380,7 +409,7 @@ def read_xlsx(content: bytes) -> XlsxWorkbook:
             if not formats: _reject()
         sheet_records = [r for r in workbook if r['tag'] == 'sheet']
         if not 1 <= len(sheet_records) <= 8: _reject('UNSUPPORTED_FORMAT')
-        sheets = []; names = set(); targets = set(); nonempty = 0
+        sheets = []; names = set(); targets = set(); nonempty = 0; sheet_checks = []
         for record in sheet_records:
             attrs = record['attrs']; name = _sheet_name(attrs.get('name')); visibility = attrs.get('state', 'visible')
             if name in names or visibility not in {'visible', 'hidden', 'veryHidden'}: _reject()
@@ -391,6 +420,7 @@ def read_xlsx(content: bytes) -> XlsxWorkbook:
             if target in targets: _reject()
             targets.add(target); rows = _get_part(parts, target, 'worksheet')
             hidden_columns = []; hidden_rows = []; merged = []; seen_rows = set()
+            sheet_checks.append((target, hidden_columns))
             for item in rows:
                 if item['tag'] == 'dimension': _bounds(item['attrs'].get('ref'))
                 if item['tag'] == 'col':
@@ -419,9 +449,14 @@ def read_xlsx(content: bytes) -> XlsxWorkbook:
             sheets.append({'sheet_name': name, 'sheet_visibility': visibility, 'cells': cells, 'merged_ranges': merged, 'hidden_rows': hidden_rows, 'hidden_columns': hidden_columns, 'used_range': f'A1:{_address(max_col, max_row)}' if (max_col, max_row) != (1, 1) else 'A1'})
         # Index limits are decided only after every structural check above passed,
         # so a corrupted or unsupported workbook never becomes aggregation-only.
-        if over_limit: raise XlsxIndexLimitExceeded('UNSUPPORTED_FORMAT')
-        native_json = _dump({'serialization_version': 'xlsx-structure-v1', 'date1904': date1904, 'sheets': sheets})
-        if len(native_json.encode('utf-8')) > _MAX_NATIVE_BYTES: raise XlsxIndexLimitExceeded('UNSUPPORTED_FORMAT')
+        native_json = None
+        if not over_limit:
+            native_json = _dump({'serialization_version': 'xlsx-structure-v1', 'date1904': date1904, 'sheets': sheets})
+            over_limit = len(native_json.encode('utf-8')) > _MAX_NATIVE_BYTES
+        if over_limit:
+            for target, hidden_columns in sheet_checks:
+                _validate_sheet_stream(content, target, strings, formats, date1904, hidden_columns)
+            raise XlsxIndexLimitExceeded('UNSUPPORTED_FORMAT')
         return XlsxWorkbook(hashlib.sha256(content).hexdigest(), tuple(sheets), native_json)
     except SourceRejected: raise
     except (zipfile.BadZipFile, zipfile.LargeZipFile, ET.ParseError, OSError, EOFError, ValueError, TypeError, KeyError, RuntimeError, NotImplementedError, UnicodeError, zlib.error):
