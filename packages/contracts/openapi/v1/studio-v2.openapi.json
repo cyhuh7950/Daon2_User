@@ -3778,7 +3778,8 @@
           "changes",
           "error_code",
           "applied_revision",
-          "created_at"
+          "created_at",
+          "preview_html"
         ],
         "properties": {
           "turn_id": {
@@ -3868,6 +3869,12 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "preview_html": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

@@ -116,6 +116,7 @@ const schemas = {
     state: { type: "string", enum: ["queued", "working", "ready", "no_change", "failed", "applied", "discarded"] }, reply: nullable({ type: "string" }),
     changes: { type: "array", items: exact({ op: { type: "string", enum: ["replace", "insert_after", "delete"] }, id: { type: "string" }, before_text: { type: "string" }, after_text: { type: "string" }, reason: { type: "string" } }) },
     error_code: nullable({ type: "string" }), applied_revision: nullable({ type: "integer", minimum: 1 }), created_at: time,
+    preview_html: nullable({ type: "string" }),
   }),
   StudioV2EditTurnList: exact({ turns: { type: "array", items: ref("StudioV2EditTurn") } }),
   StudioV2CancelReceipt: exact({ output_id: id, cancel_requested: { type: "boolean" } }),
