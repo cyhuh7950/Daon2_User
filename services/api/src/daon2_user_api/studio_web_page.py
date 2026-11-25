@@ -53,22 +53,32 @@ def validate_web_page(data: Mapping[str, object], pack: ContextPack, request: st
     w = Warnings()
     used: list[str] = []
     by_ref = pack.by_ref()
+    pack_anchors: set = set()
+    for passage in pack.passages:
+        pack_anchors |= _evidence_anchors(passage.text)
     sections: list[dict[str, object]] = []
     verified_count = 0
     for si, section in enumerate(as_list(data.get("sections"), MAX_SECTIONS)):
         if not isinstance(section, Mapping):
             continue
+        heading = text_field(section.get("heading"), HEADING_LIMIT)
+        heading_ok = _evidence_anchors(heading).issubset(pack_anchors)
+        if not heading_ok:
+            w.add("ANCHOR_MISMATCH", f"sections[{si}].heading")
         blocks: list[dict[str, object]] = []
+        sec_verified = 0
+        sec_used: list[str] = []
         for bi, raw in enumerate(as_list(section.get("blocks"), MAX_BLOCKS_PER_SECTION)):
             if not isinstance(raw, Mapping):
                 continue
-            kind = raw.get("type") if raw.get("type") in _KINDS else "paragraph"
-            block = _build_block(str(kind), raw)
+            raw_kind = raw.get("type")
+            kind = raw_kind if isinstance(raw_kind, str) and raw_kind in _KINDS else "paragraph"
+            block = _build_block(kind, raw)
             if block is None:
                 continue
             path = f"sections[{si}].blocks[{bi}]"
             refs = clean_refs(raw.get("refs"), pack, w, path)
-            insufficient = not refs
+            insufficient = not refs or not heading_ok
             if refs:
                 source = "\n".join(by_ref[r].text for r in refs)
                 if not _evidence_anchors(_block_text(block)).issubset(_evidence_anchors(source)):
@@ -77,16 +87,22 @@ def validate_web_page(data: Mapping[str, object], pack: ContextPack, request: st
             block["refs"] = refs
             block["insufficient"] = insufficient
             if not insufficient:
-                verified_count += 1
-                used += refs
+                sec_verified += 1
+                sec_used += refs
             blocks.append(block)
-        heading = text_field(section.get("heading"), HEADING_LIMIT)
         if heading and blocks:
             sections.append({"heading": heading, "blocks": blocks})
+            verified_count += sec_verified
+            used += sec_used
     if not sections or verified_count == 0:
         raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+    title = text_field(data.get("title"), TITLE_LIMIT)
+    title_ok = _evidence_anchors(title).issubset(pack_anchors)
+    if not title_ok:
+        w.add("ANCHOR_MISMATCH", "title")
     body: dict[str, object] = {
-        "title": text_field(data.get("title"), TITLE_LIMIT),
+        "title": title,
+        "title_insufficient": not title_ok,
         "request": text_field(request, REQUEST_LIMIT),
         "sections": sections,
         "html": "",
@@ -102,7 +118,7 @@ def verified_body(body: Mapping[str, Any]) -> dict[str, Any]:
         blocks = [dict(b) for b in section.get("blocks", []) if not b.get("insufficient")]
         if blocks:
             sections.append({"heading": section.get("heading", ""), "blocks": blocks})
-    return {**body, "sections": sections}
+    return {**body, "title": "" if body.get("title_insufficient") else body.get("title", ""), "sections": sections}
 
 
 def verified_text(body: Mapping[str, Any]) -> str:

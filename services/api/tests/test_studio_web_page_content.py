@@ -100,3 +100,68 @@ def test_request_stored_trimmed_to_2000() -> None:
     data = _data([{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}])
     body, _, _ = validate_web_page(data, pack, "  " + "가" * 2500 + "  ")
     assert body["request"] == "가" * 2000
+
+
+def test_verified_blocks_in_headingless_section_do_not_count() -> None:
+    pack = _pack("보상 한도는 100만 원이다.")
+    data = {"title": "안내", "sections": [
+        {"heading": "", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]},
+        {"heading": "근거 없음", "blocks": [{"type": "paragraph", "text": "지어낸 문장", "refs": []}]},
+    ]}
+    with pytest.raises(StudioError) as excinfo:
+        validate_web_page(data, pack, "요청")
+    assert excinfo.value.code == "STUDIO_VALIDATION_FAILED"
+
+
+def test_headingless_section_refs_not_in_used() -> None:
+    pack = _pack("보상 한도는 100만 원이다.", "지급 기한은 30일이다.")
+    data = {"title": "안내", "sections": [
+        {"heading": "", "blocks": [{"type": "paragraph", "text": "지급 기한은 30일", "refs": ["S2"]}]},
+        {"heading": "개요", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]},
+    ]}
+    _, _, used = validate_web_page(data, pack, "요청")
+    assert used == ["S1"]
+
+
+def test_heading_with_unsupported_number_marks_section_insufficient() -> None:
+    pack = _pack("보상 한도는 100만 원이다.")
+    data = {"title": "안내", "sections": [
+        {"heading": "한도 999만 원 안내", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]},
+        {"heading": "개요", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]},
+    ]}
+    body, warnings, _ = validate_web_page(data, pack, "요청")
+    assert len(body["sections"]) == 2
+    assert body["sections"][0]["blocks"][0]["insufficient"] is True
+    assert any(w["code"] == "ANCHOR_MISMATCH" and w["path"] == "sections[0].heading" for w in warnings)
+    assert [s["heading"] for s in verified_body(body)["sections"]] == ["개요"]
+    assert "999" not in verified_text(body)
+
+
+def test_title_with_unsupported_number_is_dropped_from_verified() -> None:
+    pack = _pack("보상 한도는 100만 원이다.")
+    data = {"title": "2025년 안내", "sections": [
+        {"heading": "개요", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]}]}
+    body, warnings, _ = validate_web_page(data, pack, "요청")
+    assert body["title"] == "2025년 안내"
+    assert any(w["code"] == "ANCHOR_MISMATCH" and w["path"] == "title" for w in warnings)
+    assert verified_body(body)["title"] == ""
+    assert "2025" not in verified_text(body)
+
+
+def test_supported_title_and_heading_numbers_unaffected() -> None:
+    pack = _pack("보상 한도는 100만 원이다.")
+    data = {"title": "100만 원 안내", "sections": [
+        {"heading": "한도 100만 원", "blocks": [{"type": "paragraph", "text": "보상 한도는 100만 원", "refs": ["S1"]}]}]}
+    body, warnings, _ = validate_web_page(data, pack, "요청")
+    assert not warnings
+    assert body["sections"][0]["blocks"][0]["insufficient"] is False
+    assert verified_body(body)["title"] == "100만 원 안내"
+    assert "100만 원 안내" in verified_text(body)
+
+
+def test_non_string_block_type_does_not_raise() -> None:
+    pack = _pack("보상 한도는 100만 원이다.")
+    data = _data([{"type": ["x"], "text": "보상 한도는 100만 원", "refs": ["S1"]},
+                  {"type": {"a": 1}, "text": "보상 한도는 100만 원", "refs": ["S1"]}])
+    body, _, _ = validate_web_page(data, pack, "요청")
+    assert [b["type"] for b in body["sections"][0]["blocks"]] == ["paragraph", "paragraph"]
