@@ -171,12 +171,14 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
         <button type="button" className="studio-btn" aria-haspopup="menu" aria-expanded={downloadOpen} onClick={() => setDownloadOpen((v) => !v)}>{msg("studio.menu.download")}</button>
         {downloadOpen && <div className="studio-menu" role="menu" style={{ top: 44 }} onKeyDown={(event) => { if (event.key === "Escape") setDownloadOpen(false); }}>
           {exportFormats.map((format) => <Fragment key={format}>
-            {format === "html" && <label className="studio-menu__check">
-              <input type="checkbox" checked={includeSources} onChange={(event) => setIncludeSources(event.target.checked)} /> {msg("studio.web_page.include_sources")}</label>}
+            {format === "html" && <div role="menuitemcheckbox" aria-checked={includeSources} tabIndex={0} className="studio-menu__check"
+              onClick={() => setIncludeSources((value) => !value)}
+              onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setIncludeSources((value) => !value); } }}>
+              <span className="studio-menu__box" aria-hidden="true" data-checked={includeSources}>{includeSources ? "✓" : ""}</span>{msg("studio.web_page.include_sources")}</div>}
             <button type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button></Fragment>)}</div>}
       </span>}
     </div>
-    <div className="studio-detail__body">
+    <div className={output?.type_id === "web_page" && !editing ? "studio-detail__body studio-detail__body--web-page" : "studio-detail__body"}>
       {stepUp && <ExportStepUpDialog pending={stepUp.pending} error={stepUp.error} onSubmit={(password) => void submitStepUp(password)} onCancel={() => setStepUp(null)} />}
       {error && <p className="studio-alert" role="alert">{studioErrorMessage(error)}</p>}
       {!output && !error && <p role="status">…</p>}

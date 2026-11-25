@@ -110,6 +110,10 @@ test("웹 페이지 뷰어: iframe은 srcDoc + sandbox=allow-scripts만, 뺀 내
     const item = findElements(view.container, (n) => n.tagName === "LI" && n.getAttribute("data-ref") === "S2")[0];
     const scrolled = [];
     item.scrollIntoView = (options) => scrolled.push(options);
+    // 근거 칸 자체의 scrollTop만 바꾼다(바깥 칸은 움직이지 않는다). 항목은 칸 기준 500px, 높이 30px, 칸 높이 200px.
+    const pane = findElements(view.container, (n) => n.tagName === "ASIDE")[0];
+    Object.assign(pane, { scrollTop: 0, clientHeight: 200 });
+    Object.assign(item, { offsetTop: 500, offsetHeight: 30 });
     const post = async (data, source) => {
       const event = new MinimalEvent("message", { bubbles: false });
       event.data = data; event.source = source; event.origin = "null";
@@ -120,7 +124,8 @@ test("웹 페이지 뷰어: iframe은 srcDoc + sandbox=allow-scripts만, 뺀 내
     assert.deepEqual(opened, []);
     await post({ type: "daon-ref", ref: "S2" }, frameWindow);
     assert.deepEqual(opened, ["S2"]);
-    assert.equal(scrolled.length, 1);
+    assert.equal(scrolled.length, 0, "scrollIntoView는 바깥 조상까지 움직이므로 쓰지 않는다");
+    assert.equal(pane.scrollTop, 330);
     assert.equal(findElements(view.container, (n) => n.tagName === "LI" && n.getAttribute("data-ref") === "S2")[0].getAttribute("aria-current"), "true");
 
     // 근거 칸 항목을 누르면 기존 근거 창을 연다
@@ -145,6 +150,10 @@ test("웹 페이지 뷰어: 뺀 내용이 없으면 안내 줄이 없고, 제목
     assert.deepEqual(module.excludedItems(withTitle), ["안내 페이지", "<b>근거 없는</b> 문장", "한도: 300만 원"]);
     const bullets = { sections: [{ heading: "h", blocks: [{ type: "bullets", items: ["가", "나"], insufficient: true }, { type: "table", rows: [["a", "b"], ["1", "2"]], insufficient: true }] }] };
     assert.deepEqual(module.excludedItems(bullets), ["가 · 나", "a | b / 1 | 2"]);
+    // 칸 안 스크롤 위치: 이미 보이면 그대로, 위에 있으면 위 끝, 아래에 있으면 아래 끝을 맞춘다.
+    assert.equal(module.paneScrollTop({ itemTop: 50, itemHeight: 30, scrollTop: 0, paneHeight: 200 }), 0);
+    assert.equal(module.paneScrollTop({ itemTop: 50, itemHeight: 30, scrollTop: 100, paneHeight: 200 }), 50);
+    assert.equal(module.paneScrollTop({ itemTop: 500, itemHeight: 30, scrollTop: 0, paneHeight: 200 }), 330);
     const view = await mount(module.WebPageViewer, { content: clean, evidence, onOpenEvidence: () => {} });
     try { assert.ok(!view.container.textContent.includes("근거 부족으로 뺀 내용")); } finally { await view.unmount(); view.restore(); }
   } finally { await cleanup(); }
@@ -198,6 +207,23 @@ test("뷰어 배치: 두 칸 grid, 칸마다 min-height:0 + overflow:auto, 820px
   const pane = rule(".studio-web-page__page, .studio-web-page__evidence");
   assert.match(pane, /min-height:\s*0/u);
   assert.match(pane, /overflow:\s*auto/u);
+  assert.doesNotMatch(root, /min-height:\s*360px/u);
+  const body = rule(".studio-detail__body--web-page");
+  assert.match(body, /display:\s*flex/u);
+  assert.match(body, /flex-direction:\s*column/u);
+  assert.match(body, /overflow:\s*hidden/u);
+  const viewerInBody = rule(".studio-detail__body--web-page > .studio-web-page");
+  assert.match(viewerInBody, /flex:\s*1 1 auto/u);
+  assert.match(viewerInBody, /min-height:\s*0/u);
+  const chatInBody = rule(".studio-detail__body--web-page > .studio-chat-edit");
+  assert.match(chatInBody, /flex:\s*none/u);
+  assert.match(chatInBody, /max-height:/u);
+  assert.match(chatInBody, /min-height:\s*0/u);
+  const turnsInBody = rule(".studio-detail__body--web-page .studio-chat-edit__turns");
+  assert.match(turnsInBody, /overflow:\s*auto/u);
+  assert.match(turnsInBody, /min-height:\s*0/u);
+  assert.match(rule(".studio-web-page__preview"), /height:\s*min\(/u);
+  assert.match(rule(".studio-web-page__evidence"), /position:\s*relative/u);
   const narrow = /@media \(max-width: 820px\)\s*\{\s*\.studio-web-page\s*\{([^}]*)\}/u.exec(css)?.[1] ?? "";
   assert.match(narrow, /grid-template-columns:\s*minmax\(0,\s*1fr\)/u);
   assert.match(narrow, /grid-template-rows:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*1fr\)/u);
@@ -214,7 +240,7 @@ test("내려받기: include_sources 쿼리를 0/1로 붙이고, 패널은 html�
   assert.ok(urls[2].endsWith(`/outputs/${OID}/exports/pdf`), urls[2]);
   const panel = await read("packages/ui/src/studio-panel.jsx");
   assert.match(panel, /const \[includeSources, setIncludeSources\] = useState\(true\)/u);
-  assert.match(panel, /format === "html" && <label[^>]*>\s*<input type="checkbox" checked=\{includeSources\}/u);
+  assert.match(panel, /format === "html" && <div role="menuitemcheckbox" aria-checked=\{includeSources\}/u);
   assert.match(panel, /msg\("studio\.web_page\.include_sources"\)/u);
   assert.match(panel, /format === "html" \? \{ includeSources \}/u);
   // BFF가 html 내려받기와 include_sources 쿼리를 통과시킨다

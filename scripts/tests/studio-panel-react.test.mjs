@@ -791,3 +791,66 @@ test("조사 보고서가 아니면(research 없음) 사용한 자료를 그리�
     assert.deepEqual(findElements(view.container, (n) => n.getAttribute?.("class") === "studio-ref").map((n) => n.textContent), ["[1]"]);
   } finally { await view.close(); }
 });
+
+// 웹 페이지 보기(WO-N8): 상세 본문은 web_page일 때만 칸 배치 클래스를 받는다(다른 유형 배치는 그대로).
+test("웹 페이지 상세만 본문에 web_page 칸 배치 클래스를 붙인다", async () => {
+  const page = item({ output_id: OID("e"), type_id: "web_page", title: "웹 페이지 1" });
+  const studio = fakeStudio([page, item()]);
+  const base = studio.getOutput;
+  studio.getOutput = async (id) => id === OID("e")
+    ? { ...page, settings: {}, assets: [], evidence: [], revision: { content: { body: { title: "페이지", request: "r", sections: [], html: "<!DOCTYPE html><p>x</p>" }, warnings: [] } } }
+    : base(id);
+  const view = await mount(studio);
+  const bodyClass = () => findElements(view.container, (n) => n.getAttribute?.("class")?.startsWith("studio-detail__body"))[0]?.getAttribute("class");
+  try {
+    await view.click(byLabel(view.container, "열기: 웹 페이지 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.equal(bodyClass(), "studio-detail__body studio-detail__body--web-page");
+    await view.click(byLabel(view.container, "목록으로"));
+    await view.click(byLabel(view.container, "열기: 보고서 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.equal(bodyClass(), "studio-detail__body");
+  } finally { await view.close(); }
+});
+
+test("html 내려받기 메뉴의 '출처 목록 넣기'는 menuitemcheckbox이고 클릭·Enter·Space로 바뀌어 내려받기에 실린다", async () => {
+  const page = item({ output_id: OID("e"), type_id: "web_page", title: "웹 페이지 1" });
+  const studio = fakeStudio([page]);
+  studio.exportFormats = () => ["html"];
+  studio.getOutput = async () => ({ ...page, settings: {}, assets: [], evidence: [], revision: { content: { body: { title: "페이지", sections: [], html: "<p>x</p>" }, warnings: [] } } });
+  const downloads = [];
+  studio.downloadExport = async (id, format, options) => { downloads.push([id, format, options]); return { bytes: new Uint8Array([60]), contentType: "text/html", disposition: "" }; };
+  const priorCreate = globalThis.URL.createObjectURL; const priorRevoke = globalThis.URL.revokeObjectURL;
+  globalThis.URL.createObjectURL = () => "blob:fake"; globalThis.URL.revokeObjectURL = () => {};
+  const view = await mount(studio);
+  try {
+    await view.click(byLabel(view.container, "열기: 웹 페이지 1"));
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await view.click(buttonByText(view.container, "다운로드"));
+    const check = () => findElements(view.container, (n) => n.getAttribute?.("role") === "menuitemcheckbox")[0];
+    assert.ok(check(), "menuitemcheckbox가 있다");
+    assert.ok(check().textContent.includes("출처 목록 넣기"));
+    assert.equal(check().getAttribute("aria-checked"), "true");
+    assert.equal(check().getAttribute("tabindex") ?? check().getAttribute("tabIndex"), "0");
+    await view.click(check());
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    const key = async (name) => { let prevented = false; await view.act(async () => reactProps(check()).onKeyDown({ key: name, preventDefault() { prevented = true; }, stopPropagation() {} })); return prevented; };
+    assert.equal(await key("Enter"), true);
+    assert.equal(check().getAttribute("aria-checked"), "true");
+    assert.equal(await key(" "), true);
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    assert.equal(await key("Tab"), false);
+    assert.equal(check().getAttribute("aria-checked"), "false");
+    await view.click(findElements(view.container, (n) => n.getAttribute?.("role") === "menuitem" && n.textContent === "HTML")[0]);
+    await view.act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    assert.deepEqual(downloads, [[OID("e"), "html", { includeSources: false }]]);
+    // Escape로 메뉴 닫기는 그대로 동작한다
+    await view.click(buttonByText(view.container, "다운로드"));
+    const menu = findElements(view.container, (n) => n.getAttribute?.("role") === "menu")[0];
+    await view.act(async () => reactProps(menu).onKeyDown({ key: "Escape" }));
+    assert.equal(findElements(view.container, (n) => n.getAttribute?.("role") === "menu").length, 0);
+  } finally {
+    globalThis.URL.createObjectURL = priorCreate; globalThis.URL.revokeObjectURL = priorRevoke;
+    await view.close();
+  }
+});

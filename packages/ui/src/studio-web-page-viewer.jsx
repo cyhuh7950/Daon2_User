@@ -29,6 +29,13 @@ export function WebPageFrame({ html, title, frameRef }) {
   return <iframe ref={frameRef} className="studio-web-page__frame" srcDoc={html} sandbox="allow-scripts" referrerPolicy="no-referrer" title={title} />;
 }
 
+/** 근거 칸 안에서만 스크롤한다. 항목이 이미 보이면 그대로, 위로 벗어나면 위 끝, 아래로 벗어나면 아래 끝을 맞춘다. */
+export function paneScrollTop({ itemTop, itemHeight, scrollTop, paneHeight }) {
+  if (itemTop < scrollTop) return itemTop;
+  if (itemTop + itemHeight > scrollTop + paneHeight) return Math.max(0, itemTop + itemHeight - paneHeight);
+  return scrollTop;
+}
+
 const whereOf = (item) => item?.locator_kind === "page" ? msg("dialog.page_suffix", { n: item.locator_value }) : item?.locator_value ?? "";
 
 export function WebPageViewer({ content, evidence = [], onOpenEvidence }) {
@@ -39,6 +46,7 @@ export function WebPageViewer({ content, evidence = [], onOpenEvidence }) {
   const [active, setActive] = useState(null);
   const frameRef = useRef(null);
   const itemRefs = useRef(new Map());
+  const paneRef = useRef(null);
   const latest = useRef({ knownRefs, onOpenEvidence });
   latest.current = { knownRefs, onOpenEvidence };
 
@@ -49,7 +57,10 @@ export function WebPageViewer({ content, evidence = [], onOpenEvidence }) {
       const ref = acceptRefMessage(event, frameRef.current?.contentWindow, latest.current.knownRefs);
       if (!ref) return;
       setActive(ref);
-      itemRefs.current.get(ref)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      // scrollIntoView는 바깥 칸까지 움직이므로 쓰지 않고, 근거 칸(position:relative)의 scrollTop만 바꾼다.
+      const item = itemRefs.current.get(ref);
+      const pane = paneRef.current;
+      if (item && pane) pane.scrollTop = paneScrollTop({ itemTop: item.offsetTop, itemHeight: item.offsetHeight, scrollTop: pane.scrollTop, paneHeight: pane.clientHeight });
       latest.current.onOpenEvidence?.(ref);
     };
     target.addEventListener("message", onMessage);
@@ -60,7 +71,7 @@ export function WebPageViewer({ content, evidence = [], onOpenEvidence }) {
     <div className="studio-web-page__page">
       <WebPageFrame html={html} title={msg("studio.web_page.frame", { title: body.title ?? "" }).trim()} frameRef={frameRef} />
     </div>
-    <aside className="studio-web-page__evidence" aria-label={msg("studio.dialog.provenance.evidence")}>
+    <aside ref={paneRef} className="studio-web-page__evidence" aria-label={msg("studio.dialog.provenance.evidence")}>
       {excluded.length > 0 && <div className="studio-web-page__excluded">
         <p role="note">{msg("studio.web_page.excluded", { n: excluded.length })}</p>
         <ul>{excluded.map((text, index) => <li key={index}>{text}</li>)}</ul>

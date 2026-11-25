@@ -41,6 +41,7 @@ test("Studio v2 읽기 경로는 정확한 세그먼트로만 전달된다", asy
     [get("/outputs/sv2-1/video"), seg("outputs", "sv2-1", "video"), "/outputs/sv2-1/video"],
     [get("/outputs/sv2-1/exports/vtt"), seg("outputs", "sv2-1", "exports", "vtt"), "/outputs/sv2-1/exports/vtt"],
     [get("/outputs/sv2-1/exports/html", "?revision=2&include_sources=0"), seg("outputs", "sv2-1", "exports", "html"), "/outputs/sv2-1/exports/html?revision=2&include_sources=0"],
+    [get("/outputs/sv2-1/exports/html", "?include_sources=1"), seg("outputs", "sv2-1", "exports", "html"), "/outputs/sv2-1/exports/html?include_sources=1"],
     [get("/outputs/sv2-1/evidence/ref-1/content", "?revision=1"), seg("outputs", "sv2-1", "evidence", "ref-1", "content"), "/outputs/sv2-1/evidence/ref-1/content?revision=1"],
   ];
   for (const [request, segments, suffix] of cases) {
@@ -89,6 +90,11 @@ test("Studio v2는 허용하지 않는 메서드·쿼리·형식을 upstream 전
   assert.equal((await proxy(get("/outputs", "?limit=1&limit=2"), seg("outputs"))).status, 400);
   assert.equal((await proxy(get("/outputs/sv2-1", "?workspace_id=x"), seg("outputs", "sv2-1"))).status, 400);
   assert.equal((await proxy(get("/outputs/sv2-1/exports/exe"), seg("outputs", "sv2-1", "exports", "exe"))).status, 404);
+  // 웹 페이지 HTML 내려받기(WO-N8): include_sources는 html에서만, 값은 "0"/"1"만 받는다.
+  assert.equal((await proxy(get("/outputs/sv2-1/exports/pdf", "?include_sources=1"), seg("outputs", "sv2-1", "exports", "pdf"))).status, 400);
+  assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=2"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
+  assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=true"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
+  assert.equal((await proxy(get("/outputs/sv2-1/exports/html", "?include_sources=0&include_sources=1"), seg("outputs", "sv2-1", "exports", "html"))).status, 400);
   assert.equal((await proxy(get("/unknown"), seg("unknown"))).status, 404);
   assert.equal((await proxy(get("/outputs/bad%20id"), seg("outputs", "bad id"))).status, 404);
   assert.equal(captured.length, 0);

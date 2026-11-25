@@ -204,7 +204,9 @@ function studioV2Route(method, segments) {
     return make(`/outputs/${id}/edit-turns/${encodeURIComponent(rest[3])}/${rest[4]}`, ["POST"]);
   }
   if (rest.length === 4 && rest[2] === "exports" && STUDIO_V2_EXPORT_FORMATS.has(rest[3])) {
-    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: STUDIO_V2_EXPORT_QUERY, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
+    // include_sources는 웹 페이지 HTML에서만 받는다. 다른 형식은 revision만.
+    const html = rest[3] === "html";
+    return make(`/outputs/${id}/exports/${rest[3]}`, ["GET"], { query: html ? STUDIO_V2_EXPORT_QUERY : STUDIO_V2_REVISION_QUERY, includeSourcesQuery: html, timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES, studioExport: true });
   }
   if (rest.length === 3 && rest[2] === "audio") {
     return make(`/outputs/${id}/audio`, ["GET"], { timeoutMs: 60_000, maxResponseBytes: STUDIO_V2_EXPORT_BYTES });
@@ -1488,6 +1490,9 @@ export function createBffProxy({
       if (route.operationsStatus && ((query.has("scope") && !["self","workspace_visible"].includes(query.get("scope")))
           || (query.has("include_readiness") && query.get("include_readiness")!=="1")
           || (query.has('include_capacity') && query.get('include_capacity')!=='1'))) {
+        return createBffSafeError(400, "INVALID_REQUEST", trace);
+      }
+      if (route.includeSourcesQuery && query.has("include_sources") && !["0", "1"].includes(query.get("include_sources"))) {
         return createBffSafeError(400, "INVALID_REQUEST", trace);
       }
     }
