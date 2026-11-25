@@ -26,7 +26,7 @@ MAX_LIST_LIMIT = 50
 TYPE_LABELS = {
     "report": "보고서", "data_table": "데이터 표", "mind_map": "마인드맵", "flashcards": "플래시카드",
     "quiz": "퀴즈", "slides": "슬라이드 자료", "infographic": "인포그래픽", "audio_overview": "오디오 개요",
-    "video_overview": "동영상 개요", "memo": "메모", "authored_document": "작성 문서", "web_page": "웹 페이지",
+    "video_overview": "동영상 개요", "memo": "메모", "authored_document": "작성 문서", "web_page": "웹 페이지", "data_aggregation": "데이터 집계",
 }
 _ACTIVE = ("queued", "generating")
 
