@@ -1,14 +1,12 @@
+import { readableManualLine } from "./manual-markdown-text.js";
+import { manualHeadingId } from "./manual-toc.js";
+
+export { readableManualLine };
+
 // 앱 안 매뉴얼 보기: 검증된 Release Markdown을 제목·목록·표·그림으로 그린다.
 // 그림은 공개 사본의 /manual/images/ 안 PNG만 그린다(다른 경로는 설명 글만 보인다).
 const SAFE_IMAGE = /^images\/[a-z0-9-]+\.png$/u;
 
-export function readableManualLine(line) {
-  return line
-    .replace(/!\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\*\*([^*]+)\*\*/gu, "$1")
-    .replace(/`([^`]+)`/gu, "$1");
-}
 
 function tableCells(line) {
   const cells = [];
@@ -71,7 +69,8 @@ export function ManualMarkdown({ text }) {
     const heading = /^(#{1,4})\s+(.+)$/u.exec(value);
     if (heading) {
       const level = heading[1].length;
-      blocks.push(level === 1 ? <h3 key={index}>{heading[2]}</h3> : level === 4 ? <h5 key={index}>{heading[2]}</h5> : <h4 key={index}>{heading[2]}</h4>);
+      // 부(##)·절(###) 제목에는 목차와 같은 id를 붙인다(N1-B15).
+      blocks.push(level === 1 ? <h3 key={index}>{heading[2]}</h3> : level === 4 ? <h5 key={index}>{heading[2]}</h5> : <h4 key={index} id={manualHeadingId(index)}>{heading[2]}</h4>);
       continue;
     }
     const ordered = /^\d+\.\s+(.+)$/u.exec(value);
