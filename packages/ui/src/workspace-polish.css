@@ -91,6 +91,8 @@
   .adaptive-workspace[data-product-workspace-state] { padding-bottom: 64px; }
   .workspace-bottom-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; gap: 4px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)); background: var(--daon-color-surface, #fff); border-top: 1px solid var(--daon-color-border, rgba(148, 163, 184, .45)); }
   .workspace-bottom-tabs button { flex: 1; min-height: 44px; border: 0; border-radius: 10px; background: transparent; color: var(--daon-color-text-secondary, inherit); font-weight: 600; cursor: pointer; }
+  /* 왼쪽 아래 실행 상태 점이 하단 탭(Source) 글자와 겹치지 않게 탭 위로 올린다. */
+  body:has(.workspace-bottom-tabs) .web-shell-runtime { bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
   .workspace-bottom-tabs button.is-active { background: var(--daon-color-accent-soft, rgba(139, 92, 246, .14)); color: var(--daon-color-accent, #8b5cf6); }
   .adaptive-workspace .workspace-panes[data-layout="source-conversation-studio"][data-narrow-active] { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
   .adaptive-workspace .workspace-panes[data-narrow-active="sources"] .pane-slot:not(:has(#product-pane-sources)),
