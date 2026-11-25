@@ -298,6 +298,22 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
 
   const stats = { sourceCount: 0, checkedCount: checkedSourceVersionIds.length, readySourceCount: 0, processingCount: 0, ...sourceStats };
   const typeById = new Map(state.types.map((t) => [t.type_id, t]));
+  // 다시 만들기 대화상자: 목록 항목에는 settings가 없으므로 요청 글이 필요한 유형만 출력 상세를 읽어 채운다.
+  const [regenSettings, setRegenSettings] = useState(null);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const regenTarget = dialog?.kind === "regenerate" ? dialog.output : null;
+  const regenNeedsRequest = Boolean(regenTarget && typeById.get(regenTarget.type_id)?.settings_schema?.properties?.page_request);
+  useEffect(() => {
+    setRegenSettings(null);
+    if (!regenTarget || !regenNeedsRequest) { setRegenLoading(false); return undefined; }
+    let alive = true;
+    setRegenLoading(true);
+    Promise.resolve(studio.getOutput(dialog.output.output_id))
+      .then((detail) => { if (alive) setRegenSettings(detail?.settings ?? null); })
+      .catch(() => {})
+      .finally(() => { if (alive) setRegenLoading(false); });
+    return () => { alive = false; };
+  }, [regenTarget?.output_id, regenNeedsRequest]);
 
   const create = async (typeId, { formatId, settings } = {}) => {
     if (stateRef.current.pendingCreate.includes(typeId)) return;
@@ -410,7 +426,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     }} />}
     {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
-    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: dialog.output.settings?.page_request }} onCancel={() => setDialog(null)}
+    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: regenSettings?.page_request }} loading={regenLoading} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings, values.formatId); }} />}
     {dialog?.kind === "provenance" && <ProvenanceDialog load={() => studio.getProvenance(dialog.output.output_id)} onClose={() => setDialog(null)}
       onOpenEvidence={(ref) => openEvidence(dialog.output, ref)} onRegenerate={(settings) => { const target = dialog.output; setDialog(null); regenerate(target, settings); }} />}

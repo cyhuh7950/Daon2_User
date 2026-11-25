@@ -38,7 +38,7 @@ function accents(block) {
   return Object.fromEntries([...block.matchAll(/--studio-accent-([a-z]+):\s*(#[0-9a-fA-F]{6});/gu)].map((m) => [m[1], m[2]]));
 }
 
-test("아이콘 이름은 37개이며 중복 없이 필수 유형·동작 아이콘을 모두 가진다", () => {
+test("아이콘 이름은 38개이며 중복 없이 필수 유형·동작 아이콘을 모두 가진다", () => {
   assert.equal(STUDIO_ICON_NAMES.length, 38);
   assert.equal(new Set(STUDIO_ICON_NAMES).size, STUDIO_ICON_NAMES.length);
   for (const name of [...REQUIRED_TYPE_ICONS, ...REQUIRED_ACTION_ICONS]) {

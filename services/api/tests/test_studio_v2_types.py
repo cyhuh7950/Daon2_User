@@ -25,6 +25,16 @@ class StudioV2TypesTests(unittest.TestCase):
             self.assertNotIn("reason", by_id[type_id])
         self.assertTrue(is_available("audio_overview", tts_enabled=True))
 
+    def test_web_page_is_listed_last_among_tiles_with_page_request_schema(self):
+        items = available_types()
+        by_id = {item["type_id"]: item for item in items}
+        self.assertIn("web_page", by_id)
+        self.assertTrue(by_id["web_page"]["available"])
+        self.assertEqual(by_id["web_page"]["export_formats"], ["html"])
+        self.assertEqual(by_id["web_page"]["settings_schema"]["properties"]["page_request"]["maxLength"], 2000)
+        ids = [item["type_id"] for item in items]
+        self.assertEqual(ids[ids.index("web_page") - 1], "data_table")
+
     def test_validate_settings_defaults_and_rejections(self):
         self.assertEqual(validate_settings("report", None, {}), ("summary", {}))
         self.assertEqual(validate_settings("quiz", None, {"count": 10, "focus": "핵심"}), (None, {"count": 10, "focus": "핵심"}))

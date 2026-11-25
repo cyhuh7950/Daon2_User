@@ -76,7 +76,7 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
 # 현재 제공 단계. 이후 단계는 reason과 함께 비활성으로 노출한다.
 _AVAILABLE_PHASES = {"1", "2"}
 _TILE_TYPES = ("audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz",
-               "infographic", "data_table")
+               "infographic", "data_table", "web_page")
 
 
 def is_available(type_id: str, *, tts_enabled: bool = False, authoring_enabled: bool = False) -> bool:
@@ -97,7 +97,7 @@ def is_available(type_id: str, *, tts_enabled: bool = False, authoring_enabled: 
 
 def available_types(*, tts_enabled: bool = False, authoring_enabled: bool = False,
                     tts_settings: Mapping[str, object] | None = None) -> list[dict[str, object]]:
-    """`/studio/types` 응답. 타일 9종 + 메모(+작성)."""
+    """`/studio/types` 응답. 타일 10종 + 메모(+작성)."""
     order = (*_TILE_TYPES, "memo", "authored_document")
     result: list[dict[str, object]] = []
     for type_id in order:

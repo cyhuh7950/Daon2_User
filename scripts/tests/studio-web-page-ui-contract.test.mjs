@@ -23,11 +23,18 @@ test("설정 창에 page_request 입력이 maxLength 2000, required로 있고 �
   assert.match(source, /<textarea id="studio-page-request" maxLength=\{2000\} required/u);
   assert.match(source, /settings\.page_request = pageRequest\.trim\(\)/u);
   assert.match(source, /pageRequestMissing = Boolean\(properties\.page_request\) && !pageRequest\.trim\(\)/u);
-  assert.match(source, /type="submit"[^>]*disabled=\{pageRequestMissing\}/u);
+  assert.match(source, /type="submit"[^>]*disabled=\{pageRequestMissing \|\| loading\}/u);
 });
 
-test("설정을 바꿔 다시 만들 때 지난 요청 글이 채워진다", () => {
-  assert.match(read("packages/ui/src/studio-panel.jsx"), /page_request: dialog\.output\.settings\?\.page_request/u);
+test("설정을 바꿔 다시 만들 때 출력 상세를 읽어 지난 요청 글을 채우고, 읽는 동안 버튼이 꺼진다", () => {
+  const panel = read("packages/ui/src/studio-panel.jsx");
+  assert.match(panel, /studio\.getOutput\(dialog\.output\.output_id\)/u);
+  assert.match(panel, /page_request: regenSettings\?\.page_request/u);
+  assert.match(panel, /loading=\{regenLoading\}/u);
+  const dialogs = read("packages/ui/src/studio-dialogs.jsx");
+  assert.match(dialogs, /loading = false/u);
+  assert.match(dialogs, /disabled=\{pageRequestMissing \|\| loading\}/u);
+  assert.match(dialogs, /setPageRequest\(String\(initial\.page_request/u);
 });
 
 test("web_page 문구 키가 모두 있다", () => {
