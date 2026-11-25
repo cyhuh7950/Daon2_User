@@ -139,6 +139,89 @@ def verified_text(body: Mapping[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 대화로 고치기(WO-K5 연결): 고친 본문 정리와 바뀐 블록 다시 판정
+# ---------------------------------------------------------------------------
+
+
+def clean_edited_body(body: Mapping[str, Any], known_refs: set[str]) -> dict[str, Any]:
+    """대화로 고친 본문을 정리한다. 근거 라벨은 known_refs에 있는 것만 남기고 insufficient·title_insufficient·
+    request·html 같은 다른 칸은 그대로 둔다. 판정은 mark_edited_blocks가 따로 한다. 규칙 위반은 STUDIO_INPUT_INVALID."""
+    sections: list[dict[str, Any]] = []
+    for section in as_list(body.get("sections"), MAX_SECTIONS):
+        if not isinstance(section, Mapping):
+            continue
+        blocks: list[dict[str, Any]] = []
+        for raw in as_list(section.get("blocks"), MAX_BLOCKS_PER_SECTION):
+            if not isinstance(raw, Mapping):
+                continue
+            kind = raw.get("type")
+            if not isinstance(kind, str) or kind not in _KINDS:
+                raise StudioError("STUDIO_INPUT_INVALID", 400)
+            block = _build_block(kind, raw)
+            if block is None:
+                continue
+            refs = raw.get("refs") if isinstance(raw.get("refs"), list) else []
+            block["refs"] = [r for r in dict.fromkeys(refs) if isinstance(r, str) and r in known_refs]
+            block["insufficient"] = raw.get("insufficient") is True
+            blocks.append(block)
+        heading = text_field(section.get("heading"), HEADING_LIMIT)
+        if heading and blocks:
+            sections.append({"heading": heading, "blocks": blocks})
+    if not sections:
+        raise StudioError("STUDIO_INPUT_INVALID", 400)
+    cleaned = {**body, "title": text_field(body.get("title"), TITLE_LIMIT), "sections": sections}
+    ensure_size(cleaned)
+    return cleaned
+
+
+def _block_key(block: Mapping[str, Any]) -> tuple[Any, ...]:
+    return tuple(sorted((k, repr(v)) for k, v in block.items() if k != "insufficient"))
+
+
+def mark_edited_blocks(new_body: Mapping[str, Any], old_body: Mapping[str, Any], extra_text: str) -> dict[str, Any]:
+    """대화로 고친 본문의 바뀐 블록을 1단계와 같은 규칙으로 다시 판정한 사본을 돌려준다.
+
+    허용 근거 글 = 이전 본문의 근거 확인 글(verified_text) + 이번에 새로 찾은 자료 글(extra_text).
+    - 같은 자리의 이전 블록과 내용이 같으면 원래 판정을 그대로 둔다.
+    - 바뀌었거나 새 블록이면 유효 refs가 없거나 숫자·날짜·식별자가 허용 근거 글에 없을 때 insufficient=True.
+    - 자리가 밀린 블록이라도 이전에 근거 부족이던 블록과 내용이 같으면 근거 부족으로 둔다(승격하지 않는다).
+    - 절 제목의 anchor가 허용 근거 글에 없으면 그 절의 블록을 모두 근거 부족으로 둔다(1단계 규칙과 같다).
+    - 제목이 바뀌었으면 title_insufficient도 같은 방법으로 다시 정한다.
+    """
+    allowed = _evidence_anchors(verified_text(old_body) + "\n" + (extra_text or ""))
+    old_sections = list(old_body.get("sections") or [])
+    weak = {_block_key(b) for s in old_sections for b in s.get("blocks", []) if b.get("insufficient")}
+    sections: list[dict[str, Any]] = []
+    for si, section in enumerate(new_body.get("sections") or []):
+        old_section = old_sections[si] if si < len(old_sections) else {}
+        old_blocks = list(old_section.get("blocks") or [])
+        heading = str(section.get("heading", ""))
+        # 바뀌지 않은 절 제목도 같이 본다: 근거 확인 블록이 있던 절의 제목은 verified_text에 들어 있어 통과하고,
+        # 1단계에서 제목 근거가 없어 블록이 모두 근거 부족이던 절은 고친 블록도 근거 부족으로 남는다.
+        heading_ok = _evidence_anchors(heading).issubset(allowed)
+        blocks = []
+        for bi, block in enumerate(section.get("blocks") or []):
+            item = dict(block)
+            old_block = old_blocks[bi] if bi < len(old_blocks) else None
+            if old_block is not None and _block_key(old_block) == _block_key(item):
+                item["insufficient"] = bool(old_block.get("insufficient"))
+            else:
+                item["insufficient"] = (not item.get("refs") or not _evidence_anchors(_block_text(item)).issubset(allowed)
+                                        or _block_key(item) in weak)
+            if not heading_ok:
+                item["insufficient"] = True
+            blocks.append(item)
+        sections.append({**section, "blocks": blocks})
+    result = {**new_body, "sections": sections}
+    title = str(new_body.get("title") or "")
+    if title != str(old_body.get("title") or ""):
+        result["title_insufficient"] = not _evidence_anchors(title).issubset(allowed)
+    else:
+        result["title_insufficient"] = bool(old_body.get("title_insufficient"))
+    return result
+
+
+# ---------------------------------------------------------------------------
 # 2단계 HTML 처리: 추출·정리(sanitize)·CSP·숫자/절 제목 대조·연결 스크립트
 #
 # 정리기는 표준 HTMLParser 토큰을 다시 써서 출력한다(정규식으로 태그를 지우지 않는다).

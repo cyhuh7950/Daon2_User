@@ -8,9 +8,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .authoring.agent import knowledge_row, next_knowledge_ref
 from .question_external_evidence import ExternalEvidenceError
-from .studio_chat_edit import AUTHORED_TYPE, MAX_PIECE_CHARS, ChatEditInvalid, Piece, apply_changes, describe_changes, flatten, humanize_reply, piece_text, pieces_size, render_pieces
+from .studio_chat_edit import AUTHORED_TYPE, MAX_PIECE_CHARS, WEB_PAGE_TYPE, ChatEditInvalid, Piece, apply_changes, describe_changes, flatten, humanize_reply, piece_text, pieces_size, render_pieces
 from .studio_context_builder import ContextPack, build_pack
+from .studio_generators import render_web_page_html
 from .studio_text_generation import StudioPrompt, StudioTextGenerator
+from .studio_web_page import mark_edited_blocks
 from .studio_v2_generation import StudioCancelled
 from .studio_workspace import StudioContext, StudioError
 
@@ -98,7 +100,24 @@ class ChatEditRunner:
                               max_output_tokens=6000, prompt_version="studio-chat-edit-v1", schema_name="studio_chat_edit")
         reply, changes = self._answer(context, prompt, type_id, content, cancel_check)
         new_evidence = [material.rows[ref] for ref in _used_refs(changes) if ref in material.rows]
-        self._repository.save_edit_turn_result(context, turn_id, reply=humanize_reply(reply, pieces), changes=[{**row, "reason": humanize_reply(row["reason"], pieces)} for row in describe_changes(type_id, content, changes)], new_evidence=new_evidence)
+        extra_kwargs: dict[str, Any] = {}
+        if type_id == WEB_PAGE_TYPE and changes:
+            # 합치기 → 다시 판정 → HTML 만들기를 마친 뒤에만 저장한다. HTML 실패(StudioError)는 그대로 올려 턴을 실패로 끝낸다.
+            extra_kwargs["preview"] = self._web_page_preview(context, output_id, content, changes, material, cancel_check)
+        self._repository.save_edit_turn_result(context, turn_id, reply=humanize_reply(reply, pieces), changes=[{**row, "reason": humanize_reply(row["reason"], pieces)} for row in describe_changes(type_id, content, changes)], new_evidence=new_evidence,
+                                               **extra_kwargs)
+
+    def _web_page_preview(self, context: StudioContext, output_id: str, content: Mapping[str, Any], changes: Sequence[Mapping[str, Any]], material: _Material,
+                          cancel_check: Callable[[], None]) -> dict[str, Any]:
+        """웹 페이지 고친 안의 본문과 HTML을 미리 만든다(WO-N8). 적용은 이것을 그대로 쓴다."""
+        known = {str(ref) for ref in self._repository.chat_material_scope(context, output_id)["refs"]} | set(material.rows)
+        try:  # 적용 때와 같은 근거 번호 범위(현재 판 근거 + 새 자료)로 합친다
+            merged = apply_changes(WEB_PAGE_TYPE, content, changes, known)
+        except ChatEditInvalid:
+            raise StudioError("CHAT_EDIT_INVALID", 422) from None
+        body = {**mark_edited_blocks(merged["body"], content["body"], material.text), "html": ""}
+        html = render_web_page_html(self._llm, context, body, str(body.get("request", "")), cancel_check=cancel_check)
+        return {"html": html, "body": body}
 
     def _material(self, context: StudioContext, output_id: str, type_id: str, instruction: str, pieces: Sequence[Piece], content: Mapping[str, Any], cancel_check: Callable[[], None]) -> _Material:
         """더 찾을지는 LLM이 정한다. 찾지 못해도 대화는 끊지 않고 그 사실을 LLM에 알린다."""

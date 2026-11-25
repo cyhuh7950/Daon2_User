@@ -227,7 +227,7 @@ class AuthoredTests(unittest.TestCase):
         self.assertEqual(authored_known_refs(authored()), {"K1"})
 
     def test_authored_type_is_supported(self):
-        self.assertEqual(CHAT_EDIT_TYPES, {"report", "slides", "flashcards", "quiz", "authored_document"})
+        self.assertEqual(CHAT_EDIT_TYPES, {"report", "slides", "flashcards", "quiz", "authored_document", "web_page"})
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ CHANGE = {"op": "replace", "id": "s1.b1", "content": {"type": "paragraph", "text
 
 def turn(**over):  # type: ignore[no-untyped-def]
     return {"turn_id": "svt-1", "output_id": OID, "job_id": "sve-1", "base_revision": 3, "instruction": "고쳐 줘", "state": "ready", "reply": "고쳤습니다",
-            "changes_json": [CHANGE], "new_evidence_json": [], "error_code": None, "applied_revision": None, "created_at": datetime(2026, 11, 10, tzinfo=timezone.utc), **over}
+            "changes_json": [CHANGE], "new_evidence_json": [], "error_code": None, "applied_revision": None, "created_at": datetime(2026, 11, 10, tzinfo=timezone.utc), "preview_json": {}, **over}
 
 
 class FakeConnection:

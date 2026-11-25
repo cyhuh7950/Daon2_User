@@ -12,10 +12,12 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .studio_user_edit import validate_user_edit
+from .studio_web_page import clean_edited_body
 from .studio_workspace import StudioError
 
-CHAT_EDIT_TYPES = frozenset({"report", "slides", "flashcards", "quiz", "authored_document"})
+CHAT_EDIT_TYPES = frozenset({"report", "slides", "flashcards", "quiz", "authored_document", "web_page"})
 AUTHORED_TYPE = "authored_document"
+WEB_PAGE_TYPE = "web_page"
 MAX_PARAGRAPHS = 40
 MAX_PARAGRAPH_CHARS = 4000
 MAX_UNIT_TITLE_CHARS = 120
@@ -76,7 +78,20 @@ def _flatten_authored(content: Mapping[str, Any]) -> list[Piece]:
     return pieces
 
 
-_FLATTEN = {"report": _flatten_report, "slides": _flatten_slides, "flashcards": _flatten_cards, "quiz": _flatten_quiz, AUTHORED_TYPE: _flatten_authored}
+def _flatten_web_page(content: Mapping[str, Any]) -> list[Piece]:
+    """보고서와 같은 조각 구조(제목·절·절 제목·블록)이고 요약 칸은 없다. 블록 번호는 원래 자리 그대로 쓴다."""
+    body = _body(content)
+    pieces = [Piece("title", "text", {"text": body.get("title", "")})]
+    for n, section in enumerate(body.get("sections", []), 1):
+        pieces.append(Piece(f"s{n}", "section", section))
+        pieces.append(Piece(f"s{n}.heading", "text", {"text": section.get("heading", "")}))
+        # 표·수치(table·metric)는 숫자를 문장 수정으로 바꾸기 쉬워 조각으로 내지 않는다(고치기 대상에서 뺀다).
+        pieces.extend(Piece(f"s{n}.b{m}", "block", block) for m, block in enumerate(section.get("blocks", []), 1)
+                      if block.get("type") not in ("table", "metric"))
+    return pieces
+
+
+_FLATTEN = {"report": _flatten_report, "slides": _flatten_slides, "flashcards": _flatten_cards, "quiz": _flatten_quiz, AUTHORED_TYPE: _flatten_authored, WEB_PAGE_TYPE: _flatten_web_page}
 
 
 def flatten(type_id: str, content: Mapping[str, Any]) -> list[Piece]:
@@ -219,8 +234,17 @@ def _merge_quiz(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any
     return {**body, "questions": _merge_list(body.get("questions", []), "q", by_id)}
 
 
-_MERGE = {"report": _merge_report, "slides": _merge_slides, "flashcards": _merge_cards, "quiz": _merge_quiz}
-_SIZE = {"report": _report_size, "slides": lambda body: len(body.get("slides", [])), "flashcards": lambda body: len(body.get("cards", [])), "quiz": lambda body: len(body.get("questions", []))}
+def _merge_web_page(content: Mapping[str, Any], by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """보고서 끼워 넣기를 쓰되 웹 페이지에 없는 요약 칸은 만들지 않는다. 고치지 않은 블록의 insufficient는 그대로 남는다."""
+    merged = _merge_report(content, by_id)
+    if "summary" not in _body(content):
+        merged.pop("summary", None)
+    return merged
+
+
+_MERGE = {"report": _merge_report, "slides": _merge_slides, "flashcards": _merge_cards, "quiz": _merge_quiz, WEB_PAGE_TYPE: _merge_web_page}
+_SIZE = {"report": _report_size, "slides": lambda body: len(body.get("slides", [])), "flashcards": lambda body: len(body.get("cards", [])), "quiz": lambda body: len(body.get("questions", [])),
+         WEB_PAGE_TYPE: _report_size}
 
 
 def authored_known_refs(content: Mapping[str, Any]) -> set[str]:
@@ -272,7 +296,10 @@ def apply_changes(type_id: str, content: Mapping[str, Any], changes: Sequence[Ma
         return _apply_authored(content, by_id, known_refs)
     merged = copy.deepcopy(_MERGE[type_id](content, by_id))
     try:
-        cleaned = validate_user_edit(type_id, merged, known_refs, _body(content))
+        if type_id == WEB_PAGE_TYPE:
+            cleaned = clean_edited_body(merged, known_refs)
+        else:
+            cleaned = validate_user_edit(type_id, merged, known_refs, _body(content))
     except StudioError as error:
         raise ChatEditInvalid("자료 저장 규칙에 맞지 않습니다.") from error
     if _SIZE[type_id](cleaned) != _SIZE[type_id](merged):
