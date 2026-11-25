@@ -507,20 +507,21 @@ class DataAggregationGenerator:
             raise StudioError("STUDIO_INPUT_INVALID", 400)
         return request.strip(), version.strip(), (sheet or None), header_row
 
-    def _ask(self, ctx: GenerationContext, request: str, info: Mapping[str, object], note: str) -> Mapping[str, object]:
+    def _ask(self, ctx: GenerationContext, request: str, info: Mapping[str, object], note: str):  # type: ignore[no-untyped-def]
+        """모델 응답(StudioTextGeneration)을 돌려준다. 인스턴스에 저장하지 않는다(동시 작업 간 상태 공유 없음)."""
         ctx.cancel_check()
         user = f"[집계 요청 — 사용자 지시]\n{request}\n\n[표 정보]\n{json.dumps(info, ensure_ascii=False)}{note}"
         prompt = StudioPrompt(system=AGGREGATION_RULES, user=user, json_schema=SPEC_SCHEMA, max_output_tokens=self.max_tokens,
                               prompt_version=self.prompt_version, schema_name="studio_aggregation_spec")
-        generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
-        self._last = generation
-        return generation.data
+        return self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
 
-    def _propose(self, ctx: GenerationContext, request: str, table) -> tuple[dict[str, Any], list[str], dict[str, Any]]:  # type: ignore[no-untyped-def]
+    def _propose(self, ctx: GenerationContext, request: str, table):  # type: ignore[no-untyped-def]
+        """(spec, warnings, spec_raw, generation)."""
         info = table_profile(table)
         note = ""
         for _ in range(2):
-            raw = self._ask(ctx, request, info, note)
+            generation = self._ask(ctx, request, info, note)
+            raw = generation.data
             try:
                 spec, warnings = normalize(raw, table)
             except SpecInvalid as invalid:
@@ -536,7 +537,7 @@ class DataAggregationGenerator:
                 failure = StudioError(code, 422)
                 failure.detail = detail  # type: ignore[attr-defined]  # 실패 카드에는 코드만 저장된다(작업 6 Ruling)
                 raise failure from None
-            return spec, warnings, json.loads(json.dumps(raw, ensure_ascii=False, default=str))
+            return spec, warnings, json.loads(json.dumps(raw, ensure_ascii=False, default=str)), generation
         raise StudioError("STUDIO_VALIDATION_FAILED", 502)
 
     def generate(self, ctx: GenerationContext) -> GenerationResult:
@@ -556,7 +557,7 @@ class DataAggregationGenerator:
         del content
         read_seconds = time.monotonic() - started
         ctx.progress(30, "집계 조건 만드는 중")
-        spec, spec_warnings, spec_raw = self._propose(ctx, request, table)
+        spec, spec_warnings, spec_raw, generation = self._propose(ctx, request, table)
         ctx.progress(70, "계산 중")
         # 표 읽기와 계산이 60초 한 예산을 나눠 쓴다(모델 응답 시간은 넣지 않는다).
         computed = time.monotonic()
@@ -586,7 +587,6 @@ class DataAggregationGenerator:
             raise StudioError("AGGREGATION_TOO_LARGE", 422)
         self._record_audit(ctx, rows_read, elapsed_ms, digest)
         notes = [{"code": "AGGREGATION_WARNING", "path": f"body.warnings[{index}]"} for index in range(len(warnings))]
-        generation = getattr(self, "_last", None)
         generated_with = {"provider": getattr(generation, "provider_code", ""), "model": getattr(generation, "model_id", ""),
                           "connection": getattr(generation, "connection_short_code", ""), "prompt_version": self.prompt_version}
         return GenerationResult(content={"schema": f"studio.{self.type_id}.v1", "language": ctx.language, "body": body, "warnings": notes},

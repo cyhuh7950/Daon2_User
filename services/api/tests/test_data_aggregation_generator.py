@@ -331,6 +331,65 @@ class DataAggregationGeneratorTests(unittest.TestCase):
         self.assertIsInstance(registry.get("data_aggregation"), DataAggregationGenerator)
 
 
+NEW_PUBLIC_CODES = (("STUDIO_SOURCE_UNAVAILABLE", 409), ("TABLE_TOO_LARGE", 422), ("TABLE_TIMEOUT", 422),
+                    ("TABLE_SHEET_NOT_FOUND", 422), ("TABLE_HEADER_INVALID", 422), ("TABLE_FORMAT_UNSUPPORTED", 422),
+                    ("TABLE_ENCODING_UNSUPPORTED", 422), ("AGGREGATION_UNSUPPORTED", 422), ("AGGREGATION_TOO_LARGE", 422),
+                    ("AGGREGATION_TOO_MANY_GROUPS", 422), ("AGGREGATION_FILTER_VALUE_NOT_FOUND", 422),
+                    ("STUDIO_SERVICE_UNAVAILABLE", 503))
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_new_codes_are_public(self):
+        from daon2_user_api.studio_v2_routes import STUDIO_V2_PUBLIC_CODES
+        for code, _ in NEW_PUBLIC_CODES[:-1]:  # STUDIO_SERVICE_UNAVAILABLE은 runtime 기본 공개 코드
+            self.assertIn(code, STUDIO_V2_PUBLIC_CODES)
+
+    def test_table_profile_busy_returns_503(self):
+        from daon2_user_api import studio_v2_service
+        service = studio_v2_service.StudioV2Service(None, object_storage=object())
+        self.assertTrue(studio_v2_service._TABLE_PROFILE_SLOTS.acquire(timeout=1))
+        try:
+            with patch.object(studio_v2_service, "TABLE_PROFILE_WAIT_SECONDS", 0.01):
+                with self.assertRaises(StudioError) as caught:
+                    service.table_profile(CTX, SVID, None, 1)
+        finally:
+            studio_v2_service._TABLE_PROFILE_SLOTS.release()
+        self.assertEqual((caught.exception.code, caught.exception.status), ("STUDIO_SERVICE_UNAVAILABLE", 503))
+
+    def test_table_profile_slot_released_after_read(self):
+        from daon2_user_api import studio_v2_service
+        service = studio_v2_service.StudioV2Service(None, object_storage=object())
+        reader = make_reader()[0]
+        with patch("daon2_user_api.studio_original_reader.StudioOriginalReader", return_value=reader):
+            for _ in range(2):  # 두 번째 호출이 막히지 않으면 자리가 돌아온 것
+                with patch.object(studio_v2_service, "TABLE_PROFILE_WAIT_SECONDS", 0.01):
+                    data = service.table_profile(CTX, SVID, None, 1)
+        self.assertEqual(data["row_count"], 4)
+
+    def test_generator_keeps_no_shared_generation_state(self):
+        generator = DataAggregationGenerator(make_reader()[0], ScriptedLLM(GOOD_SPEC))
+        result = generator.generate(agg_ctx()[0])
+        self.assertNotIn("_last", vars(generator))
+        self.assertEqual(result.generated_with["model"], "m")
+
+    def test_list_sheets_uses_profile_deadline(self):
+        from daon2_user_api.table_reader import TableReadError, list_sheets
+        from test_table_reader import sheet_xml, workbook
+        content = workbook([("Sheet1", sheet_xml([["지역", "금액"], ["서울", 1]]))])
+        self.assertEqual(list_sheets(content), ["Sheet1"])
+        with self.assertRaises(TableReadError) as caught:
+            list_sheets(content, deadline=time.monotonic() - 1)
+        self.assertEqual(caught.exception.code, "TABLE_TIMEOUT")
+        from daon2_user_api import studio_v2_service
+        seen = []
+        real = studio_v2_service.list_sheets if hasattr(studio_v2_service, "list_sheets") else None
+        with patch("daon2_user_api.table_reader.list_sheets", side_effect=lambda c, **kw: seen.append(kw) or ["Sheet1"]):
+            studio_v2_service.table_profile_from_original(content, "a.xlsx", "xlsx", None, 1)
+        self.assertIsNone(real)
+        self.assertEqual(len(seen), 1)
+        self.assertIsInstance(seen[0].get("deadline"), float)
+
+
 class WorkerWiringTests(unittest.TestCase):
     def test_object_storage_absent_or_present(self):
         from daon2_user_api import studio_v2_worker
@@ -421,6 +480,18 @@ class TableProfileTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.calls[-1], ("notebook-001", SVID, "Sheet1", 2))
         unauthenticated = await self.client.get(base, params={"source_version_id": SVID})
         self.assertEqual(unauthenticated.status_code, 401)
+
+    async def test_table_profile_route_preserves_public_codes(self):
+        from test_identity_support import identity_session_view
+        base = "/api/v1/workspaces/workspace-001/notebooks/notebook-001/studio/table-profile"
+        service = self.dependencies.studio_v2_service
+        for code, status in NEW_PUBLIC_CODES:
+            def fail(*_a, code=code, status=status):
+                raise StudioError(code, status)
+            with patch.object(type(service), "table_profile", fail), \
+                    patch.object(self.identity, "describe_access", return_value=identity_session_view(self.principal)):
+                response = await self.client.get(base, params={"source_version_id": SVID}, cookies=self.cookies)
+            self.assertEqual((response.status_code, response.json()["error"]["code"]), (status, code))
 
 
 if __name__ == "__main__":

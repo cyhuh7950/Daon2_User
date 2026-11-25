@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -24,6 +25,9 @@ class EvidenceContent:
 
 _MEDIA_KINDS = {"audio_overview": "mp3", "video_overview": "mp4"}
 TABLE_PROFILE_SECONDS = 60.0
+TABLE_PROFILE_WAIT_SECONDS = 5.0
+# API 프로세스에서 표 정보 읽기는 한 번에 하나만(큰 표가 동시에 메모리에 올라오지 않게). 오래 기다리지 않고 503으로 돌려준다.
+_TABLE_PROFILE_SLOTS = threading.BoundedSemaphore(1)
 
 
 def table_profile_from_original(content: bytes, file_name: str, source_format: str, sheet: str | None, header_row: int,
@@ -32,7 +36,7 @@ def table_profile_from_original(content: bytes, file_name: str, source_format: s
     from .table_reader import TableLimits, TableReadError, list_sheets, profile, read_table
     deadline = time.monotonic() + seconds
     try:
-        sheets = list_sheets(content) if source_format == "xlsx" else []
+        sheets = list_sheets(content, deadline=deadline) if source_format == "xlsx" else []
         table = read_table(content, file_name=file_name, source_format=source_format, sheet=sheet, header_row=header_row,
                            limits=TableLimits(), deadline=deadline)
     except TableReadError as error:
@@ -116,9 +120,14 @@ class StudioV2Service(PostgresStudioV2Repository):
             raise StudioError("STUDIO_SERVICE_UNAVAILABLE", 503)
         from .authorization import Action
         from .studio_original_reader import StudioOriginalReader
-        content, file_name, source_format, _ = StudioOriginalReader(self._cloud_store, self._object_storage).read(
-            context, source_version_id, action=Action.VIEW)
-        return table_profile_from_original(content, file_name, source_format, sheet, header_row)
+        if not _TABLE_PROFILE_SLOTS.acquire(timeout=TABLE_PROFILE_WAIT_SECONDS):
+            raise StudioError("STUDIO_SERVICE_UNAVAILABLE", 503)
+        try:
+            content, file_name, source_format, _ = StudioOriginalReader(self._cloud_store, self._object_storage).read(
+                context, source_version_id, action=Action.VIEW)
+            return table_profile_from_original(content, file_name, source_format, sheet, header_row)
+        finally:
+            _TABLE_PROFILE_SLOTS.release()
 
     def get_media(self, context: StudioContext, output_id: str, type_id: str) -> dict[str, object]:
         """오디오·동영상 개요의 재생용 자산(mp3·mp4). 완료된 해당 유형 산출물만."""

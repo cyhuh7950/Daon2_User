@@ -754,12 +754,13 @@ _PARSE_ERRORS = (zipfile.BadZipFile, zipfile.LargeZipFile, ET.ParseError, OSErro
                  KeyError, IndexError, RuntimeError, NotImplementedError, UnicodeError, zlib.error, csv.Error)
 
 
-def list_sheets(content: bytes) -> list[str]:
+def list_sheets(content: bytes, *, deadline: float | None = None) -> list[str]:
     """Sheet names of an XLSX workbook, in workbook order."""
     if not isinstance(content, (bytes, bytearray)):
         _fail('TABLE_FORMAT_UNSUPPORTED')
+    _check_deadline(deadline)
     try:
-        package = _Package(bytes(content), TableLimits(), None)
+        package = _Package(bytes(content), TableLimits(), deadline)
         try:
             _, sheets = _workbook(package)
             return [name for name, _ in sheets]
