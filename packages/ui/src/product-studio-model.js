@@ -8,7 +8,6 @@ export const OUTPUT_TYPES = Object.freeze([
   Object.freeze({ id: "infographic", label: "인포그래픽", formats: ["svg", "png", "pdf", "json"] }),
   Object.freeze({ id: "flashcards", label: "플래시카드", formats: ["json", "csv", "pdf"] }),
   Object.freeze({ id: "quiz", label: "퀴즈", formats: ["json", "csv", "pdf"] }),
-  Object.freeze({ id: "web_page", label: "웹 페이지", formats: ["html"] }),
   Object.freeze({ id: "audio", label: "AI 오디오", formats: ["json"], generationUnavailable: true }),
   Object.freeze({ id: "video", label: "동영상", formats: ["json"], generationUnavailable: true }),
 ]);

@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { StudioIcon, STUDIO_TYPE_STYLE } from "./studio-icon.js";
 import {
-  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds,
+  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds, webPageProgressKey,
 } from "./studio-panel-model.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 import { ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDialog, SettingsDialog, ShareDialog } from "./studio-dialogs.jsx";
@@ -60,8 +60,11 @@ function Card({ output, now, waiting = false, outlinePending = false, confirmedO
   let subtitle = cardSubtitle(output, { now });
   // 동시 생성 한도 때문에 시작을 기다리는 산출물은 "대기 중"으로 구분한다(낙관적 카드와 실행 중 카드는 "생성 중").
   // 심층 조사(NB4-U2)는 서버 진행 메모로 단계(계획 → 찾기 n/m → 작성)를 보인다. 조사는 구성 확인을 쓰지 않아 확정 문구와 겹치지 않는다.
+  // 웹 페이지(WO-N8)는 서버 진행 메모로 "내용 만드는 중" → "페이지 만드는 중"을 보인다.
   const research = generating && !waiting ? researchProgress(output) : null;
+  const webPageKey = generating && !waiting ? webPageProgressKey(output) : null;
   if (generating) subtitle = waiting ? msg("studio.card.queued") : research ? msg(`studio.research.progress.${research.step}`, research)
+    : webPageKey ? msg(webPageKey)
     : confirmedOutline ? msg("studio.card.generating_confirmed") : msg("studio.card.generating");
   else if (state === "failed") subtitle = studioErrorMessage(output.error_code) || msg("studio.card.failed");
   else if (state === "cancelled") subtitle = msg("studio.card.cancelled");

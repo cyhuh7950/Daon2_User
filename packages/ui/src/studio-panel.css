@@ -210,6 +210,7 @@
 .studio-web-page__preview { display: flex; height: min(240px, 30vh); margin-top: 8px; border: 1px solid var(--studio-border); border-radius: 12px; overflow: hidden; background: #ffffff; }
 .studio-menu__check { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 10px; font-size: 14px; cursor: pointer; }
 .studio-menu__check:hover, .studio-menu__check:focus-visible { background: var(--studio-tile); }
+.studio-panel .studio-menu__check:focus-visible { outline: 3px solid var(--studio-focus); }
 .studio-menu__box { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--studio-border); border-radius: 4px; font-size: 13px; }
 .studio-menu__box[data-checked="true"] { border-color: var(--studio-primary); background: var(--studio-primary); color: var(--studio-primary-text); }
 /* 웹 페이지 상세 본문만: 본문 자체는 스크롤하지 않고, 뷰어가 남는 높이를 채운다. 대화 수정은 높이 한도 안에서 고친 안 목록만 스크롤한다. */

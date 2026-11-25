@@ -156,7 +156,15 @@ export function researchProgress(output) {
   return null;
 }
 
-/** 진행 막대 너비(%): 서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */
+const WEB_PAGE_NOTES = new Map([["내용 만드는 중", "studio.progress.web_page.content"], ["페이지 만드는 중", "studio.progress.web_page.html"]]);
+
+/** 웹 페이지(WO-N8) 생성 중 카드 문구 키. 서버 진행 메모가 두 단계 중 하나일 때만, 아니면 null(기존 문구). */
+export function webPageProgressKey(output) {
+  if (output?.type_id !== "web_page" || !ACTIVE.has(output.status)) return null;
+  return WEB_PAGE_NOTES.get(output.progress?.note) ?? null;
+}
+
+/** 진행 막대 너비(%):서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */
 export function progressPercent(output) {
   const pct = output?.progress?.pct ?? output?.progress_pct;
   return Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) : 20;

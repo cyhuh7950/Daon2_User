@@ -667,6 +667,23 @@ test("심층 조사 카드 진행 문구 3단계: 계획 → 찾기 n/m → 작�
   } finally { await view.close(); }
 });
 
+test("웹 페이지 카드 진행 문구: 내용 만드는 중 → 페이지 만드는 중, 다른 메모는 기존 문구(WO-N8 최종 검토 I3)", async () => {
+  const studio = fakeStudio([
+    item({ output_id: OID("1"), title: "웹 1", type_id: "web_page", status: "generating", progress: { pct: 15, note: "내용 만드는 중" } }),
+    item({ output_id: OID("2"), title: "웹 2", type_id: "web_page", status: "generating", progress: { pct: 55, note: "페이지 만드는 중" } }),
+    item({ output_id: OID("3"), title: "웹 3", type_id: "web_page", status: "generating", progress: { pct: 95, note: "검증 완료" } }),
+    item({ output_id: OID("4"), title: "보고 4", type_id: "report", status: "generating", progress: { pct: 55, note: "페이지 만드는 중" } })]);
+  const view = await mount(studio);
+  try {
+    await wait(view);
+    assert.match(cardOf(view.container, "웹 1").textContent, /내용 만드는 중/u);
+    assert.match(cardOf(view.container, "웹 2").textContent, /페이지 만드는 중/u);
+    assert.match(cardOf(view.container, "웹 3").textContent, /생성 중…/u);
+    assert.match(cardOf(view.container, "보고 4").textContent, /생성 중…/u, "웹 페이지가 아니면 웹 페이지 문구를 쓰지 않는다");
+    assert.ok(buttonByText(cardOf(view.container, "웹 1"), "취소"));
+  } finally { await view.close(); }
+});
+
 test("진행 문구가 없거나 조사 형식이 아니면 기존 문구를 그대로 쓰고, 폴링으로 단계가 바뀌면 문구도 바뀐다", async () => {
   const studio = fakeStudio([
     item({ output_id: OID("1"), title: "일반 보고서", status: "generating", progress: null }),

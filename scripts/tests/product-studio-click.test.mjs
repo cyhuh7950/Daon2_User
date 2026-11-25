@@ -964,7 +964,7 @@ test('S21 React marks only audio/video file generation unavailable while saved m
     const container=dom.document.createElement('div');dom.document.body.appendChild(container);reactRoot=createRoot(container);
     await act(async()=>reactRoot.render(createElement(ProductStudioPane,{state:createProductStudioState({workspaceId:'workspace-1',outputs}),adapter})));
     const tiles=()=>findElements(container,node=>node.tagName==='BUTTON'&&node.getAttribute?.('class')?.split(' ').includes('studio-type-tile'));
-    assert.equal(tiles().length,12);
+    assert.equal(tiles().length,11);
     for(const label of ['AI 오디오','동영상']){
       const tile=tiles().find(node=>node.textContent.includes(label));assert.ok(tile);
       assert.equal(tile.disabled,true,label);
@@ -972,7 +972,7 @@ test('S21 React marks only audio/video file generation unavailable while saved m
       await act(async()=>tile.dispatchEvent(new MinimalEvent('click')));
       assert.equal(findElements(container,node=>node.getAttribute?.('data-studio-view')==='config').length,0);
     }
-    for(const label of ['근거 기반 보고서','제약·준수 점검표','비교·데이터 표','지식 구조도','업무 문서 초안','슬라이드','인포그래픽','플래시카드','퀴즈','웹 페이지']){
+    for(const label of ['근거 기반 보고서','제약·준수 점검표','비교·데이터 표','지식 구조도','업무 문서 초안','슬라이드','인포그래픽','플래시카드','퀴즈']){
       const tile=tiles().find(node=>node.textContent===label);assert.ok(tile,label);assert.equal(tile.disabled,false);
       await act(async()=>tile.dispatchEvent(new MinimalEvent('click')));
       assert.match(container.textContent,new RegExp(`${label} 설정`));

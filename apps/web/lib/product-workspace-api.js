@@ -713,7 +713,7 @@ export async function listStudioOutputs(workspaceId, { notebookId, fetchImpl = f
 // media provider is configured; they must not be silently treated as success.
 const STUDIO_OUTPUT_TYPES = new Set([
   "evidence_report", "compliance_checklist", "comparison_table", "knowledge_map", "business_draft",
-  "slides", "infographic", "flashcards", "quiz", "web_page", "audio", "video",
+  "slides", "infographic", "flashcards", "quiz", "audio", "video",
 ]);
 const STUDIO_ACTIONS = new Set(["reviews", "approval-requests", "approvals", "deliveries", "knowledge-registrations"]);
 

@@ -50,8 +50,12 @@ test("web_page 문구 키가 모두 있다", () => {
   assert.ok(STUDIO_MESSAGES["studio.web_page.request.hint"]);
 });
 
-test("대화로 고치기 유형과 API 허용 유형에 web_page가 있다", () => {
+test("대화로 고치기 유형에 web_page가 있고, 예전 제품 스튜디오 화면에는 없다(최종 검토 I5)", () => {
   assert.match(read("packages/ui/src/studio-chat-edit.jsx"), /CHAT_EDIT_TYPES = \[[^\]]*"web_page"/u);
-  assert.match(read("apps/web/lib/product-workspace-api.js"), /STUDIO_OUTPUT_TYPES = new Set\(\[[^\]]*"web_page"/u);
-  assert.match(read("packages/ui/src/product-studio-model.js"), /id: "web_page", label: "웹 페이지", formats: \["html"\]/u);
+  assert.doesNotMatch(read("apps/web/lib/product-workspace-api.js"), /STUDIO_OUTPUT_TYPES = new Set\(\[[^\]]*"web_page"/u);
+  assert.doesNotMatch(read("packages/ui/src/product-studio-model.js"), /web_page/u);
+});
+
+test("출처 목록 넣기 메뉴 항목은 키보드 초점 테두리가 보인다(최종 검토 M3)", () => {
+  assert.match(read("packages/ui/src/studio-panel.css"), /\.studio-panel \.studio-menu__check:focus-visible \{ outline: 3px solid var\(--studio-focus\); \}/u);
 });
