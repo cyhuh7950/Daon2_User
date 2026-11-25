@@ -49,3 +49,8 @@ test("고른 면 하나가 머리줄과 하단 탭 사이 높이를 채우고, �
   assert.match(panes, /overflow:\s*hidden/u);
   assert.match(narrow, /\[data-narrow-active="conversation"\] \.pane-slot:not\(:has\(#product-pane-conversation\)\)/u);
 });
+
+test("하단 탭 자리는 작업 화면 아래 여백 한 곳에서만 잡는다(칸 묶음 아래 여백 0, 빈 띠 없음)", () => {
+  // 1023px 이하 규칙의 칸 묶음 padding-bottom: 52px와 820px 이하 화면 padding-bottom: 64px가 겹쳐 칸 아래에 약 60px 빈 띠가 생겼다.
+  assert.match(rule('.adaptive-workspace .workspace-panes[data-layout="source-conversation-studio"]'), /padding-bottom:\s*0/u);
+});
