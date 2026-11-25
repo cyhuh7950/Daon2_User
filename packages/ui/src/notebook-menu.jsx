@@ -132,8 +132,8 @@ export function NotebookTools({ studio, title = "", counts = {}, onCreateNoteboo
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
   return <div className="notebook-tools">
-    <button type="button" className="notebook-create" onClick={onCreateNotebook}>{msg("notebook.create")}</button>
-    <button type="button" className="notebook-share" disabled title={msg("notebook.share.pending")}>{msg("notebook.share")}</button>
+    <button type="button" className="notebook-create" aria-label={msg("notebook.create")} title={msg("notebook.create")} onClick={onCreateNotebook}><StudioIcon name="add" size={18} className="app-action-icon" /><span className="app-action-label">{msg("notebook.create")}</span></button>
+    <button type="button" className="notebook-share" aria-label={msg("notebook.share")} disabled title={msg("notebook.share.pending")}><StudioIcon name="share" size={18} className="app-action-icon" /><span className="app-action-label">{msg("notebook.share")}</span></button>
     <div className="settings-menu-anchor" ref={anchorRef}>
       <button type="button" aria-haspopup="menu" aria-expanded={menuOpen} aria-label={msg("notebook.menu")} onClick={() => setMenuOpen((open) => !open)}><StudioIcon name="more_vertical" size={18} /></button>
       {menuOpen ? <div className="settings-menu" role="menu" aria-label={msg("notebook.menu")}>

@@ -126,3 +126,18 @@
 .assistant-message ul.answer-list { margin: 3px 0; padding-left: 18px; }
 .assistant-message ul.answer-list li { margin: 2px 0; }
 .citation-row a { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 머리줄 버튼(휴대폰 머리줄 줄이기): 넓은 화면은 글자 버튼, 600px 이하는 36px 아이콘 버튼. 이름은 aria-label·title로 남는다. */
+.workspace-app-bar .app-action-icon { display: none; }
+@media (max-width: 600px) {
+  .adaptive-workspace .workspace-app-bar { flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px; min-height: 0; }
+  .workspace-app-bar .workspace-brand { flex: 1 1 auto; min-width: 0; }
+  .workspace-app-bar .workspace-brand > div { min-width: 0; }
+  .workspace-app-bar .workspace-brand h1 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .workspace-app-bar .workspace-app-actions { flex: none; flex-wrap: nowrap; gap: 4px; }
+  .workspace-app-bar .workspace-app-actions .notebook-tools { flex-wrap: nowrap; gap: 4px; }
+  .workspace-app-bar .app-action-icon { display: inline-block; }
+  .workspace-app-bar .app-action-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .workspace-app-bar .workspace-app-actions button { display: inline-grid; place-items: center; width: 36px; min-width: 36px; height: 36px; min-height: 36px; padding: 0; }
+  .workspace-app-bar .workspace-status { min-height: 0; padding: 0 4px; border: 0; background: transparent; }
+  .workspace-app-bar .workspace-status .status-text { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
