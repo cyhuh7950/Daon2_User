@@ -169,6 +169,22 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         return JSONResponse({"data": {"types": available_types(authoring_enabled=authoring is not None, tts_enabled=tts is not None,
                                                                                  tts_settings=tts.settings_overlay() if tts else None), "limits": limits}, "meta": _meta(request, id)})
 
+    @app.get(base + "/table-profile")
+    async def studio_v2_table_profile(id: str, notebook_id: str, request: Request) -> JSONResponse:
+        """데이터 집계(WO-N9) 표 정보: 시트·열 이름과 종류·행 수. 셀 값은 돌려주지 않는다."""
+        _require_query_keys(request, frozenset({"source_version_id", "sheet", "header_row"}))
+        ctx = _ctx(request, id, notebook_id, Action.VIEW)
+        version = request.query_params.get("source_version_id") or ""
+        sheet = request.query_params.get("sheet") or None
+        header_raw = request.query_params.get("header_row", "1")
+        if (_ID.fullmatch(version) is None or (sheet is not None and len(sheet) > 120)
+                or not header_raw.isdigit() or not 1 <= int(header_raw) <= 50):
+            raise HTTPException(status_code=400)
+        data = await run(service.table_profile, ctx, version, sheet, int(header_raw))
+        response = JSONResponse({"data": data, "meta": _meta(request, id)})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     @app.post(base + "/outputs", status_code=202)
     async def studio_v2_create(id: str, notebook_id: str, body: CreateBody, request: Request,
                                idempotency_key: str = Header(alias="Idempotency-Key")) -> JSONResponse:

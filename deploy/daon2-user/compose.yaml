@@ -156,14 +156,25 @@ services:
       DAON_PROVIDER_CREDENTIAL_KEY_FILE: /run/secrets/provider_credential_key
       DAON_TTS_CONFIG_FILE: /run/secrets/tts_engines
       DAON_STUDIO_V2_CONTEXT_CHARS: ${DAON_STUDIO_V2_CONTEXT_CHARS-16000}
+      # 데이터 집계(WO-N9)가 노트북 소스의 XLSX·CSV 원본을 읽는다(document-worker와 같은 저장소 설정).
+      DAON_OBJECT_STORAGE_ENDPOINT: ${DAON_OBJECT_STORAGE_ENDPOINT:?object storage endpoint required}
+      DAON_OBJECT_STORAGE_BUCKET: ${DAON_OBJECT_STORAGE_BUCKET:?object storage bucket required}
+      DAON_OBJECT_STORAGE_SECURE: ${DAON_OBJECT_STORAGE_SECURE-true}
+      DAON_OBJECT_ACCESS_KEY_FILE: /run/secrets/object_access_key
+      DAON_OBJECT_SECRET_KEY_FILE: /run/secrets/object_secret_key
     mem_limit: 768m
     cpus: 1.0
     secrets:
+      - object_access_key
+      - object_secret_key
       - provider_credential_key
       - tts_engines
     networks:
       - daon2_user
       - proxy-network
+    depends_on:
+      object-storage:
+        condition: service_healthy
     healthcheck:
       disable: true
     restart: unless-stopped

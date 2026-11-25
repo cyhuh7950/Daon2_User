@@ -96,6 +96,21 @@ test("document worker is internal and receives the same server-only dependencies
   assert.doesNotMatch(worker, /NEXT_PUBLIC_/);
 });
 
+test("WO-N9 studio-v2 worker reads source originals with the document-worker storage settings", async () => {
+  const document = parse(await readFile(composeUrl, "utf8"));
+  const v2 = document.services["studio-v2-worker"];
+  const worker = document.services["document-worker"];
+  for (const key of ["DAON_OBJECT_STORAGE_ENDPOINT", "DAON_OBJECT_STORAGE_BUCKET", "DAON_OBJECT_STORAGE_SECURE",
+    "DAON_OBJECT_ACCESS_KEY_FILE", "DAON_OBJECT_SECRET_KEY_FILE"]) {
+    assert.equal(v2.environment[key], worker.environment[key], key);
+  }
+  for (const secret of ["object_access_key", "object_secret_key"]) {
+    assert.ok(v2.secrets.includes(secret), secret);
+  }
+  assert.equal(v2.depends_on["object-storage"].condition, "service_healthy");
+  assert.equal(v2.mem_limit, "768m");
+});
+
 test("example environment exposes only the provider credential key file", async () => {
   const source = await readFile(new URL("../../.env.example", import.meta.url), "utf8");
   assert.match(source, /^DAON_PROVIDER_CREDENTIAL_KEY_FILE=/m);
