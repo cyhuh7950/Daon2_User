@@ -7,10 +7,12 @@ import re
 import pytest
 
 from daon2_user_api.studio_web_page import (
+    BEHAVIOR_SCRIPT,
     BRIDGE_SCRIPT,
     CSP,
     MAX_HTML_BYTES,
     WebPageCheckFailed,
+    attach_behavior,
     attach_bridge,
     extract_html,
     finalize_html,
@@ -96,9 +98,12 @@ def test_numbers_outside_verified_text_are_stray() -> None:
     assert stray_anchors(html, "보상 한도는 100만 원이다.", "요청") != set()
 
 
-def test_script_constant_is_checked() -> None:
+def test_model_script_is_removed_entirely() -> None:
+    # 모델 스크립트는 남지 않으므로 숫자 대조 대상도 아니다(판정 A).
     html = sanitize_html(_page("<p>안내</p><script>const rate=0.37</script>"))
-    assert "number:0.37" in stray_anchors(html, "안내", "요청")
+    assert "<script" not in html.lower()
+    assert "0.37" not in html
+    assert stray_anchors(html, "안내", "요청") == set()
 
 
 def test_numbers_match_with_commas_and_units() -> None:
@@ -166,11 +171,16 @@ def test_uppercase_tags_and_attrs_are_handled() -> None:
     assert "링크" in out and "링크2" in out
 
 
-def test_inline_handlers_and_inline_script_are_kept() -> None:
-    raw = _page('<button onclick="toggle()">열기</button><script>function toggle(){return 1<2}</script>')
+def test_inline_handlers_and_inline_script_are_removed() -> None:
+    raw = _page(
+        '<button onclick="toggle()" ONMOUSEOVER="x()" data-toggle="a">열기</button>'
+        "<script>function toggle(){return 1<2}</script>"
+        "<svg><script>alert(1)</script></svg><math><script>alert(2)</script></math>"
+    )
     out = sanitize_html(raw)
-    assert 'onclick="toggle()"' in out
-    assert "<script>function toggle(){return 1<2}</script>" in out
+    assert "onclick" not in out.lower() and "onmouseover" not in out.lower()
+    assert "<script" not in out.lower() and "alert" not in out and "toggle()" not in out
+    assert '<button data-toggle="a">열기</button>' in out
 
 
 def test_url_attributes_allow_only_fragments_and_data_images() -> None:
@@ -259,7 +269,143 @@ def test_sanitize_is_idempotent() -> None:
 def test_script_end_tag_variants_cannot_escape() -> None:
     raw = _page('<script>var a="</scr"+"ipt>";</script><p>x</p>')
     out = sanitize_html(raw)
-    assert out.lower().count("<script") == out.lower().count("</script>")
+    assert "<script" not in out.lower() and "</script" not in out.lower()
+    assert "<p>x</p>" in out
+
+
+_EVIL = (
+    '<meta http-equiv="refresh" content="1;url=https://evil.example/?x">'
+    '<a href="https://evil.example/a">x</a><form action="https://evil.example/f"></form>'
+)
+
+
+def _assert_no_evil(out: str) -> None:
+    lowered = out.lower()
+    assert "http-equiv" not in lowered.replace('http-equiv="content-security-policy"', "")
+    assert "evil.example" not in lowered
+    assert "<form" not in lowered
+    assert '<a href="http' not in lowered
+
+
+@pytest.mark.parametrize("payload", [
+    "<h2>개요</h2><p>본문</p><svg></math><script>" + _EVIL + "</script></svg>",
+    "<h2>개요</h2><p>본문</p><svg><foreignObject><p></svg></p></foreignObject><script>" + _EVIL + "</script></svg>",
+])
+def test_reviewer_foreign_content_script_payloads(payload: str) -> None:
+    out = sanitize_html(payload)
+    _assert_no_evil(out)
+    assert out.lower().count("http-equiv") == 1
+    final = finalize_html(payload, "개요 본문", "", ["개요"])
+    _assert_no_evil(final)
+
+
+@pytest.mark.parametrize("wrapper", ["{}", "<svg>{}</svg>", "<svg></math>{}</svg>", "<math><mtext>{}</mtext></math>"])
+def test_style_raw_text_never_contains_lt(wrapper: str) -> None:
+    out = sanitize_html(wrapper.format("<style>p{color:red}" + _EVIL + "</style>"))
+    chunks = re.findall(r"<style>(.*?)</style>", out, re.S)
+    assert chunks
+    for chunk in chunks:
+        # 태그를 열 수 없고(<가 없음) 주소 형태도 남지 않는다. 남은 "evil.example" 글자 자체는 CSS 안의 무해한 글이다.
+        assert "<" not in chunk
+        assert "http:" not in chunk.lower() and "https:" not in chunk.lower() and "//" not in chunk
+    assert "<a " not in out and "<form" not in out and "<meta http-equiv=\"refresh" not in out
+
+
+def test_template_and_noscript_dropped_with_content() -> None:
+    out = sanitize_html(_page("<template><p>틀 안</p></template><noscript><p>대체 글</p></noscript><p>남음</p>"))
+    assert "template" not in out and "noscript" not in out
+    assert "틀 안" not in out and "대체 글" not in out
+    assert "<p>남음</p>" in out
+
+
+def test_charset_and_doctype_always_ours() -> None:
+    meta = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
+    for raw in (
+        '<html><head><meta charset="euc-kr"><meta http-equiv="Content-Type" content="text/html; charset=euc-kr"></head><body>a</body></html>',
+        "<p>a</p>",
+        "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01//EN\"><p>a</p>",
+    ):
+        out = sanitize_html(raw)
+        assert out.startswith("<!DOCTYPE html><html><head>" + meta + '<meta charset="utf-8">')
+        assert out.lower().count("charset") == 1
+        assert "euc-kr" not in out and "W3C" not in out
+
+
+def test_control_characters_stripped() -> None:
+    out = sanitize_html(_page('<p title="a\x01b\x00c">x\x02y\x1fz\tw\nv</p>'))
+    assert not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", out)
+    assert 'title="abc"' in out
+    assert "xyz\tw\nv" in out
+
+
+@pytest.mark.parametrize(("body", "anchor"), [
+    ('<p title="연 37%">a</p>', "quantity:37:percent"),
+    ('<img alt="500만 원" src="data:image/png;base64,AA">', "number:500"),
+    ('<input value="777">', "number:777"),
+    ('<ol start="450"><li>a</li></ol>', "number:450"),
+    ('<ul><li value="321">a</li></ul>', "number:321"),
+    ('<p aria-label="연 88명">a</p>', "number:88"),
+    ('<input placeholder="예: 6543">', "number:6543"),
+    ('<option label="4321">a</option>', "number:4321"),
+    ('<p data-rate="0.37">a</p>', "number:0.37"),
+])
+def test_numbers_in_attributes_are_checked(body: str, anchor: str) -> None:
+    html = sanitize_html(_page(body))
+    assert anchor in stray_anchors(html, "a", "")
+
+
+def test_numbers_in_css_content_are_checked() -> None:
+    html = sanitize_html(_page('<p class="p">a</p><span style="--x:1">b</span>', head='<style>.p::before{content:"9,999원"}</style>'))
+    assert "number:9999" in stray_anchors(html, "a b", "")
+    inline = sanitize_html(_page('<p style="content:\'4,444\'">a</p>'))
+    assert "number:4444" in stray_anchors(inline, "a", "")
+    # CSS 정리로 생긴 \3c 는 숫자로 잡히지 않는다.
+    lt = sanitize_html(_page("<p>a</p>", head='<style>.p::before{content:"<"}</style>'))
+    assert stray_anchors(lt, "a", "") == set()
+
+
+def test_structural_data_attributes_not_checked() -> None:
+    html = sanitize_html(_page(
+        '<div data-tabs="1"><button data-tab="t2026">a</button><div data-panel="t2026">a</div></div>'
+        '<button data-toggle="x99">a</button><div data-toggle-target="x99">a</div>'
+        '<table data-sortable="555"><tr><th>a</th></tr></table><p data-ref="S12">a</p>'
+    ))
+    assert stray_anchors(html, "a", "") == set()
+
+
+def test_behavior_script_shape_and_attach() -> None:
+    assert BEHAVIOR_SCRIPT.startswith("<script data-daon-behavior>") and BEHAVIOR_SCRIPT.endswith("</script>")
+    for token in ("[data-tabs]", "[data-tab]", "[data-panel]", "aria-selected", "hidden",
+                  "[data-toggle]", "[data-toggle-target]", "table[data-sortable]", "localeCompare", "numeric:true"):
+        assert token in BEHAVIOR_SCRIPT, token
+    body = BEHAVIOR_SCRIPT[len("<script data-daon-behavior>"):-len("</script>")]
+    for banned in ("fetch", "XMLHttpRequest", "location", "window.open", "WebSocket", "sendBeacon", "import(", "eval", "innerHTML", "src", "href"):
+        assert banned not in body, banned
+    assert not re.search(r"(?<![\w.])(?:[2-9]|\d{2,})", body)
+    html = sanitize_html(_page("<p>a</p>"))
+    assert attach_behavior(html).count("data-daon-behavior") == 1
+
+
+def test_finalize_inserts_behavior_then_bridge_and_strip_keeps_behavior() -> None:
+    final = finalize_html(_page("<h2>개요</h2><p>a</p>"), "개요 a", "", ["개요"])
+    b, r, end = final.index(BEHAVIOR_SCRIPT), final.index(BRIDGE_SCRIPT), final.lower().rindex("</body>")
+    assert b < r < end
+    stripped = strip_bridge(final)
+    assert BEHAVIOR_SCRIPT in stripped and BRIDGE_SCRIPT not in stripped
+
+
+def test_model_behavior_marker_attribute_removed() -> None:
+    out = sanitize_html(_page('<p data-daon-behavior="1">x</p>'))
+    assert "data-daon-behavior" not in out
+
+
+def test_attach_uses_original_offsets_with_dotted_i() -> None:
+    html = sanitize_html("<body><p>" + "İ" * 30 + '</p></body><p title="abcdefghijklmnopqrstuvwxyz">t</p>')
+    attached = attach_bridge(html)
+    assert attached.index(BRIDGE_SCRIPT) == html.index("</body>")
+    assert strip_bridge(attached) == html
+    behaved = attach_behavior(html)
+    assert behaved.index(BEHAVIOR_SCRIPT) == html.index("</body>")
 
 
 def test_attribute_values_are_reescaped() -> None:
@@ -272,7 +418,7 @@ def test_attribute_values_are_reescaped() -> None:
 def test_head_and_html_created_when_missing() -> None:
     out = sanitize_html("<p>조각</p>")
     meta = f'<meta http-equiv="Content-Security-Policy" content="{CSP}">'
-    assert out.startswith("<html><head>" + meta)
+    assert out.startswith("<!DOCTYPE html><html><head>" + meta + '<meta charset="utf-8">')
     assert "<p>조각</p>" in out
 
 

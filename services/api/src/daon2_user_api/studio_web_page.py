@@ -167,6 +167,56 @@ BRIDGE_SCRIPT = (
 )
 
 
+# 표시 동작(탭·접기·표 정렬)용 고정 스크립트. 모델 스크립트는 모두 지우고 이것만 붙인다.
+# 네트워크·이동 API를 쓰지 않고, 0/1 밖의 숫자 상수를 쓰지 않는다.
+BEHAVIOR_SCRIPT = (
+    "<script data-daon-behavior>"
+    "(function(){"
+    "function all(root,q){return Array.prototype.slice.call(root.querySelectorAll(q));}"
+    'function own(box,el){return el.closest("[data-tabs]")===box;}'
+    "function hide(el,off){if(off){el.setAttribute(\"hidden\",\"\");}else{el.removeAttribute(\"hidden\");}}"
+    "function show(box,name){"
+    'all(box,"[data-tab]").forEach(function(b){if(own(box,b)){'
+    'b.setAttribute("aria-selected",b.getAttribute("data-tab")===name?"true":"false");}});'
+    'all(box,"[data-panel]").forEach(function(p){if(own(box,p)){'
+    'hide(p,p.getAttribute("data-panel")!==name);}});}'
+    "function init(){"
+    'all(document,"[data-tabs]").forEach(function(box){'
+    'var first=all(box,"[data-tab]").filter(function(b){return own(box,b);})[0];'
+    'if(first){show(box,first.getAttribute("data-tab"));}});}'
+    'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",init);}else{init();}'
+    "function sortBy(th){"
+    'var table=th.closest("table[data-sortable]");if(!table){return;}'
+    "var row=th.parentNode;var idx=Array.prototype.indexOf.call(row.children,th);"
+    "var body=table.tBodies[0];if(!body){return;}"
+    'var dir=th.getAttribute("data-sort-dir")==="asc"?"desc":"asc";'
+    'all(row,"th").forEach(function(h){h.removeAttribute("data-sort-dir");h.removeAttribute("aria-sort");});'
+    'th.setAttribute("data-sort-dir",dir);'
+    'th.setAttribute("aria-sort",dir==="asc"?"ascending":"descending");'
+    "var rows=Array.prototype.slice.call(body.rows);"
+    "rows.sort(function(a,b){"
+    'var x=a.cells[idx]?a.cells[idx].textContent.trim():"";'
+    'var y=b.cells[idx]?b.cells[idx].textContent.trim():"";'
+    'var r=x.localeCompare(y,undefined,{numeric:true,sensitivity:"base"});'
+    'return dir==="asc"?r:-r;});'
+    "rows.forEach(function(r){body.appendChild(r);});}"
+    'document.addEventListener("click",function(e){'
+    "var t=e.target;if(!t||!t.closest){return;}"
+    'var tab=t.closest("[data-tab]");'
+    'if(tab){var box=tab.closest("[data-tabs]");if(box){show(box,tab.getAttribute("data-tab"));return;}}'
+    'var tg=t.closest("[data-toggle]");'
+    'if(tg){var name=tg.getAttribute("data-toggle");'
+    'all(document,"[data-toggle-target]").forEach(function(el){'
+    'if(el.getAttribute("data-toggle-target")===name){'
+    'var open=el.hasAttribute("hidden");hide(el,!open);'
+    'tg.setAttribute("aria-expanded",open?"true":"false");}});return;}'
+    'var th=t.closest("th");if(th){sortBy(th);}'
+    "});"
+    "})();"
+    "</script>"
+)
+
+
 class WebPageCheckFailed(Exception):
     """2단계 HTML 검사 실패. reason: numbers | headings | size | empty.
 
@@ -214,20 +264,25 @@ def extract_html(raw: str) -> str:
 
 _TAG_NAME = re.compile(r"[a-z][a-z0-9-]*")
 _ATTR_NAME = re.compile(r"[a-z_:][a-z0-9_:.-]*")
-# 요소와 안쪽 내용을 통째로 지운다.
-_DROP_WITH_CONTENT = {"iframe", "object", "applet", "noembed", "noframes", "portal", "fencedframe"}
+# 요소와 안쪽 내용을 통째로 지운다. 모델 script는 어디에 있든(svg/math 안 포함) 모두 지운다.
+_DROP_WITH_CONTENT = {
+    "script", "iframe", "object", "applet", "noembed", "noframes", "portal", "fencedframe",
+    "template", "noscript",
+}
 # 태그만 지운다(안쪽 내용은 남김). form은 내용을 살린다.
 _DROP_TAG = {"link", "base", "embed", "frame", "frameset", "form", "param", "plaintext", "keygen"}
 _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
-_RAW_KEEP = {"script", "style"}
+_RAW_KEEP = {"style"}
 _RCDATA_LIKE = {"textarea", "title", "xmp"}
 _ANIMATION = {"set", "animate", "animatemotion", "animatetransform", "animatecolor"}
 # 값과 상관없이 늘 지우는 속성(주소를 담거나 요청을 일으킨다).
 _ALWAYS_DROP_ATTRS = {
     "srcset", "imagesrcset", "ping", "action", "formaction", "manifest", "codebase", "archive",
     "classid", "longdesc", "profile", "lowsrc", "dynsrc", "srcdoc", "cite", "icon", "http-equiv",
-    "data-daon-bridge",
+    "data-daon-bridge", "data-daon-behavior",
 }
+# 글자 데이터·속성 값에서 지우는 C0 제어문자(\t \n \r 제외).
+_C0 = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _HREF_ATTRS = {"href", "xlink:href"}
 _SRC_ATTRS = {"src", "poster", "background", "data"}
 _CTRL_WS = re.compile(r"[\x00-\x20\x7f]+")
@@ -315,9 +370,12 @@ def _clean_attrs(tag: str, attrs: list[tuple[str, str | None]]) -> list[tuple[st
         seen.add(name)  # 브라우저는 같은 이름의 첫 속성만 쓴다.
         if name in _ALWAYS_DROP_ATTRS:
             continue
+        if name.startswith("on"):  # 모델 처리기는 모두 지운다(판정 A).
+            continue
         if value is None:
             kept.append((name, None))
             continue
+        value = _C0.sub("", value)
         probe = _CTRL_WS.sub("", value).lower()
         if name in _HREF_ATTRS:
             if probe.startswith("#") or (tag in ("image", "feimage") and probe.startswith("data:image/")):
@@ -345,9 +403,7 @@ class _Sanitizer(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
-        self.doctype = False
         self.html_attrs: list[tuple[str, str | None]] | None = None
-        self.charset = False
         self.skip: str | None = None
         self.skip_depth = 0
         self.raw: str | None = None
@@ -368,16 +424,12 @@ class _Sanitizer(HTMLParser):
             return
         if tag == "head" or tag in _DROP_TAG:
             return
-        names = {n for n, _ in attrs}
-        if tag in _DROP_WITH_CONTENT or (tag == "script" and names & {"src", "href", "xlink:href"}):
+        if tag in _DROP_WITH_CONTENT:
             if not self_closing:
                 self.skip, self.skip_depth = tag, 1
             return
-        if tag == "meta":
-            if "http-equiv" in names:
-                return
-            if "charset" in names:
-                self.charset = True
+        if tag == "meta" and {n for n, _ in attrs} & {"http-equiv", "charset"}:
+            return  # CSP·refresh·content-type·charset는 우리 것만 쓴다.
         if tag in _ANIMATION:
             target = next((str(v or "").strip().lower() for n, v in attrs if n == "attributename"), "")
             if target.endswith("href") or target in ("src", "action", "formaction"):
@@ -424,19 +476,17 @@ class _Sanitizer(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self.skip is not None:
             return
-        if self.raw == "script" and not self.foreign:
-            # 원문 유지. 단 "</"와 "<!--"는 스크립트 끝/escape 상태를 만들지 못하게 바꾼다.
-            self.out.append(data.replace("</", "<\\/").replace("<!--", "<\\!--"))
-        elif self.raw == "style":
+        data = _C0.sub("", data)
+        if self.raw == "style":
+            # _clean_css가 '<'를 CSS escape로 바꾸므로 어떤 파싱 문맥에서도 태그가 생기지 않는다.
             css, _ = _clean_css(data)
             self.out.append(_html.escape(css, quote=False) if self.foreign else css)
         else:
-            # 일반 글, RCDATA(textarea·title), xmp, 그리고 svg/math 안의 script(문자 데이터로 파싱됨)
+            # 일반 글, RCDATA(textarea·title), xmp
             self.out.append(_html.escape(data, quote=False))
 
-    def handle_decl(self, decl: str) -> None:
-        if decl.strip().lower().startswith("doctype"):
-            self.doctype = True
+    def handle_decl(self, decl: str) -> None:  # doctype은 늘 우리 것(<!DOCTYPE html>)을 쓴다.
+        return
 
     def handle_comment(self, data: str) -> None:  # 주석은 버린다.
         return
@@ -450,9 +500,8 @@ class _Sanitizer(HTMLParser):
     def result(self) -> str:
         if self.raw is not None:
             self.out.append(f"</{self.raw}>")
-        head = _CSP_META + ("" if self.charset else _CHARSET_META)
-        prefix = ("<!DOCTYPE html>" if self.doctype else "") + f"<html{_render_attrs(self.html_attrs or [])}><head>"
-        return prefix + head + "".join(self.out)
+        prefix = f"<!DOCTYPE html><html{_render_attrs(self.html_attrs or [])}><head>"
+        return prefix + _CSP_META + _CHARSET_META + "".join(self.out)
 
 
 def sanitize_html(html: str) -> str:
@@ -477,20 +526,58 @@ _THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
 _REF_PART = re.compile(r"s\d+")
 
 
+# 숫자 대조에 넣는 속성 글. 구조용 data-*는 뺀다.
+_CHECKED_ATTRS = {"alt", "title", "placeholder", "value", "label"}
+_STRUCTURAL_DATA = {
+    "data-ref", "data-tab", "data-panel", "data-toggle", "data-toggle-target", "data-tabs", "data-sortable",
+}
+_CSS_CONTENT = re.compile(r"content\s*:\s*((?:\"[^\"]*\"|'[^']*'|[^;}\"'])*)", re.I)
+_CSS_STRING = re.compile(r"\"([^\"]*)\"|'([^']*)'")
+
+
+def _css_content_strings(css: str) -> list[str]:
+    found: list[str] = []
+    for value in _CSS_CONTENT.findall(css):
+        for double, single in _CSS_STRING.findall(value):
+            found.append(_css_unescape(double or single))
+    return found
+
+
+def _attr_checked(tag: str, name: str) -> bool:
+    if name in _CHECKED_ATTRS or name.startswith("aria-"):
+        return True
+    if name.startswith("data-"):
+        return name not in _STRUCTURAL_DATA
+    return tag == "ol" and name == "start"
+
+
 class _TextCollector(HTMLParser):
+    """보이는 글(절 제목·숫자)과 숫자 대조용 속성·CSS content 글을 모은다. script 글은 보지 않는다."""
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.visible: list[str] = []
-        self.script: list[str] = []
+        self.extra: list[str] = []
         self.raw: str | None = None
+
+    def _attrs(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if not value:
+                continue
+            if name == "style":
+                self.extra.extend(_css_content_strings(value))
+            elif _attr_checked(tag, name):
+                self.extra.append(value)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in ("script", "style"):
             self.raw = tag
+        self._attrs(tag, attrs)
         if tag not in _INLINE:
             self.visible.append(" ")
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._attrs(tag, attrs)
         if tag not in _INLINE:
             self.visible.append(" ")
 
@@ -502,15 +589,17 @@ class _TextCollector(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self.raw == "style":
-            return
-        (self.script if self.raw == "script" else self.visible).append(data)
+            self.extra.extend(_css_content_strings(data))
+        elif self.raw is None:
+            self.visible.append(data)
 
 
 def _collect(html: str) -> tuple[str, str]:
+    """(보이는 글, 속성·CSS content 글)."""
     collector = _TextCollector()
     collector.feed(html)
     collector.close()
-    return "".join(collector.visible), "\n".join(collector.script)
+    return "".join(collector.visible), "\n".join(collector.extra)
 
 
 def _anchors(text: str) -> frozenset[str]:
@@ -528,9 +617,11 @@ def _excepted(anchor: str) -> bool:
 
 
 def stray_anchors(html: str, allowed_text: str, request: str) -> set[str]:
-    """보이는 글과 <script> 글의 anchor 가운데 allowed_text·요청 글에 없는 것(예외 제외)."""
-    visible, script = _collect(html)
-    page = _anchors(visible) | _anchors(script)
+    """보이는 글·속성 글(alt·title·aria-*·placeholder·value·label·비구조 data-*·ol[start])·
+    CSS content 글의 anchor 가운데 allowed_text·요청 글에 없는 것(예외 제외).
+    속성 글은 따로 뽑아 보이는 글과 붙지 않게 한다."""
+    visible, extra = _collect(html)
+    page = _anchors(visible) | _anchors(extra)
     allowed = _anchors(allowed_text) | _anchors(request)
     return {a for a in page - allowed if not _excepted(a)}
 
@@ -545,11 +636,25 @@ def missing_headings(html: str, headings: Sequence[str]) -> list[str]:
     return [h for h in headings if _squash(h) and _squash(h) not in visible]
 
 
+_BODY_END = re.compile(r"</body\s*>", re.I)
+
+
+def _insert_before_body_end(html: str, script: str) -> str:
+    """원래 문자열에서 대소문자 무시로 찾은 마지막 </body> 앞에 넣는다(없으면 끝에)."""
+    last = None
+    for last in _BODY_END.finditer(html):
+        pass
+    if last is None:
+        return html + script
+    return html[: last.start()] + script + html[last.start():]
+
+
 def attach_bridge(html: str) -> str:
-    end = html.lower().rfind("</body>")
-    if end < 0:
-        return html + BRIDGE_SCRIPT
-    return html[:end] + BRIDGE_SCRIPT + html[end:]
+    return _insert_before_body_end(html, BRIDGE_SCRIPT)
+
+
+def attach_behavior(html: str) -> str:
+    return _insert_before_body_end(html, BEHAVIOR_SCRIPT)
 
 
 def strip_bridge(html: str) -> str:
@@ -557,7 +662,8 @@ def strip_bridge(html: str) -> str:
 
 
 def finalize_html(raw: str, allowed_text: str, request: str, headings: Sequence[str]) -> str:
-    """extract → sanitize → 크기 → 숫자 대조 → 절 제목 → 연결 스크립트. 실패 시 WebPageCheckFailed."""
+    """extract → sanitize → 크기 → 숫자 대조 → 절 제목 → 동작 스크립트·연결 스크립트(</body> 앞, 이 순서).
+    실패 시 WebPageCheckFailed."""
     extracted = extract_html(raw)
     if not extracted:
         raise WebPageCheckFailed("empty")
@@ -574,4 +680,4 @@ def finalize_html(raw: str, allowed_text: str, request: str, headings: Sequence[
     missing = missing_headings(html, headings)
     if missing:
         raise WebPageCheckFailed("headings", missing)
-    return attach_bridge(html)
+    return attach_bridge(attach_behavior(html))
