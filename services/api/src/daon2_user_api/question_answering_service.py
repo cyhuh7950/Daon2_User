@@ -309,15 +309,35 @@ class _OmniRouteTextGenerationAdapter(OpenAICompatibleTextGenerationAdapter):
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID")
         return GroundedTextResult(answer, (), False, {})
 
+    @staticmethod
+    def _log_unreadable(kind: str, response: Mapping[str, object], parsed: object = None) -> None:
+        """OmniRoute 응답을 읽지 못한 이유와 모양만 남긴다(값·글은 남기지 않음). 칸 이름은 영문 소문자·밑줄만."""
+        raw = response.get("output_text") if isinstance(response, Mapping) else None
+        def names(value: object) -> str:
+            if not isinstance(value, Mapping):
+                return "-"
+            safe = sorted(key for key in value if isinstance(key, str) and re.fullmatch(r"[a-z_]{1,30}", key))
+            return ",".join(safe[:12]) or "-"
+        logging.getLogger(__name__).warning(
+            "omniroute_response_invalid kind=%s output_text=%s chars=%d response_keys=%s parsed_type=%s parsed_keys=%s",
+            kind, type(raw).__name__, len(raw) if isinstance(raw, str) else -1, names(response),
+            type(parsed).__name__, names(parsed))
+
     def generate(self, request, selection, *, provider_payload=None):  # type: ignore[no-untyped-def]
-        parsed = self._parsed(self._call(
-            selection, provider_payload or self.provider_payload(request, selection),
-        ))
+        response = self._call(selection, provider_payload or self.provider_payload(request, selection))
+        try:
+            parsed = self._parsed(response)
+        except ValueError:
+            raw = response.get("output_text") if isinstance(response, Mapping) else None
+            kind = "no_output_text" if not isinstance(raw, str) else "not_object" if raw.strip().startswith("[") else "not_json"
+            self._log_unreadable(kind, response)
+            raise
         try:
             answer = str(parsed["answer"]).strip()
             cited = tuple(str(item) for item in cast(list[object], parsed["cited_chunk_ids"]))
             insufficient = bool(parsed["insufficient"])
         except (KeyError, TypeError):
+            self._log_unreadable("missing_keys", response, parsed)
             raise ValueError("TEXT_GENERATION_RESPONSE_INVALID") from None
         allowed = {item.chunk_id for item in request.evidence}
         answer = strip_citation_labels(answer, allowed)

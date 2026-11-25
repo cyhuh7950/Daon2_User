@@ -2229,6 +2229,25 @@ class OmniRouteResponseShapeTests(unittest.TestCase):
         finally:
             selection.release()
 
+    def test_unreadable_grounded_response_logs_only_its_shape(self):
+        # OmniRoute 질문이 TEXT_GENERATION_RESPONSE_INVALID로 실패했는데 응답 모양을 알 수 없었다. 값 없이 모양만 남긴다.
+        from daon2_user_api.question_answering import GroundedQuestionRequest
+        chunk = IndexedEvidenceChunk("chunk-1", "doc-1", "ver-1", 1, "근거 본문 CANARY", "blk-1", 1.0)
+        request = GroundedQuestionRequest("질문 CANARY", (chunk,), "trace-omni")
+        cases = (("답변 CANARY 입니다", "not_json"), ('{"answer": "답 CANARY"}', "missing_keys"), ('["x"]', "not_object"))
+        for output, kind in cases:
+            with self.subTest(kind=kind):
+                adapter, selection = self._adapter(output)
+                try:
+                    with self.assertLogs("daon2_user_api.question_answering_service", level="WARNING") as logs,                             self.assertRaisesRegex(ValueError, "TEXT_GENERATION_RESPONSE_INVALID"):
+                        adapter.generate(request, selection)
+                finally:
+                    selection.release()
+                joined = "\n".join(logs.output)
+                self.assertIn(f"omniroute_response_invalid kind={kind}", joined)
+                self.assertIn("output_text=str", joined)
+                self.assertNotIn("CANARY", joined)
+
 class AnswerProcessServiceTests(unittest.TestCase):
     """NB1-F1: 시스템이 실제로 한 일만 담은 process 블록을 저장 인자·차단 오류에 싣는다."""
 
