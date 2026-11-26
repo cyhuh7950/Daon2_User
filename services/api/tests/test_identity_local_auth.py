@@ -3,7 +3,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from daon2_user_api.audit import AuditEventStore
-from daon2_user_api.identity import ClientKind, DevicePlatform, IdentityError, IdentityService, SqliteIdentityRepository
+from daon2_user_api.identity import (
+    INITIAL_ADMIN_PASSWORD, INITIAL_ADMIN_USER_ID, ClientKind, DevicePlatform, IdentityError, IdentityService,
+    SqliteIdentityRepository,
+)
 
 
 class Sender:
@@ -92,6 +95,51 @@ def test_local_native_login_issues_windows_native_rotating_credentials_without_c
     with pytest.raises(IdentityError) as error:
         identity.rotate_refresh(native.refresh_token, trace_id="t6", policy_version="p1")
     assert error.value.code == "REFRESH_REPLAYED"
+    repo.close()
+
+
+def test_changed_initial_admin_password_works_in_windows_without_email(tmp_path):
+    identity, repo, _ = service(tmp_path)
+    identity.ensure_initial_admin()
+    web = identity.local_login(login_id=INITIAL_ADMIN_USER_ID, password=INITIAL_ADMIN_PASSWORD,
+                               platform=DevicePlatform.WEB, trace_id="t1", policy_version="p1")
+    password = "changed synthetic admin password"
+    identity.change_current_password(access_token=web.access_token, current_password=INITIAL_ADMIN_PASSWORD,
+                                     new_password=password, trace_id="t2", policy_version="p1")
+    with repo.transaction() as connection:
+        admin = connection.execute("SELECT email_verified_at,password_change_required FROM users WHERE user_id=?",
+                                   (INITIAL_ADMIN_USER_ID,)).fetchone()
+        assert admin["email_verified_at"] is None and not admin["password_change_required"]
+    identity.local_login(login_id=INITIAL_ADMIN_USER_ID, password=password, platform=DevicePlatform.WEB,
+                         trace_id="t3", policy_version="p1")
+    native = identity.local_native_login(login_id=INITIAL_ADMIN_USER_ID, password=password, trace_id="t4", policy_version="p1")
+    assert native.user_id == INITIAL_ADMIN_USER_ID
+    assert native.client_kind is ClientKind.NATIVE
+    assert native.refresh_token
+    with pytest.raises(IdentityError, match="AUTHENTICATION_REQUIRED"):
+        identity.local_native_login(login_id=INITIAL_ADMIN_USER_ID, password="incorrect synthetic password",
+                                    trace_id="t5", policy_version="p1")
+    repo.close()
+
+
+def test_native_login_preserves_email_verification_and_admin_password_change_requirements(tmp_path):
+    identity, repo, _ = service(tmp_path)
+    password = "unchanged synthetic test password"
+    identity.ensure_initial_admin()
+    identity.signup(login_id="alice", email="Alice@example.com", password=password, trace_id="t1", policy_version="p1")
+    with repo.transaction() as connection:
+        connection.execute("UPDATE users SET state='active' WHERE login_id='alice'")
+    with pytest.raises(IdentityError, match="AUTHENTICATION_REQUIRED"):
+        identity.local_native_login(login_id="alice", password=password, trace_id="t2", policy_version="p1")
+
+    web = identity.local_login(login_id=INITIAL_ADMIN_USER_ID, password=INITIAL_ADMIN_PASSWORD,
+                               platform=DevicePlatform.WEB, trace_id="t3", policy_version="p1")
+    identity.change_current_password(access_token=web.access_token, current_password=INITIAL_ADMIN_PASSWORD,
+                                     new_password=password, trace_id="t4", policy_version="p1")
+    with repo.transaction() as connection:
+        connection.execute("UPDATE users SET password_change_required=TRUE WHERE user_id=?", (INITIAL_ADMIN_USER_ID,))
+    with pytest.raises(IdentityError, match="AUTHENTICATION_REQUIRED"):
+        identity.local_native_login(login_id=INITIAL_ADMIN_USER_ID, password=password, trace_id="t5", policy_version="p1")
     repo.close()
 
 
