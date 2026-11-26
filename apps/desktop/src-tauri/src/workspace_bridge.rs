@@ -293,6 +293,8 @@ pub struct NotebookView {
     pub output_count: u32,
     pub updated_at: String,
     pub status: String,
+    #[serde(default, skip_serializing)]
+    etag: Option<String>,
 }
 
 impl NotebookView {
@@ -302,6 +304,14 @@ impl NotebookView {
             && (20..=27).contains(&self.updated_at.len())
             && self.updated_at.ends_with('Z')
             && matches!(self.status.as_str(), "empty" | "active" | "attention")
+            && self.etag.as_deref().is_none_or(|etag| {
+                etag.strip_prefix("\"notebook:")
+                    .and_then(|version| version.strip_suffix('"'))
+                    .is_some_and(|version| {
+                        version.bytes().next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+                            && version.parse::<u64>().is_ok()
+                    })
+            })
     }
 }
 
@@ -321,6 +331,27 @@ pub struct NotebookConversation {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct NotebookSourceDeletion {
+    request_id: String,
+    source_id: String,
+    state: String,
+    version: u32,
+    grace_until: String,
+    legal_hold_active: bool,
+}
+
+impl NotebookSourceDeletion {
+    fn valid(&self) -> bool {
+        valid_id(&self.request_id)
+            && valid_id(&self.source_id)
+            && matches!(self.state.as_str(), "grace_period" | "blocked_by_hold" | "awaiting_ack" | "cleanup_pending" | "failed" | "purged")
+            && self.version > 0
+            && time::OffsetDateTime::parse(&self.grace_until, &time::format_description::well_known::Rfc3339).is_ok()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct NotebookContext {
     pub notebook_id: String,
     pub sources: Vec<NotebookSourceBinding>,
@@ -329,6 +360,8 @@ pub struct NotebookContext {
     pub studio_output_ids: Vec<String>,
     pub output_version_ids: Vec<String>,
     pub generation_settings_ids: Vec<String>,
+    #[serde(default)]
+    source_deletion_requests: Vec<NotebookSourceDeletion>,
     pub conversation: Option<NotebookConversation>,
 }
 
@@ -342,6 +375,8 @@ fn valid_notebook_context(data: &NotebookContext, notebook_id: &str) -> bool {
         && ids_valid(&data.studio_output_ids)
         && ids_valid(&data.output_version_ids)
         && ids_valid(&data.generation_settings_ids)
+        && data.source_deletion_requests.len() <= 1_000
+        && data.source_deletion_requests.iter().all(NotebookSourceDeletion::valid)
         && match &data.conversation {
             None => data.conversation_thread_ids.is_empty(),
             Some(conversation) => data.conversation_thread_ids.first() == Some(&conversation.conversation_thread_id)
@@ -1327,6 +1362,29 @@ mod tests {
         let data: SourceListData = parse_json(response, "workspace-1", false).unwrap();
         assert!(data.sources.iter().all(WorkspaceSource::valid));
         assert!(data.sources.iter().map(|source| source.filename.as_str()).eq(filenames));
+    }
+
+    #[test]
+    fn notebook_views_accept_api_etag_and_project_source_deletion_requests() {
+        let view: NotebookView = serde_json::from_value(serde_json::json!({
+            "notebook_id": "notebook-1", "title": "혼합 소스 검수",
+            "source_count": 2, "output_count": 0, "updated_at": "2026-11-27T00:00:00Z",
+            "status": "active", "etag": "\"notebook:3\"",
+        })).expect("API notebook view");
+        assert!(view.valid());
+        assert!(serde_json::to_value(view).unwrap().get("etag").is_none());
+
+        let context: NotebookContext = serde_json::from_value(serde_json::json!({
+            "notebook_id": "notebook-1", "sources": [],
+            "knowledge_context_ids": [], "conversation_thread_ids": [], "studio_output_ids": [],
+            "output_version_ids": [], "generation_settings_ids": [], "conversation": null,
+            "source_deletion_requests": [{
+                "request_id": "deletion-1", "source_id": "source-1", "state": "grace_period",
+                "version": 1, "grace_until": "2026-11-28T00:00:00+00:00", "legal_hold_active": false,
+            }],
+        })).expect("API notebook context");
+        assert!(valid_notebook_context(&context, "notebook-1"));
+        assert_eq!(serde_json::to_value(context).unwrap()["source_deletion_requests"][0]["source_id"], "source-1");
     }
 
     #[test]

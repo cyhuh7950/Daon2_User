@@ -467,7 +467,8 @@ fn request_wire_and_response_buffer_drop_guards_run_on_cancel_and_early_failure(
             "session_id": "ses-contract", "device_id": "dev-contract", "client_kind": "web",
             "delivery": "native_https_opaque_bearer", "access_credential": "access-contract-secret-0000000000000000000000",
             "refresh_credential": "refresh-contract-secret-000000000000000000000", "expires_at": "2026-08-10T12:00:00+00:00"
-        }
+        },
+        "meta": {"trace_id": "trace-auth-contract"}
     }).to_string();
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -1003,6 +1004,35 @@ fn native_response_rejects_redirect_cookie_oversize_and_non_json_before_credenti
 }
 
 #[test]
+fn native_response_accepts_api_trace_meta_and_rejects_unexpected_metadata() {
+    let mut body = serde_json::json!({
+        "data": {
+            "user_id": "usr-contract", "tenant_id": "ten-contract", "workspace_id": "wsp-contract",
+            "session_id": "ses-contract", "device_id": "dev-contract", "client_kind": "native",
+            "delivery": "native_https_opaque_bearer", "access_credential": "access-contract-secret-0000000000000000000000",
+            "refresh_credential": "refresh-contract-secret-000000000000000000000", "expires_at": "2026-08-10T12:00:00+00:00"
+        },
+        "meta": {"trace_id": "trace-auth-contract"}
+    });
+    let response = |body| NativeHttpResponse::from_parts(
+        200,
+        Some("application/json".to_owned()),
+        None,
+        false,
+        serde_json::to_vec(&body).expect("response JSON"),
+    );
+    let credentials = response(body.clone()).into_credentials().expect("API response");
+    let projection = serde_json::to_value(credentials.projection()).expect("safe projection");
+    assert_eq!(projection["user_id"], "usr-contract");
+    assert!(projection.get("meta").is_none());
+
+    body["meta"]["unknown"] = serde_json::json!("unexpected");
+    assert!(response(body.clone()).into_credentials().is_err());
+    body["meta"] = serde_json::json!({"trace_id": ""});
+    assert!(response(body).into_credentials().is_err());
+}
+
+#[test]
 fn native_response_rejects_unknown_fields_and_invalid_expiry_format() {
     let mut unknown = serde_json::json!({
         "data": {
@@ -1011,7 +1041,8 @@ fn native_response_rejects_unknown_fields_and_invalid_expiry_format() {
             "delivery": "native_https_opaque_bearer", "access_credential": "access-contract-secret-0000000000000000000000",
             "refresh_credential": "refresh-contract-secret-000000000000000000000", "expires_at": "not-a-time",
             "unexpected": "not allowed"
-        }
+        },
+        "meta": {"trace_id": "trace-auth-contract"}
     });
     let response = NativeHttpResponse::from_parts(
         200,

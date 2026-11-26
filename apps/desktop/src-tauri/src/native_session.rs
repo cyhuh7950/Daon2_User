@@ -528,7 +528,11 @@ impl NativeHttpResponse {
         let parsed = serde_json::from_slice::<NativeSessionEnvelope>(&self.body)
             .map_err(|_| NativeSessionError::authentication_required());
         self.body.zeroize();
-        let mut wire = parsed?.data;
+        let envelope = parsed?;
+        if !valid_safe_text(&envelope.meta.trace_id) {
+            return Err(NativeSessionError::authentication_required());
+        }
+        let mut wire = envelope.data;
         wire.drop_audit = self.drop_audit.clone();
         wire.into_credentials()
     }
@@ -1531,13 +1535,14 @@ impl Drop for NativeRefreshRequest {
 #[serde(deny_unknown_fields)]
 struct NativeSessionEnvelope {
     data: NativeSessionWire,
+    meta: NativeTraceMeta,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NativeRecoveryAuthorizationEnvelope {
     data: NativeRecoveryAuthorizationWire,
-    meta: NativeRecoveryAuthorizationMeta,
+    meta: NativeTraceMeta,
 }
 
 impl NativeRecoveryAuthorizationEnvelope {
@@ -1551,7 +1556,7 @@ impl NativeRecoveryAuthorizationEnvelope {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct NativeRecoveryAuthorizationMeta {
+struct NativeTraceMeta {
     trace_id: String,
 }
 

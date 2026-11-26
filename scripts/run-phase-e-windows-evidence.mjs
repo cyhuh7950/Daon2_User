@@ -87,7 +87,7 @@ const api = createServer(async (request, response) => {
       session_id: scope.session, device_id: scope.device, client_kind: "native",
       delivery: "native_https_opaque_bearer", access_credential: identity.access,
       refresh_credential: identity.refresh, expires_at: "2026-08-21T08:00:00Z",
-    } });
+    }, meta: { trace_id: safeId("trace") } });
   }
   if (request.headers.authorization !== `Bearer ${identity.access}`) return json(response, 401, { error: { code: "AUTHENTICATION_REQUIRED" } });
   const scope = url.pathname.includes(scopes[1].workspace) ? scopes[1] : scopes[0];
