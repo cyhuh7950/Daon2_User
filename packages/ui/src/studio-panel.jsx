@@ -3,10 +3,10 @@
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { StudioIcon, STUDIO_TYPE_STYLE } from "./studio-icon.js";
 import {
-  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds, webPageProgressKey,
+  TILE_ORDER, cardState, cardSubtitle, createStudioPanelState, menuItems, optimisticOutput, pollInterval, progressPercent, reduce, researchProgress, tileState, waitingOutputIds, progressNoteKey, needsSettingsDialog, tableSources,
 } from "./studio-panel-model.js";
 import { msg, studioErrorMessage } from "./studio-messages.ko.js";
-import { ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDialog, SettingsDialog, ShareDialog } from "./studio-dialogs.jsx";
+import { AggregationSettingsDialog, ConfirmDeleteDialog, EvidenceDialog, ExportStepUpDialog, ProvenanceDialog, SettingsDialog, ShareDialog } from "./studio-dialogs.jsx";
 import { StudioViewer } from "./studio-viewers.jsx";
 import { AuthoringWizard } from "./authoring-wizard.jsx";
 import { EDITABLE_TYPES, StudioEditor } from "./studio-editor.jsx";
@@ -62,9 +62,9 @@ function Card({ output, now, waiting = false, outlinePending = false, confirmedO
   // 심층 조사(NB4-U2)는 서버 진행 메모로 단계(계획 → 찾기 n/m → 작성)를 보인다. 조사는 구성 확인을 쓰지 않아 확정 문구와 겹치지 않는다.
   // 웹 페이지(WO-N8)는 서버 진행 메모로 "내용 만드는 중" → "페이지 만드는 중"을 보인다.
   const research = generating && !waiting ? researchProgress(output) : null;
-  const webPageKey = generating && !waiting ? webPageProgressKey(output) : null;
+  const noteKey = generating && !waiting ? progressNoteKey(output) : null;
   if (generating) subtitle = waiting ? msg("studio.card.queued") : research ? msg(`studio.research.progress.${research.step}`, research)
-    : webPageKey ? msg(webPageKey)
+    : noteKey ? msg(noteKey)
     : confirmedOutline ? msg("studio.card.generating_confirmed") : msg("studio.card.generating");
   else if (state === "failed") subtitle = studioErrorMessage(output.error_code) || msg("studio.card.failed");
   else if (state === "cancelled") subtitle = msg("studio.card.cancelled");
@@ -181,7 +181,8 @@ function Detail({ studio, outputId, canEdit = true, onBack, onOpenEvidence, onAs
             <button type="button" role="menuitem" onClick={() => download(format)}>{format.toUpperCase()}</button></Fragment>)}</div>}
       </span>}
     </div>
-    <div className={output?.type_id === "web_page" && !editing ? "studio-detail__body studio-detail__body--web-page" : "studio-detail__body"}>
+    <div className={output?.type_id === "web_page" && !editing ? "studio-detail__body studio-detail__body--web-page"
+      : output?.type_id === "data_aggregation" && !editing ? "studio-detail__body studio-detail__body--aggregation" : "studio-detail__body"}>
       {stepUp && <ExportStepUpDialog pending={stepUp.pending} error={stepUp.error} onSubmit={(password) => void submitStepUp(password)} onCancel={() => setStepUp(null)} />}
       {error && <p className="studio-alert" role="alert">{studioErrorMessage(error)}</p>}
       {!output && !error && <p role="status">…</p>}
@@ -308,11 +309,15 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
 
   const stats = { sourceCount: 0, checkedCount: checkedSourceVersionIds.length, readySourceCount: 0, processingCount: 0, ...sourceStats };
   const typeById = new Map(state.types.map((t) => [t.type_id, t]));
-  // 다시 만들기 대화상자: 목록 항목에는 settings가 없으므로 요청 글이 필요한 유형만 출력 상세를 읽어 채운다.
+  // 다시 만들기 대화상자: 목록 항목에는 settings가 없으므로 요청 글이 필요한 유형(웹 페이지·데이터 집계)만 출력 상세를 읽어 채운다.
   const [regenSettings, setRegenSettings] = useState(null);
   const [regenLoading, setRegenLoading] = useState(false);
   const regenTarget = dialog?.kind === "regenerate" ? dialog.output : null;
-  const regenNeedsRequest = Boolean(regenTarget && typeById.get(regenTarget.type_id)?.settings_schema?.properties?.page_request);
+  const regenNeedsRequest = Boolean(regenTarget && needsSettingsDialog(typeById.get(regenTarget.type_id)));
+  // 데이터 집계(WO-N9): 표 소스는 처리 완료된 XLSX·CSV만, 시트 목록은 표 정보(table-profile)에서.
+  const aggregationSources = tableSources(sources);
+  const profileReader = useCallback((params) => studio.getTableProfile(params), [studio]);
+  const loadTableProfile = typeof studio.getTableProfile === "function" ? profileReader : undefined;
   useEffect(() => {
     setRegenSettings(null);
     if (!regenTarget || !regenNeedsRequest) { setRegenLoading(false); return undefined; }
@@ -331,7 +336,10 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     dispatch({ type: "CREATE_STARTED", typeId });
     dispatch({ type: "OUTPUT_UPDATED", output: placeholder });
     try {
-      const receipt = await studio.createOutput({ typeId, formatId, settings, sourceVersionIds: typeId === "memo" ? undefined : checkedSourceVersionIds });
+      // 데이터 집계는 설정 창에서 고른 표 소스 하나로 만든다(소스 바뀜 표시도 그 소스 기준).
+      const sourceVersionIds = typeId === "memo" ? undefined
+        : typeId === "data_aggregation" && settings?.table_source_version_id ? [settings.table_source_version_id] : checkedSourceVersionIds;
+      const receipt = await studio.createOutput({ typeId, formatId, settings, sourceVersionIds });
       dispatch({ type: "OUTPUT_REMOVED", outputId: placeholder.output_id });
       dispatch({ type: "OUTPUT_CREATED", typeId, output: { ...placeholder, output_id: receipt.output_id, status: receipt.status, optimistic: false } });
     } catch (error) {
@@ -399,8 +407,8 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
             <button type="button" className="studio-tile" style={{ width: "100%" }} aria-disabled={!tile.enabled} aria-label={label(typeId)}
               aria-describedby={`studio-tip-${typeId}`} onClick={() => {
                 if (!tile.enabled) return;
-                // 요청 글이 꼭 필요한 유형(웹 페이지)은 빈 설정으로 바로 만들지 않고 설정 창부터 연다.
-                if (type.settings_schema?.properties?.page_request) setDialog({ kind: "settings", typeId });
+                // 요청 글이 꼭 필요한 유형(웹 페이지·데이터 집계)은 빈 설정으로 바로 만들지 않고 설정 창부터 연다.
+                if (needsSettingsDialog(type)) setDialog({ kind: "settings", typeId });
                 else create(typeId);
               }}>
               <StudioIcon name={style.icon} accent={typeId} size={24} />
@@ -439,9 +447,16 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
         // 메모를 지우면 그 메모로 만든 소스 줄이 "원본 메모 없음"으로 바뀌도록 셸이 소스 목록을 다시 읽게 한다(N1-B06).
         if (target.type_id === "memo") onMemoSourceChanged?.({ kind: "deleted", outputId: target.output_id }); } catch (error) { dispatch({ type: "ERROR", code: error?.code }); }
     }} />}
-    {dialog?.kind === "settings" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
+    {dialog?.kind === "settings" && dialog.typeId === "data_aggregation" && <AggregationSettingsDialog typeLabel={label(dialog.typeId)} sources={aggregationSources}
+      loadProfile={loadTableProfile} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
-    {dialog?.kind === "regenerate" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: regenSettings?.page_request }} loading={regenLoading} onCancel={() => setDialog(null)}
+    {dialog?.kind === "regenerate" && dialog.output.type_id === "data_aggregation" && <AggregationSettingsDialog typeLabel={label(dialog.output.type_id)} sources={aggregationSources}
+      initial={{ aggregation_request: regenSettings?.aggregation_request, table_source_version_id: regenSettings?.table_source_version_id,
+        sheet: regenSettings?.sheet, header_row: regenSettings?.header_row }} loading={regenLoading} lockSource loadProfile={loadTableProfile} onCancel={() => setDialog(null)}
+      onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings); }} />}
+    {dialog?.kind === "settings" && dialog.typeId !== "data_aggregation" && <SettingsDialog type={typeById.get(dialog.typeId)} typeLabel={label(dialog.typeId)} onCancel={() => setDialog(null)}
+      onSubmit={(values) => { const typeId = dialog.typeId; setDialog(null); create(typeId, values); }} />}
+    {dialog?.kind === "regenerate" && dialog.output.type_id !== "data_aggregation" && <SettingsDialog type={typeById.get(dialog.output.type_id)} typeLabel={label(dialog.output.type_id)} initial={{ format_id: dialog.output.format_id, page_request: regenSettings?.page_request }} loading={regenLoading} onCancel={() => setDialog(null)}
       onSubmit={(values) => { const target = dialog.output; setDialog(null); regenerate(target, values.settings, values.formatId); }} />}
     {dialog?.kind === "provenance" && <ProvenanceDialog load={() => studio.getProvenance(dialog.output.output_id)} onClose={() => setDialog(null)}
       onOpenEvidence={(ref) => openEvidence(dialog.output, ref)} onRegenerate={(settings) => { const target = dialog.output; setDialog(null); regenerate(target, settings); }} />}

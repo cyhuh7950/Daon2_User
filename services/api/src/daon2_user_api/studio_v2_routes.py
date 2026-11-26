@@ -32,6 +32,10 @@ STUDIO_V2_PUBLIC_CODES = frozenset({
     "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
     # 슬라이드·동영상 생성 전 구성 확인(WO-N1 NB3-F1)
     "OUTLINE_INVALID", "OUTLINE_REVIEW_PENDING",
+    # 데이터 집계(WO-N9): 원본·표 읽기·집계 실패
+    "STUDIO_SOURCE_UNAVAILABLE", "TABLE_TOO_LARGE", "TABLE_TIMEOUT", "TABLE_SHEET_NOT_FOUND", "TABLE_HEADER_INVALID",
+    "TABLE_FORMAT_UNSUPPORTED", "TABLE_ENCODING_UNSUPPORTED", "AGGREGATION_UNSUPPORTED", "AGGREGATION_TOO_LARGE",
+    "AGGREGATION_TOO_MANY_GROUPS", "AGGREGATION_FILTER_VALUE_NOT_FOUND",
 })
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TURN_ID = re.compile(r"^svt-[0-9a-f]{32}$")
@@ -168,6 +172,22 @@ def register_studio_v2_routes(app: FastAPI, dependencies: Any, service: Any, lic
         limits = {"user_concurrency": max(1, int(os.environ.get("DAON_STUDIO_V2_USER_CONCURRENCY", "2")))}
         return JSONResponse({"data": {"types": available_types(authoring_enabled=authoring is not None, tts_enabled=tts is not None,
                                                                                  tts_settings=tts.settings_overlay() if tts else None), "limits": limits}, "meta": _meta(request, id)})
+
+    @app.get(base + "/table-profile")
+    async def studio_v2_table_profile(id: str, notebook_id: str, request: Request) -> JSONResponse:
+        """데이터 집계(WO-N9) 표 정보: 시트·열 이름과 종류·행 수. 셀 값은 돌려주지 않는다."""
+        _require_query_keys(request, frozenset({"source_version_id", "sheet", "header_row"}))
+        ctx = _ctx(request, id, notebook_id, Action.VIEW)
+        version = request.query_params.get("source_version_id") or ""
+        sheet = request.query_params.get("sheet") or None
+        header_raw = request.query_params.get("header_row", "1")
+        if (_ID.fullmatch(version) is None or (sheet is not None and len(sheet) > 120)
+                or not header_raw.isdigit() or not 1 <= int(header_raw) <= 50):
+            raise HTTPException(status_code=400)
+        data = await run(service.table_profile, ctx, version, sheet, int(header_raw))
+        response = JSONResponse({"data": data, "meta": _meta(request, id)})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.post(base + "/outputs", status_code=202)
     async def studio_v2_create(id: str, notebook_id: str, body: CreateBody, request: Request,

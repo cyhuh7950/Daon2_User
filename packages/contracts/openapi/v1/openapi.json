@@ -7027,6 +7027,7 @@
           "processing_state": { "type": "string" },
           "job_state": { "type": "string" },
           "safe_error_code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+          "aggregation_only": { "description": "Only on ready XLSX sources over the question-index limits (WO-N9). They have no question evidence and are used only by data aggregation.", "type": "boolean", "const": true },
           "website": { "$ref": "#/components/schemas/WebsiteSourceOriginal" },
           "memo_origin": {
             "description": "Only on sources made from a Studio memo (WO-N1 N1-3). memo_exists is false after the memo was deleted; the source stays.",

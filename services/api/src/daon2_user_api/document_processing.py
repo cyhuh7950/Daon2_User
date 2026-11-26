@@ -383,6 +383,12 @@ class DocumentProcessingService:
                 self._repository.complete(context, processing_run_id, result)
                 return result
             if xlsx_source_format(document.filename, document.content_type):
+                from .xlsx_document_understanding import aggregation_only_result, xlsx_aggregation_only
+                if xlsx_aggregation_only(document.content):
+                    # WO-N9: 질문 색인 한도를 넘는 표는 모델 없이 '집계 전용'으로 완료한다(근거 0개).
+                    result = aggregation_only_result(document, context)
+                    self._repository.complete(context, processing_run_id, result)
+                    return result
                 with resolve("text_generation") as model:
                     self._egress_guard.authorize(context, (model,))
                     result = _failure_call("text_generation", model.connection_id,

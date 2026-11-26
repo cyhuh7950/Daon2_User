@@ -70,13 +70,18 @@ STUDIO_V2_TYPES: Mapping[str, StudioV2Type] = {
         _t("authored_document", ("docx", "pptx", "pdf"), phase="A1",
            schema={"template_id": {"type": "string", "maxLength": 64}}),
         _t("web_page", ("html",), schema={"page_request": {"type": "string", "maxLength": 2000}}),
+        _t("data_aggregation", ("xlsx", "csv"),
+           schema={"aggregation_request": {"type": "string", "maxLength": 2000},
+                   "table_source_version_id": {"type": "string", "maxLength": 120},
+                   "sheet": {"type": "string", "maxLength": 120},
+                   "header_row": {"type": "integer", "minimum": 1, "maximum": 50}}),
     )
 }
 
 # 현재 제공 단계. 이후 단계는 reason과 함께 비활성으로 노출한다.
 _AVAILABLE_PHASES = {"1", "2"}
 _TILE_TYPES = ("audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz",
-               "infographic", "data_table", "web_page")
+               "infographic", "data_table", "web_page", "data_aggregation")
 
 
 def is_available(type_id: str, *, tts_enabled: bool = False, authoring_enabled: bool = False) -> bool:
@@ -250,6 +255,9 @@ def validate_settings(type_id: str, format_id: str | None, settings: Mapping[str
         raise ValueError("STUDIO_INPUT_INVALID")
     if type_id == "web_page" and not str(clean.get("page_request", "")).strip():
         raise ValueError("STUDIO_INPUT_INVALID")  # 요청 글 없이 만들면 접수 단계에서 거부한다(실패 카드가 생기지 않게)
+    if type_id == "data_aggregation" and (not str(clean.get("aggregation_request", "")).strip()
+                                          or not str(clean.get("table_source_version_id", "")).strip()):
+        raise ValueError("STUDIO_INPUT_INVALID")  # 집계 요청과 표 자료가 모두 있어야 접수한다
     if ("research_query" in clean) != ("research_scopes" in clean):
         raise ValueError("STUDIO_INPUT_INVALID")  # 심층 조사는 질문과 범위를 함께 보낸다
     if "research_query" in clean and (clean.get("confirm_outline") == "yes" or clean.get("confirmed_outline")):

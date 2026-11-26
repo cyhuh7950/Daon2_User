@@ -1,6 +1,6 @@
 // Studio v2 패널 모델(순수 함수). WO-S1 T-S1-03. DOM·fetch에 의존하지 않는다.
 
-export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "web_page"]);
+export const TILE_ORDER = Object.freeze(["audio_overview", "slides", "video_overview", "mind_map", "report", "flashcards", "quiz", "infographic", "data_table", "web_page", "data_aggregation"]);
 const ACTIVE = new Set(["queued", "generating"]);
 export const POLL_ACTIVE_MS = 1500;
 export const POLL_HIDDEN_MS = 10000;
@@ -156,12 +156,37 @@ export function researchProgress(output) {
   return null;
 }
 
-const WEB_PAGE_NOTES = new Map([["내용 만드는 중", "studio.progress.web_page.content"], ["페이지 만드는 중", "studio.progress.web_page.html"]]);
+// 유형별 서버 진행 메모 → 카드 문구 키. 웹 페이지(WO-N8) 두 단계, 데이터 집계(WO-N9) 세 단계.
+const PROGRESS_NOTES = new Map([
+  ["web_page", new Map([["내용 만드는 중", "studio.progress.web_page.content"], ["페이지 만드는 중", "studio.progress.web_page.html"]])],
+  ["data_aggregation", new Map([["표 읽는 중", "studio.progress.aggregation.read"], ["집계 조건 만드는 중", "studio.progress.aggregation.spec"],
+    ["계산 중", "studio.progress.aggregation.compute"]])],
+]);
 
-/** 웹 페이지(WO-N8) 생성 중 카드 문구 키. 서버 진행 메모가 두 단계 중 하나일 때만, 아니면 null(기존 문구). */
-export function webPageProgressKey(output) {
-  if (output?.type_id !== "web_page" || !ACTIVE.has(output.status)) return null;
-  return WEB_PAGE_NOTES.get(output.progress?.note) ?? null;
+/** 생성 중 카드 문구 키. 서버 진행 메모가 그 유형의 단계 중 하나일 때만, 아니면 null(기존 문구). 원문 메모는 화면에 쓰지 않는다. */
+export function progressNoteKey(output) {
+  const notes = PROGRESS_NOTES.get(output?.type_id);
+  if (!notes || !ACTIVE.has(output.status)) return null;
+  return notes.get(output.progress?.note) ?? null;
+}
+
+/** 예전 이름(WO-N8). */
+export const webPageProgressKey = progressNoteKey;
+
+// 데이터 집계(WO-N9): 표 소스로 고를 수 있는 파일(XLSX·CSV)인지. 처리 완료(ready)된 소스만.
+const TABLE_FILE = /\.(xlsx|csv)$/iu;
+export const tableSourceKind = (source) => {
+  const match = TABLE_FILE.exec(String(source?.filename ?? ""));
+  return match ? match[1].toLowerCase() : null;
+};
+export function tableSources(sources = []) {
+  return sources.filter((source) => source?.ready === true && typeof source.sourceVersionId === "string" && tableSourceKind(source) !== null);
+}
+
+/** 설정 창이 꼭 필요한 유형(요청 글 필수): 웹 페이지·데이터 집계. 타일을 눌러도 바로 만들지 않는다. */
+export function needsSettingsDialog(type) {
+  const properties = type?.settings_schema?.properties;
+  return Boolean(properties?.page_request || properties?.aggregation_request);
 }
 
 /** 진행 막대 너비(%):서버 진행률(progress.pct)이 있으면 그것, 없으면 예전 progress_pct, 둘 다 없으면 20. */

@@ -5,6 +5,7 @@ import { msg, studioErrorMessage } from "./studio-messages.ko.js";
 import { MemoSourceAction } from "./memo-source.jsx";
 import { OUTLINE_REVIEW_TYPES, OutlineReviewEditor } from "./outline-review.jsx";
 import { WebPageViewer } from "./studio-web-page-viewer.jsx";
+import { DataAggregationViewer } from "./studio-data-aggregation-viewer.jsx";
 
 const LEVEL_COLORS = ["#3b6fd8", "#3fa37a", "#8e5bd1", "#b57b00", "#2a8ea3", "#c0453f"];
 
@@ -498,6 +499,7 @@ export function StudioViewer({ output, research = false, onConfirmOutline, onCan
     case "video_overview": return <VideoViewer {...common} onLoadVideo={onLoadVideo} onLoadCaptions={onLoadCaptions} confirmedOutline={Boolean(output.settings?.confirmed_outline)} />;
     case "memo": return <MemoViewer content={content} onSave={onSaveMemo} memoSource={memoSource} />;
     case "web_page": return <WebPageViewer {...common} />;
+    case "data_aggregation": return <DataAggregationViewer content={content} />;
     default: return <p>{msg("viewer.unsupported")}</p>;
   }
 }

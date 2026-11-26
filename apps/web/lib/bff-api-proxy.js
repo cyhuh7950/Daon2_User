@@ -154,6 +154,10 @@ const STUDIO_V2_EXPORT_BYTES = 32 * 1024 * 1024;
 const STUDIO_V2_REVISION_QUERY = new Set(["revision"]);
 // 웹 페이지 HTML 내려받기(WO-N8): 출처 목록 넣기 선택을 API로 넘긴다.
 const STUDIO_V2_EXPORT_QUERY = new Set(["revision", "include_sources"]);
+const STUDIO_V2_TABLE_PROFILE_QUERY = new Set(["source_version_id", "sheet", "header_row"]);
+const validTableProfileQuery = (query) => query.getAll("source_version_id").length === 1 && SAFE_SEGMENT.test(query.get("source_version_id"))
+  && (!query.has("sheet") || (query.get("sheet").length >= 1 && query.get("sheet").length <= 120))
+  && (!query.has("header_row") || (/^[1-9][0-9]?$/u.test(query.get("header_row")) && Number(query.get("header_row")) <= 50));
 const STUDIO_V2_ACTIONS = new Map([
   ["edit-turns", ["GET", "POST"]], ["revisions", ["POST"]], ["regenerate", ["POST"]], ["cancel", ["POST"]], ["provenance", ["GET"]],
   ["sharing", ["GET"]], ["learning-attempts", ["GET", "POST"]], ["source", ["POST"]],
@@ -183,6 +187,8 @@ function studioV2Route(method, segments) {
   }
   if (rest.length === 1) {
     if (rest[0] === "types") return make("/types", ["GET"]);
+    // 데이터 집계(WO-N9) 표 정보: 쿼리는 source_version_id(필수)·sheet·header_row 세 개만.
+    if (rest[0] === "table-profile") return make("/table-profile", ["GET"], { query: STUDIO_V2_TABLE_PROFILE_QUERY, tableProfileQuery: true });
     if (rest[0] === "outputs") return make("/outputs", ["GET", "POST"], { query: new Set(method === "GET" ? ["cursor", "limit"] : []) });
     if (rest[0] === "memos") return make("/memos", ["POST"]);
     if (rest[0] === "customization") return make("/customization", ["GET", "PUT"]);
@@ -1493,6 +1499,9 @@ export function createBffProxy({
         return createBffSafeError(400, "INVALID_REQUEST", trace);
       }
       if (route.includeSourcesQuery && query.has("include_sources") && !["0", "1"].includes(query.get("include_sources"))) {
+        return createBffSafeError(400, "INVALID_REQUEST", trace);
+      }
+      if (route.tableProfileQuery && !validTableProfileQuery(query)) {
         return createBffSafeError(400, "INVALID_REQUEST", trace);
       }
     }

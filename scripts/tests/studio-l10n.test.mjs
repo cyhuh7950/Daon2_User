@@ -7,7 +7,7 @@ import test from "node:test";
 import { STUDIO_MESSAGES } from "../../packages/ui/src/studio-messages.ko.js";
 
 const SRC = path.resolve(import.meta.dirname, "../../packages/ui/src");
-const FILES = ["studio-panel.jsx", "studio-dialogs.jsx", "studio-viewers.jsx", "studio-editor.jsx", "authoring-wizard.jsx", "notebook-menu.jsx", "authoring-templates-pane.jsx", "export-policy-pane.jsx", "studio-web-page-viewer.jsx"];
+const FILES = ["studio-panel.jsx", "studio-dialogs.jsx", "studio-viewers.jsx", "studio-editor.jsx", "authoring-wizard.jsx", "notebook-menu.jsx", "authoring-templates-pane.jsx", "export-policy-pane.jsx", "studio-web-page-viewer.jsx", "studio-data-aggregation-viewer.jsx"];
 
 const stripComments = (code) => code.replace(/\/\*[\s\S]*?\*\//gu, "").split("\n").map((line) => line.replace(/(^|[^:"'`])\/\/.*$/u, "$1")).join("\n");
 

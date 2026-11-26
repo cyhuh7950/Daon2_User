@@ -205,6 +205,39 @@ class StudioV2Worker:
                 stop.wait(poll_seconds)
 
 
+def _object_storage_from_env():  # type: ignore[no-untyped-def]
+    """원본 저장소 어댑터(데이터 집계용). document_processing_worker와 같은 환경 변수를 쓴다.
+
+    설정이 없거나 비밀 파일을 읽지 못하면 None — 데이터 집계만 등록하지 않고 작업자는 계속 돈다.
+    """
+    endpoint = os.environ.get("DAON_OBJECT_STORAGE_ENDPOINT", "").strip()
+    bucket = os.environ.get("DAON_OBJECT_STORAGE_BUCKET", "").strip()
+    access = os.environ.get("DAON_OBJECT_ACCESS_KEY_FILE", "").strip()
+    secret = os.environ.get("DAON_OBJECT_SECRET_KEY_FILE", "").strip()
+    if not (endpoint and bucket and access and secret):
+        _LOGGER.warning("STUDIO_V2_OBJECT_STORAGE_UNCONFIGURED")
+        return None
+    from pathlib import Path
+    from .object_queue import MinioObjectStorageAdapter
+    try:
+        access_key = Path(access).read_text(encoding="utf-8").strip()
+        secret_key = Path(secret).read_text(encoding="utf-8").strip()
+        return MinioObjectStorageAdapter(endpoint=endpoint, bucket=bucket, access_key=access_key, secret_key=secret_key,
+                                         secure=os.environ.get("DAON_OBJECT_STORAGE_SECURE", "true").lower() == "true")
+    except (OSError, ValueError):
+        _LOGGER.warning("STUDIO_V2_OBJECT_STORAGE_UNAVAILABLE")
+        return None
+
+
+def _audit_store_from_env():  # type: ignore[no-untyped-def]
+    """보안 감사 저장소(security_audit_events). API와 같은 DSN을 쓴다. 없으면 None."""
+    dsn = os.environ.get("DAON_CLOUD_DATABASE_DSN", "").strip()
+    if not dsn:
+        return None
+    from .audit import PostgresSecurityAuditStore
+    return PostgresSecurityAuditStore(dsn)
+
+
 def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
     """Provider 키 파일이 있으면 실제 생성기, 없으면 스텁(시험용)."""
     key_file = os.environ.get("DAON_PROVIDER_CREDENTIAL_KEY_FILE", "").strip()
@@ -227,7 +260,13 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
     llm = StudioTextGenerator(resolver, StudioModelCatalog(cloud_store), egress_gate=gate)
     reader = StudioSourceReader(cloud_store)
     context_chars = int(os.environ.get("DAON_STUDIO_V2_CONTEXT_CHARS", "16000"))
-    registry = build_registry(reader, llm, context_chars=context_chars)
+    storage = _object_storage_from_env()
+    original_reader = None
+    if storage is not None:
+        from .studio_original_reader import StudioOriginalReader
+        original_reader = StudioOriginalReader(cloud_store, storage)
+    registry = build_registry(reader, llm, context_chars=context_chars, original_reader=original_reader,
+                              audit_store=_audit_store_from_env() if original_reader is not None else None)
     from .tts_engines import configured_from_env as tts_file_config
     from .tts_engine_service import TtsEngineService
     from .knowledge_connector_service import settings_from_env as _tts_env

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import dataclass, field
 
 from .question_answering_postgres import PostgresQuestionAnsweringRepository, QuestionContext, QuestionRepositoryError
@@ -22,6 +24,33 @@ class EvidenceContent:
 
 
 _MEDIA_KINDS = {"audio_overview": "mp3", "video_overview": "mp4"}
+TABLE_PROFILE_SECONDS = 60.0
+TABLE_PROFILE_WAIT_SECONDS = 5.0
+# API 프로세스에서 표 정보 읽기는 한 번에 하나만(큰 표가 동시에 메모리에 올라오지 않게). 오래 기다리지 않고 503으로 돌려준다.
+_TABLE_PROFILE_SLOTS = threading.BoundedSemaphore(1)
+_SHEET_RECOVERABLE = frozenset({"TABLE_TOO_LARGE", "TABLE_HEADER_INVALID", "TABLE_SHEET_NOT_FOUND", "TABLE_FORMAT_UNSUPPORTED",
+                                "TABLE_ENCODING_UNSUPPORTED", "TABLE_TIMEOUT"})
+
+
+def table_profile_from_original(content: bytes, file_name: str, source_format: str, sheet: str | None, header_row: int,
+                                *, seconds: float = TABLE_PROFILE_SECONDS) -> dict[str, object]:
+    """데이터 집계 화면의 표 정보: 시트 이름·열 이름과 종류·행 수만. 셀 값은 넣지 않는다(WO-N9)."""
+    from .table_reader import TableLimits, TableReadError, list_sheets, profile, read_table
+    deadline = time.monotonic() + seconds
+    try:
+        sheets = list_sheets(content, deadline=deadline) if source_format == "xlsx" else []
+    except TableReadError as error:
+        raise StudioError(error.code, 422) from None  # 시트 목록조차 못 읽으면 오류 응답
+    try:
+        table = read_table(content, file_name=file_name, source_format=source_format, sheet=sheet, header_row=header_row,
+                           limits=TableLimits(), deadline=deadline)
+    except TableReadError as error:
+        # 검토 Ruling: 시트 목록은 읽었는데 고른 시트를 표로 못 읽으면, 다른 시트를 고를 수 있게 목록과 코드를 200으로 돌려준다.
+        if sheets and error.code in _SHEET_RECOVERABLE:
+            return {"sheets": sheets, "columns": [], "row_count": 0, "error_code": error.code}
+        raise StudioError(error.code, 422) from None
+    info = profile(table)
+    return {"sheets": sheets, "columns": info["columns"], "row_count": info["row_count"]}
 
 
 class StudioV2Service(PostgresStudioV2Repository):
@@ -92,6 +121,21 @@ class StudioV2Service(PostgresStudioV2Repository):
             asset = self.get_asset(context, output_id, format_name)
             return export_asset(stem, format_name, asset["content"])  # type: ignore[arg-type]
         return export_v2(format_name, output, include_sources=include_sources)
+
+    def table_profile(self, context: StudioContext, source_version_id: str, sheet: str | None, header_row: int) -> dict[str, object]:
+        """노트북에 연결된 XLSX·CSV 원본의 표 정보(값 없음). 읽기 권한(VIEW)으로 같은 노트북 범위 검사를 한다."""
+        if self._object_storage is None:
+            raise StudioError("STUDIO_SERVICE_UNAVAILABLE", 503)
+        from .authorization import Action
+        from .studio_original_reader import StudioOriginalReader
+        if not _TABLE_PROFILE_SLOTS.acquire(timeout=TABLE_PROFILE_WAIT_SECONDS):
+            raise StudioError("STUDIO_SERVICE_UNAVAILABLE", 503)
+        try:
+            content, file_name, source_format, _ = StudioOriginalReader(self._cloud_store, self._object_storage).read(
+                context, source_version_id, action=Action.VIEW)
+            return table_profile_from_original(content, file_name, source_format, sheet, header_row)
+        finally:
+            _TABLE_PROFILE_SLOTS.release()
 
     def get_media(self, context: StudioContext, output_id: str, type_id: str) -> dict[str, object]:
         """오디오·동영상 개요의 재생용 자산(mp3·mp4). 완료된 해당 유형 산출물만."""

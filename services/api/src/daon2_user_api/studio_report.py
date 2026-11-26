@@ -106,6 +106,8 @@ class WorkspaceSourceProjection:
     processing_state: str
     job_state: str
     safe_error_code: str | None = field(default=None, metadata={"omit_none": True})
+    # WO-N9: 질문 색인 한도를 넘어 데이터 집계에만 쓰는 XLSX에만 true로 붙는다(그 밖에는 키 없음).
+    aggregation_only: bool | None = field(default=None, metadata={"omit_none": True})
 
 
 class StudioReportRepository(Protocol):

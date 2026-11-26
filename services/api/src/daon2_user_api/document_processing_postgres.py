@@ -360,10 +360,12 @@ class PostgresDocumentProcessingRepository:
                 except DocumentUnderstandingError:
                     raise DocumentUnderstandingError("SOURCE_OBJECT_NOT_READY", status=409) from None
             if xlsx_source_format(filename, content_type):
-                from .xlsx_source import read_xlsx
+                from .xlsx_source import read_xlsx, XlsxIndexLimitExceeded
                 from .source_ingest import SourceRejected
                 try:
                     read_xlsx(content)
+                except XlsxIndexLimitExceeded:
+                    pass  # WO-N9: 구조는 온전하고 질문 색인 한도만 넘는 표는 집계 전용으로 처리한다.
                 except SourceRejected:
                     raise DocumentUnderstandingError("SOURCE_OBJECT_NOT_READY", status=409) from None
             if docx_source_format(filename, content_type):
@@ -774,7 +776,14 @@ class PostgresDocumentProcessingRepository:
             if result.status == 'ready':
                 from .pptx_document_understanding import validate_slide_evidence
                 validate_slide_evidence(result.parser.slide_evidence, result.semantic.key_facts)
-        if cell_source and result.status == 'ready':
+        if cell_source and result.lineage.get('aggregation_only') is not None:
+            # WO-N9 집계 전용: 근거 0개 결과는 묶인 원본이 실제로 한도를 넘을 때만 받는다.
+            from .xlsx_document_understanding import is_aggregation_only_result, validate_aggregation_only_result
+            if not is_aggregation_only_result(result):
+                raise DocumentUnderstandingError('UNDERSTANDING_RESULT_MISMATCH', status=409)
+            original = self.load_source_document(context, result.source_id, processing_run_id=processing_run_id)
+            validate_aggregation_only_result(result, original)
+        elif cell_source and result.status == 'ready':
             from .xlsx_document_understanding import validate_cell_evidence
             validate_cell_evidence(result.parser.cell_evidence, result.semantic.key_facts)
         understanding_id = self._opaque_id("ur", processing_run_id, result.source_version_id)

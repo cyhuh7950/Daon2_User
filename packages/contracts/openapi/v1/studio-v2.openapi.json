@@ -71,6 +71,100 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/table-profile": {
+      "get": {
+        "operationId": "getStudioV2TableProfile",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceId"
+          },
+          {
+            "$ref": "#/components/parameters/NotebookId"
+          },
+          {
+            "$ref": "#/components/parameters/SourceVersionId"
+          },
+          {
+            "$ref": "#/components/parameters/Sheet"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderRow"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2TableProfileEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Table cannot be read (TABLE_*)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Object storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudioV2Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/studio/outputs": {
       "get": {
         "operationId": "listStudioV2Outputs",
@@ -2813,6 +2907,34 @@
           "minimum": 1,
           "maximum": 50
         }
+      },
+      "SourceVersionId": {
+        "name": "source_version_id",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+        }
+      },
+      "Sheet": {
+        "name": "sheet",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "HeaderRow": {
+        "name": "header_row",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
       }
     },
     "schemas": {
@@ -2869,7 +2991,18 @@
                   "MEMO_SOURCE_UNCHANGED",
                   "SOURCE_PROCESSING_ACTIVE",
                   "OUTLINE_INVALID",
-                  "OUTLINE_REVIEW_PENDING"
+                  "OUTLINE_REVIEW_PENDING",
+                  "STUDIO_SOURCE_UNAVAILABLE",
+                  "TABLE_TOO_LARGE",
+                  "TABLE_TIMEOUT",
+                  "TABLE_SHEET_NOT_FOUND",
+                  "TABLE_HEADER_INVALID",
+                  "TABLE_FORMAT_UNSUPPORTED",
+                  "TABLE_ENCODING_UNSUPPORTED",
+                  "AGGREGATION_FILTER_VALUE_NOT_FOUND",
+                  "AGGREGATION_UNSUPPORTED",
+                  "AGGREGATION_TOO_LARGE",
+                  "AGGREGATION_TOO_MANY_GROUPS"
                 ]
               },
               "trace_id": {
@@ -4481,6 +4614,78 @@
           },
           "queued": {
             "type": "boolean"
+          }
+        }
+      },
+      "StudioV2TableProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sheets",
+          "columns",
+          "row_count"
+        ],
+        "properties": {
+          "sheets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "kind"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "date",
+                    "number",
+                    "text"
+                  ]
+                }
+              }
+            }
+          },
+          "row_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "TABLE_TOO_LARGE",
+              "TABLE_HEADER_INVALID",
+              "TABLE_SHEET_NOT_FOUND",
+              "TABLE_FORMAT_UNSUPPORTED",
+              "TABLE_ENCODING_UNSUPPORTED",
+              "TABLE_TIMEOUT"
+            ]
+          }
+        }
+      },
+      "StudioV2TableProfileEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "meta"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StudioV2TableProfile"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/StudioV2Meta"
           }
         }
       },

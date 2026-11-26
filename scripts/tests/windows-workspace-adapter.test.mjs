@@ -80,3 +80,39 @@ test("Rust Workspace Bridge는 exact 7 Command와 deny-unknown DTO만 등록한�
   assert.match(session, /MAX_WORKSPACE_PDF_BYTES/u);
   assert.doesNotMatch(bridge, /pub\s+fn\s+.*credential|pub\s+fn\s+.*access|pub\s+fn\s+.*gateway/iu);
 });
+
+test("Windows Adapter 소스 목록은 선택 키 aggregation_only·memo_origin·safe_error_code를 형식 검사 후 받는다", async () => {
+  const base = { source_id: "source-1", source_version_id: "version-1", filename: "a.xlsx", source_state: "ready", processing_state: "completed", job_state: "completed" };
+  const list = (sources) => createWindowsWorkspaceAdapter("workspace-1", { notebookId: "notebook-1", invoke: async () => sources }).listSources();
+  const good = [
+    base,
+    { ...base, aggregation_only: true },
+    { ...base, memo_origin: { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: false } },
+    { ...base, safe_error_code: "SOURCE_PROCESSING_FAILED" },
+    { ...base, safe_error_code: null },
+    { ...base, aggregation_only: true, memo_origin: { memo_output_id: `sv2-${"b".repeat(32)}`, memo_exists: true }, safe_error_code: "XLSX_LIMIT" },
+  ];
+  assert.deepEqual(await list(good), good);
+  const bad = [
+    { ...base, aggregation_only: false },
+    { ...base, aggregation_only: "true" },
+    { ...base, memo_origin: { memo_output_id: "memo-1", memo_exists: true } },
+    { ...base, memo_origin: { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: "yes" } },
+    { ...base, memo_origin: { memo_output_id: `sv2-${"a".repeat(32)}`, memo_exists: true, extra: 1 } },
+    { ...base, memo_origin: null },
+    { ...base, safe_error_code: "lower_case" },
+    { ...base, safe_error_code: 5 },
+    { ...base, website: {} },
+  ];
+  for (const source of bad) await assert.rejects(list([source]), /SOURCE_LIST_RESPONSE_INVALID/, JSON.stringify(source));
+});
+
+test("Rust Workspace Bridge 소스 DTO는 선택 키를 serde(default) Option으로 받고 deny_unknown_fields를 유지한다", async () => {
+  const bridge = await readFile(new URL("../../apps/desktop/src-tauri/src/workspace_bridge.rs", import.meta.url), "utf8");
+  const block = bridge.slice(bridge.indexOf("pub struct WorkspaceSource {"), bridge.indexOf("impl WorkspaceSource"));
+  const before = bridge.slice(0, bridge.indexOf("pub struct WorkspaceSource {")).split("\n").slice(-3).join("\n");
+  assert.match(before, /#\[serde\(deny_unknown_fields\)\]/u);
+  assert.match(block, /#\[serde\(default, skip_serializing_if = "Option::is_none"\)\]\s*pub aggregation_only: Option<bool>/u);
+  assert.match(block, /#\[serde\(default, skip_serializing_if = "Option::is_none"\)\]\s*pub memo_origin: Option<WorkspaceMemoOrigin>/u);
+  assert.match(block, /#\[serde\(default, skip_serializing_if = "Option::is_none"\)\]\s*pub safe_error_code: Option<String>/u);
+});

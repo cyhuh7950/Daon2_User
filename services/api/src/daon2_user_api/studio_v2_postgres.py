@@ -26,7 +26,7 @@ MAX_LIST_LIMIT = 50
 TYPE_LABELS = {
     "report": "보고서", "data_table": "데이터 표", "mind_map": "마인드맵", "flashcards": "플래시카드",
     "quiz": "퀴즈", "slides": "슬라이드 자료", "infographic": "인포그래픽", "audio_overview": "오디오 개요",
-    "video_overview": "동영상 개요", "memo": "메모", "authored_document": "작성 문서", "web_page": "웹 페이지",
+    "video_overview": "동영상 개요", "memo": "메모", "authored_document": "작성 문서", "web_page": "웹 페이지", "data_aggregation": "데이터 집계",
 }
 _ACTIVE = ("queued", "generating")
 
@@ -212,10 +212,12 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                 versions = list(dict.fromkeys(requested)) if requested else ([] if requested is not None and has_knowledge else self.ready_source_versions(connection, context))
                 if not versions and not has_knowledge:
                     raise StudioError("STUDIO_NO_READY_SOURCE", 409)
+                self._require_table_source(str(type_id), settings, versions)
                 if versions:
                     self.require_scope(connection, context, versions)
             else:
                 versions = []
+            self._require_table_source(str(type_id), settings, versions)
             title = f"{TYPE_LABELS.get(str(type_id), str(type_id))} {self._clock().strftime('%Y-%m-%d %H:%M')}"
             connection.execute(
                 "INSERT INTO studio_v2_outputs(tenant_id,workspace_id,output_id,notebook_id,owner_actor_id,type_id,format_id,title,"
@@ -225,6 +227,13 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                  Jsonb(settings), versions, key_sha, fingerprint))
             self._insert_job(connection, context, output_id, job_id, "create", str(type_id), format_id, settings, versions, notebook_id)
         return {"output_id": output_id, "job_id": job_id, "status": "queued", "replayed": False}
+
+    @staticmethod
+    def _require_table_source(type_id: str, settings: Mapping[str, object], versions: list[str]) -> None:
+        """데이터 집계(WO-N9): 출력의 소스는 정확히 표 소스 하나여야 한다. 그래야 노트북 범위 검사(require_scope)가
+        표 소스에도 걸리고, 소스 바뀜 표시도 그 표 기준이 된다. 다른 소스로 다시 생성하려면 새로 만든다."""
+        if type_id == "data_aggregation" and list(versions) != [settings.get("table_source_version_id")]:
+            raise StudioError("STUDIO_INPUT_INVALID", 400)
 
     @staticmethod
     def _insert_job(connection, context, output_id, job_id, mode, type_id, format_id, settings, versions, notebook_id) -> None:
@@ -255,6 +264,7 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                 raise StudioError("RESOURCE_UNAVAILABLE", 404)
             merged = {**current_settings, **dict(settings_override or {})}
             format_id, merged = checked_settings(str(type_id), format_id, merged)
+            self._require_table_source(str(type_id), merged, versions)
             if versions:
                 self.require_scope(connection, context, versions)
             connection.execute(

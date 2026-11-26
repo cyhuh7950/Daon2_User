@@ -362,7 +362,8 @@ function validateWebsiteContract(document) {
   check(parameters(sources, [["id", "path", true], ["notebook_id", "query", true], ["website_source_version_id", "query", false], ["include_failure_reason", "query", false, (schema) => keys(schema, ["type"]) && schema.type === "boolean"]]), "Source query mismatch");
   const projection = schemas.WorkspaceSourceProjection;
   const memoOrigin = projection.properties.memo_origin;
-  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website", "safe_error_code", "memo_origin"])
+  check(exactObject(projection, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"], ["website", "safe_error_code", "memo_origin", "aggregation_only"])
+    && projection.properties.aggregation_only.type === "boolean" && projection.properties.aggregation_only.const === true
     && exactObject(memoOrigin, ["memo_output_id", "memo_exists"])
     && memoOrigin.properties.memo_output_id.type === "string" && memoOrigin.properties.memo_output_id.pattern === "^sv2-[0-9a-f]{32}$"
     && memoOrigin.properties.memo_exists.type === "boolean"

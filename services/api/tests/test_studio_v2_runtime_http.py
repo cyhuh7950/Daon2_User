@@ -161,7 +161,7 @@ class StudioV2RuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
             deleted = await self.client.delete(BASE + "/outputs/" + OID, cookies=self.cookies)
         self.assertEqual([r.status_code for r in (types, created, listed, got, renamed, cancelled, exported, deleted)],
                          [200, 202, 200, 200, 200, 202, 200, 204])
-        self.assertEqual(len(types.json()["data"]["types"]), 12)
+        self.assertEqual(len(types.json()["data"]["types"]), 13)
         self.assertEqual(created.json()["data"], {"output_id": OID, "job_id": "svj-1", "status": "queued"})
         self.assertEqual(self.v2.calls[0][2], {"type_id": "report"})
         self.assertEqual(self.v2.calls[2][3], 2)

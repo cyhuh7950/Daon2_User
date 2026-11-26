@@ -19,6 +19,10 @@ export const ERROR_CODES = [
   "FORBIDDEN", "STUDIO_OUTPUT_NOT_FOUND", "OUTPUT_NOT_MEMO", "MEMO_SOURCE_EXISTS", "MEMO_EMPTY", "MEMO_TOO_LARGE",
   "MEMO_SOURCE_NOT_LINKED", "MEMO_SOURCE_UNCHANGED", "SOURCE_PROCESSING_ACTIVE",
   "OUTLINE_INVALID", "OUTLINE_REVIEW_PENDING",
+  // WO-N9 데이터 집계: 표 정보·생성 실패 코드.
+  "STUDIO_SOURCE_UNAVAILABLE", "TABLE_TOO_LARGE", "TABLE_TIMEOUT", "TABLE_SHEET_NOT_FOUND", "TABLE_HEADER_INVALID",
+  "TABLE_FORMAT_UNSUPPORTED", "TABLE_ENCODING_UNSUPPORTED", "AGGREGATION_FILTER_VALUE_NOT_FOUND", "AGGREGATION_UNSUPPORTED",
+  "AGGREGATION_TOO_LARGE", "AGGREGATION_TOO_MANY_GROUPS",
 ];
 const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
 const exact = (properties, required = Object.keys(properties)) => ({ type: "object", additionalProperties: false, required, properties });
@@ -156,7 +160,15 @@ Object.assign(schemas, {
 });
 
 const envelope = (name) => ({ type: "object", additionalProperties: false, required: ["data", "meta"], properties: { data: ref(name), meta: ref("StudioV2Meta") } });
-for (const name of ["EditTurnReceipt", "EditTurnApplyReceipt", "EditTurnList", "AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
+// WO-N9 데이터 집계 표 정보: 시트 이름·열 이름과 종류·행 수만. 셀 값은 없다.
+// error_code(선택): 시트 목록은 읽었지만 고른 시트를 표로 읽지 못했을 때(TABLE_*). 이때 columns는 비고 row_count는 0이다.
+schemas.StudioV2TableProfile = exact({
+  sheets: { type: "array", items: { type: "string" } },
+  columns: { type: "array", items: exact({ name: { type: "string" }, kind: { type: "string", enum: ["date", "number", "text"] } }) },
+  row_count: { type: "integer", minimum: 0 },
+  error_code: { type: "string", enum: ["TABLE_TOO_LARGE", "TABLE_HEADER_INVALID", "TABLE_SHEET_NOT_FOUND", "TABLE_FORMAT_UNSUPPORTED", "TABLE_ENCODING_UNSUPPORTED", "TABLE_TIMEOUT"] },
+}, ["sheets", "columns", "row_count"]);
+for (const name of ["TableProfile", "EditTurnReceipt", "EditTurnApplyReceipt", "EditTurnList", "AuthoringTemplates", "AuthoringSession", "AuthoringReceipt", "AuthoringControlReceipt", "Types", "CreateReceipt", "OutputPage", "OutputDetail", "RenameReceipt", "RevisionReceipt", "CancelReceipt", "Provenance",
   "Sharing", "LearningReceipt", "LearningAttempts", "Customization", "MemoReceipt", "MemoSourceReceipt", "MemoSourceReflectReceipt"]) schemas[`StudioV2${name}Envelope`] = envelope(`StudioV2${name}`);
 
 const parameters = {
@@ -172,6 +184,9 @@ const parameters = {
   Revision: { name: "revision", in: "query", required: false, schema: { type: "integer", minimum: 1 } },
   Cursor: { name: "cursor", in: "query", required: false, schema: { type: "string" } },
   Limit: { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 50 } },
+  SourceVersionId: { name: "source_version_id", in: "query", required: true, schema: id },
+  Sheet: { name: "sheet", in: "query", required: false, schema: { type: "string", maxLength: 120 } },
+  HeaderRow: { name: "header_row", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 50 } },
 };
 const P = (name) => ({ $ref: `#/components/parameters/${name}` });
 const base = [P("WorkspaceId"), P("NotebookId")];
@@ -204,6 +219,11 @@ const binary = (description) => ({ description, headers: { ETag: { schema: { typ
 
 const paths = {
   [`${S}/types`]: { get: op("listStudioV2Types", base, { "200": okJson("StudioV2TypesEnvelope") }) },
+  [`${S}/table-profile`]: { get: op("getStudioV2TableProfile", [...base, P("SourceVersionId"), P("Sheet"), P("HeaderRow")], {
+    "200": okJson("StudioV2TableProfileEnvelope"),
+    "422": { description: "Table cannot be read (TABLE_*)", content: { "application/json": { schema: ref("StudioV2Error") } } },
+    "503": { description: "Object storage unavailable", content: { "application/json": { schema: ref("StudioV2Error") } } },
+  }) },
   [`${S}/outputs`]: {
     get: op("listStudioV2Outputs", [...base, P("Cursor"), P("Limit")], { "200": okJson("StudioV2OutputPageEnvelope") }),
     post: op("createStudioV2Output", [...base, P("IdempotencyKey")], { "200": okJson("StudioV2CreateReceiptEnvelope", "Replayed"), "202": okJson("StudioV2CreateReceiptEnvelope", "Accepted"), ...outlineErrors }, json("StudioV2CreateRequest")),
