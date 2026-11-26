@@ -2,13 +2,20 @@ import { createStudioV2Adapter } from "../../web/lib/studio-v2-adapter.js";
 import { askGroundedQuestion, authorizeGroundedQuestion, citationContentUrl } from "../../web/lib/question-answering-api.js";
 import { downloadManualAsset, getManualManifest, readManualDocument } from "../../web/lib/manual-api.js";
 
+const MAX_IPC_BYTES = 32 * 1024 * 1024 + 16_388;
+
 function unpackResponse(value) {
-  if (!(value instanceof ArrayBuffer) || value.byteLength < 4) throw new Error("WORKSPACE_RESPONSE_REJECTED");
-  const metadataLength = new DataView(value).getUint32(0, true);
+  // The CSP blocks Tauri's fetch-based IPC. Its postMessage fallback returns an array of bytes.
+  const buffer = value instanceof ArrayBuffer ? value
+    : Array.isArray(value) && value.length <= MAX_IPC_BYTES
+      && value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+      ? Uint8Array.from(value).buffer : null;
+  if (!buffer || buffer.byteLength < 4 || buffer.byteLength > MAX_IPC_BYTES) throw new Error("WORKSPACE_RESPONSE_REJECTED");
+  const metadataLength = new DataView(buffer).getUint32(0, true);
   const offset = 4 + metadataLength;
-  if (metadataLength > 16_384 || offset > value.byteLength) throw new Error("WORKSPACE_RESPONSE_REJECTED");
-  const [status, headers] = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(value, 4, metadataLength)));
-  return new Response(status === 204 ? null : new Uint8Array(value, offset), { status, headers });
+  if (metadataLength > 16_384 || offset > buffer.byteLength) throw new Error("WORKSPACE_RESPONSE_REJECTED");
+  const [status, headers] = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(buffer, 4, metadataLength)));
+  return new Response(status === 204 ? null : new Uint8Array(buffer, offset), { status, headers });
 }
 
 async function invokeResponse(invoke, command, parameters, signal) {

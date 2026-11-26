@@ -43,11 +43,11 @@ test("Windows accepts enriched answers and sends PDF and CSV together", async ()
     if (args.request.path.includes("/citations/")) {
       return packNativeResponse("%PDF-1.4", { headers: [["content-type", "application/pdf"], ["x-citation-page", "1"]] });
     }
-    return packNativeResponse(JSON.stringify({ data: {
+    return Array.from(new Uint8Array(packNativeResponse(JSON.stringify({ data: {
       run_id: "run-one", run_result_id: "result-one", answer: "답변", insufficient: false,
       citations: [], mode: "explicit_source_lookup", grounding: "source_backed",
       source_scope_summary: "선택한 Source 범위", mismatch: null, next_actions: [], process: null,
-    }, meta: { workspace_id: "ws-one", trace_id: "trace-one" } }));
+    }, meta: { workspace_id: "ws-one", trace_id: "trace-one" } }))));
   });
   const sources = ["pdf", "csv"].map((name) => ({ resourceKind: "source", resourceId: `source-${name}`, versionId: `version-${name}` }));
   const answer = await features.askQuestion({ question: "두 자료를 비교해 줘.", knowledgeContext: { mode: "raw_only", resources: sources } });
