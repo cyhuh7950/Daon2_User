@@ -33,6 +33,17 @@ class TitleTests(unittest.TestCase):
         self.assertEqual(derive_title({"schema": "studio.web_page.v1", "body": {**body, "title_insufficient": False}}),
                          "2027년 보험료 12% 인상 안내")
 
+    def test_data_aggregation_title_from_request_not_summary_list(self):
+        # 실서버 확인(WO-N9): 요약이 문장 목록이라 제목이 "['건수…"로 붙던 문제.
+        body = {"request": "월별·상품별 청구 건수와 지급액 합계를 표와 차트로 보여줘. 전월 대비 증감률도 알려줘.",
+                "summary": ["건수(청구번호) 가장 큰 묶음: 2026-03 · 여행자보험 (608)"], "rows": [], "columns": []}
+        title = derive_title({"schema": "studio.data_aggregation.v1", "body": body})
+        self.assertEqual(title, "월별·상품별 청구 건수와 지급액 합계를 표와 차트로 보여줘")
+        self.assertFalse(title.startswith("["))
+
+    def test_list_summary_is_never_stringified(self):
+        self.assertEqual(derive_title({"body": {"summary": ["a", "b"]}}), "")
+
 
 if __name__ == "__main__":
     unittest.main()
