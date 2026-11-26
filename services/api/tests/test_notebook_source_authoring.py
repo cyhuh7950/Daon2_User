@@ -70,7 +70,10 @@ def test_rfp_cannot_also_be_its_own_reference():
 
 PROPOSAL = "시범 운영에서는 단계별 인수 목록을 사용한다."
 RFP = "서비스 전환 계획을 제출해야 한다."
-TERMS = "보험금은 서류를 받은 후 심사한다. 지급이 늦어지면 서면으로 통지한다. 증서는 인편으로 배달한다."
+TERMS = ("별빛 자동차보험 약관\n제1장 총칙\n계약자는 보험계약의 내용을 확인할 수 있다.\n"
+         "제2장 보장내용\n보장 범위는 보험증권에 적는다.\n제3장 보험금의 지급\n"
+         "보험금은 서류를 받은 후 심사한다. 지급이 늦어지면 서면으로 통지한다. 증서는 인편으로 배달한다.\n"
+         "제4장 면책\n계약이 정한 면책 사유를 통지한다.")
 MODIFIED = "지급이 늦어지면 전자우편으로 통지한다."
 ADDED = "계약자는 온라인 창구에서 진행 상태를 확인할 수 있다."
 PATH = "/api/v1/workspaces/ws-test/notebooks/nb-test/studio/authoring/sessions"
@@ -105,7 +108,7 @@ class FixtureModel:
             if "[기준 약관 구간]" in prompt.user:
                 assert "전자우편" in prompt.user
                 cited = ref(TERMS)
-                paragraphs = [{"text": text, "refs": [cited]} for text in (TERMS.split(". ")[0] + ".", MODIFIED, ADDED)]
+                paragraphs = [{"text": text, "refs": [cited]} for text in ("보험금은 서류를 받은 후 심사한다.", MODIFIED, ADDED)]
             else:
                 paragraphs = [{"text": PROPOSAL, "refs": [ref(PROPOSAL)]}]
                 if "요구서.pdf" in prompt.user:
@@ -221,8 +224,10 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     assert review["state"] == "review", review["error_code"]
     assert FixtureSources.documents[versions[-1]][1] in next(prompt.user for prompt in model.prompts if prompt.schema_name == "authoring_outline")
     assert bool(review["requirements"]) == (template == "rfp_response_proposal")
+    plan_sections = review["plan"]["sections"]
+    selected = [section for section in plan_sections if section["key"] == "payment"] if template == "insurance_terms_draft" else plan_sections[:1]
     receipt = client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
-                                                 "plan_sections": review["plan"]["sections"][:1], "output_formats": ["docx"]})
+                                                 "plan_sections": selected, "output_formats": ["docx"]})
     assert receipt.status_code == 202, receipt.text
     job = repo.jobs.pop()
     assert job.request_json["source_version_ids"] == versions
@@ -240,7 +245,10 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     if template == "insurance_terms_draft":
         changes = next(check for check in completed["document"]["checks"] if check["id"] == "terms_change_summary")
         assert changes["summary"] == {"unchanged": 1, "modified": 1, "new": 1, "delete_suggested": 1}
+        assert completed["document"]["sections"][-1]["delete_suggested"] == ["증서는 인편으로 배달한다."]
         assert "전자우편" in body and "삭제 제안" in body
+        # 근거 부록은 위치와 파일명을 가리키며, 작성하지 않은 조항을 본문에 싣지 않는다.
+        assert not any(marker in body for marker in ("제1장 총칙", "제2장 보장내용", "제4장 면책"))
     else:
         assert PROPOSAL in body
         assert ("부록 A. 요구사항 대응표" in body) == (template == "rfp_response_proposal")
@@ -296,3 +304,28 @@ def test_terms_diff_excludes_unseen_clauses_and_tracks_changed_numbers():
     check = AuthoringPipeline._compare_terms({"units": [{"reference_refs": ["S1"]}]}, sections, references)
     assert check["summary"] == {"unchanged": 0, "modified": 1, "new": 0, "delete_suggested": 0}
     assert check["source_truncated"] and check["uncompared_passages"] == 1
+
+
+def test_terms_deletion_scope_tracks_boundaries_in_unconsulted_passages():
+    parts = (
+        SourceSection("terms-v1", None, "page", "1", None, "제3장 보험금의 지급\n증서는 인편으로 배달한다."),
+        SourceSection("terms-v1", None, "page", "2", None, "제4장 면책\n다른 절의 첫 조항이다."),
+        SourceSection("terms-v1", None, "page", "3", None, "다른 절의 후속 조항이다."),
+    )
+    references = build_pack([SourceText("terms", "terms-v1", "기준약관.pdf", parts, False)], stable_ref_offset=0)
+    selected = {"key": "payment", "title": "제3장 보험금의 지급"}
+    current = {"plan": {"sections": [selected]}, "units": [{"section_key": "payment", "reference_refs": ["S1", "S3"]}]}
+    sections = [{"paragraphs": [{"text": "온라인 진행 상황 확인 창구를 연다."}]}]
+    AuthoringPipeline._compare_terms(current, sections, references)
+    assert sections[0]["delete_suggested"] == ["증서는 인편으로 배달한다."]
+
+
+def test_terms_deletion_scope_requires_a_matching_source_chapter():
+    source = SourceSection("terms-v1", None, "page", "1", None, "증서는 인편으로 배달한다.")
+    references = build_pack([SourceText("terms", "terms-v1", "기준약관.pdf", (source,), False)])
+    selected = {"key": "payment", "title": "제3장 보험금의 지급"}
+    current = {"plan": {"sections": [selected]}, "units": [{"section_key": "payment", "reference_refs": ["S1"]}]}
+    sections = [{"paragraphs": [{"text": "온라인 진행 상황 확인 창구를 연다."}]}]
+    check = AuthoringPipeline._compare_terms(current, sections, references)
+    assert check["summary"]["delete_suggested"] == 0
+    assert "delete_suggested" not in sections[0]

@@ -20,7 +20,7 @@ from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
-from .diff import split_sentences, summarize, tag_section
+from .diff import normalize, scoped_deletion_candidates, split_sentences, summarize, tag_section
 from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
 from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
@@ -486,7 +486,14 @@ class AuthoringPipeline:
         paragraphs = [paragraph for section in sections for paragraph in section["paragraphs"]]
         if not base_sentences:
             return {"id": "terms_change_summary", "title": "기준 약관 대비 변경 요약", "status": "skipped", "reason": "기준 약관 미비교"}
-        diffs, removed = tag_section([p["text"] for p in paragraphs], base_sentences, exact_unchanged=True)
+        planned_chapters = {s["key"]: normalize(s["title"]) for s in (session.get("plan") or {}).get("sections", [])}
+        chapter_refs: dict[str, set[str]] = {}
+        for unit in session["units"]:
+            chapter = planned_chapters.get(unit.get("section_key"))
+            if chapter:
+                chapter_refs.setdefault(chapter, set()).update(unit.get("reference_refs", []))
+        deletions = scoped_deletion_candidates(references.passages, chapter_refs)
+        diffs, removed = tag_section([p["text"] for p in paragraphs], base_sentences, exact_unchanged=True, deletion_candidates=deletions)
         cursor = 0
         for section in sections:
             size = len(section["paragraphs"])

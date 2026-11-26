@@ -8,10 +8,15 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping, Sequence
 
+from ..studio_context_builder import Passage
+
 UNCHANGED_AT = 0.92
 MODIFIED_AT = 0.5
 _SENT = re.compile(r"(?<=[.。!?])\s+|\n+")
 _NOISE = re.compile(r"[\s\W_]+", re.UNICODE)
+_CHAPTER = re.compile(r"^제\s*\d+\s*장")
+_HIGHER_BOUNDARY = re.compile(r"^(?:제\s*\d+\s*[편부]|(?:부칙|부록|별표|별지|특약)(?=$|[\s\d:：.\-]))")
+_ARTICLE = re.compile(r"^제\s*\d+\s*조")
 
 
 def normalize(text: str) -> str:
@@ -20,6 +25,30 @@ def normalize(text: str) -> str:
 
 def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENT.split(text) if s and s.strip()]
+
+
+def scoped_deletion_candidates(passages: Sequence[Passage], chapter_refs: Mapping[str, set[str]]) -> list[str]:
+    """확정된 장과 해당 장을 작성할 때 참조한 구간의 교집합만 삭제 후보로 쓴다."""
+    candidates: dict[str, None] = {}
+    active_refs: set[str] = set()
+    source_version_id: str | None = None
+    for passage in passages:
+        if passage.source_version_id != source_version_id:
+            active_refs = set()
+            source_version_id = passage.source_version_id
+        if passage.heading and not _ARTICLE.match(passage.heading):
+            active_refs = chapter_refs.get(normalize(passage.heading), set())
+        body = passage.text.removeprefix(f"{passage.heading}\n") if passage.heading else passage.text
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            heading = line.lstrip("#").strip()
+            if _CHAPTER.match(heading):
+                active_refs = chapter_refs.get(normalize(heading), set())
+            elif _HIGHER_BOUNDARY.match(heading) or (line.startswith("#") and not _ARTICLE.match(heading)):
+                active_refs = set()
+            elif not line.startswith("#") and passage.ref in active_refs:
+                candidates.update(dict.fromkeys(split_sentences(line)))
+    return list(candidates)
 
 
 def _bigrams(text: str) -> set[str]:
@@ -54,7 +83,8 @@ def tag_sentence(sentence: str, base: Sequence[str], *, exact_unchanged: bool = 
     return "new", None, best
 
 
-def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *, exact_unchanged: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
+def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *, exact_unchanged: bool = False,
+                deletion_candidates: Sequence[str] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
     """문단별 변경 태그와, 새 초안 어디에도 이어지지 않은 기준 문장(삭제 제안)을 돌려준다."""
     paragraphs: list[dict[str, Any]] = []
     new_sentences: list[str] = []
@@ -67,7 +97,8 @@ def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *
         tags = {r["tag"] for r in rows}
         paragraph_tag = "unchanged" if tags == {"unchanged"} else "new" if tags == {"new"} else "modified"
         paragraphs.append({"tag": paragraph_tag, "sentences": rows})
-    removed = [b for b in base_sentences if all(similarity(b, s) < MODIFIED_AT for s in new_sentences)]
+    candidates = base_sentences if deletion_candidates is None else deletion_candidates
+    removed = [b for b in candidates if all(similarity(b, s) < MODIFIED_AT for s in new_sentences)]
     return paragraphs, removed
 
 
