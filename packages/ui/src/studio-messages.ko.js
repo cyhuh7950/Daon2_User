@@ -35,6 +35,7 @@ export const STUDIO_MESSAGES = Object.freeze({
   "studio.aggregation.source": "표 소스",
   "studio.aggregation.source.none": "XLSX·CSV 소스가 없습니다. 표 파일을 소스로 추가하세요.",
   "studio.aggregation.source.choose": "표 소스를 고르세요",
+  "studio.aggregation.source.unknown": "지난 표 소스를 불러오지 못했습니다. 다른 표로 집계하려면 새로 만들어 주세요.",
   "studio.aggregation.sheet": "시트",
   "studio.aggregation.header_row": "머리글 행",
   "studio.aggregation.profile.loading": "표 정보를 읽는 중…",

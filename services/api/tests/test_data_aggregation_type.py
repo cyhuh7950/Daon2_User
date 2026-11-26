@@ -65,3 +65,114 @@ def test_available_types_lists_data_aggregation_last():
     assert ids.index("data_aggregation") == ids.index("web_page") + 1
     item = next(t for t in available_types() if t["type_id"] == "data_aggregation")
     assert item["available"] is True and item["export_formats"] == ["xlsx", "csv"]
+
+
+# ------------------------------------------------------------------ 최종 검토 I3: 출력 소스 == 표 소스
+
+class _Rows:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+    def fetchall(self):
+        return []
+
+
+class _Connection:
+    def __init__(self, rows=()):
+        self.rows = list(rows)
+        self.statements = []
+
+    def execute(self, sql, params=None):
+        self.statements.append(sql)
+        return _Rows(self.rows.pop(0) if self.rows else None)
+
+
+class _Store:
+    def __init__(self, rows=()):
+        self.connection = _Connection(rows)
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _transaction(self, context):
+        yield self.connection
+
+
+def _repo(rows=(), ready=("ver-1", "ver-2")):
+    from types import SimpleNamespace
+
+    from daon2_user_api.studio_v2_postgres import PostgresStudioV2Repository
+
+    class Repo(PostgresStudioV2Repository):
+        scoped = []
+
+        def require_scope(self, connection, context, versions, **kwargs):
+            self.scoped.append(list(versions))
+
+        def _has_selected_knowledge(self, connection, context, notebook_id):
+            return False
+
+        def ready_source_versions(self, connection, context):
+            return list(ready)
+
+    store = _Store(rows)
+    repo = Repo(store)
+    repo.scoped = []
+    repo.tts_resolver = SimpleNamespace(for_tenant=lambda tenant: None)
+    return repo, store
+
+
+AGG = {"aggregation_request": "상품별 합계", "table_source_version_id": "ver-1"}
+
+
+def _writes(store):
+    return [sql for sql in store.connection.statements if sql.startswith(("INSERT", "UPDATE"))]
+
+
+def test_create_requires_output_sources_equal_table_source():
+    from test_studio_v2_generation import CTX
+
+    from daon2_user_api.studio_workspace import StudioError
+    for requested in (None, [], ["ver-2"], ["ver-1", "ver-2"]):
+        repo, store = _repo()
+        request = {"type_id": "data_aggregation", "settings": AGG}
+        if requested is not None:
+            request["source_version_ids"] = requested
+        with pytest.raises(StudioError) as caught:
+            repo.enqueue(CTX, request, "agg-create-key-0001")
+        assert (caught.value.code, caught.value.status) in {("STUDIO_INPUT_INVALID", 400), ("STUDIO_NO_READY_SOURCE", 409)}, requested
+        assert _writes(store) == [], requested
+    repo, store = _repo()
+    receipt = repo.enqueue(CTX, {"type_id": "data_aggregation", "settings": AGG, "source_version_ids": ["ver-1"]}, "agg-create-key-0002")
+    assert receipt["status"] == "queued"
+    assert repo.scoped == [["ver-1"]]  # 표 소스도 노트북 범위 검사를 거친다
+    # 다른 유형은 바뀌지 않는다.
+    repo, store = _repo()
+    assert repo.enqueue(CTX, {"type_id": "report", "settings": {}, "source_version_ids": ["ver-1", "ver-2"]}, "agg-create-key-0003")["status"] == "queued"
+
+
+def test_regenerate_rejects_table_source_different_from_output_sources():
+    from datetime import datetime, timezone
+
+    from test_studio_v2_generation import CTX
+
+    from daon2_user_api.studio_workspace import StudioError
+    now = datetime(2026, 11, 26, tzinfo=timezone.utc)
+
+    def row(versions):
+        return ("sv2-" + "a" * 32, "data_aggregation", None, "데이터 집계", "completed", None, dict(AGG), versions, 1, CTX.actor_id, now, now)
+    repo, store = _repo([row(["ver-1"]), None])
+    with pytest.raises(StudioError) as caught:
+        repo.regenerate(CTX, "sv2-" + "a" * 32, {"table_source_version_id": "ver-2"}, "agg-regen-key-00001")
+    assert (caught.value.code, caught.value.status) == ("STUDIO_INPUT_INVALID", 400)
+    assert _writes(store) == []
+    repo, store = _repo([row(["ver-1", "ver-2"]), None])
+    with pytest.raises(StudioError):
+        repo.regenerate(CTX, "sv2-" + "a" * 32, {"aggregation_request": "다시"}, "agg-regen-key-00002")
+    repo, store = _repo([row(["ver-1"]), None])
+    receipt = repo.regenerate(CTX, "sv2-" + "a" * 32, {"aggregation_request": "다시"}, "agg-regen-key-00003")
+    assert receipt["status"] == "queued"
+    assert repo.scoped == [["ver-1"]]

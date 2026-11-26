@@ -126,7 +126,7 @@ const SOURCES = [
 const aggItem = (over = {}) => ({ output_id: OID("d"), type_id: "data_aggregation", format_id: null, title: "데이터 집계", status: "completed", error_code: null,
   source_count: 1, current_revision: 1, created_at: "2026-11-20T00:00:00Z", updated_at: "2026-11-20T00:00:00Z", stale: false, ...over });
 
-function fakeStudio({ outputs = [], settings = {}, profile } = {}) {
+function fakeStudio({ outputs = [], settings = {}, profile, getOutputFails = false } = {}) {
   const calls = [];
   return {
     calls,
@@ -135,7 +135,7 @@ function fakeStudio({ outputs = [], settings = {}, profile } = {}) {
     exportFormats: (typeId) => (typeId === "data_aggregation" ? ["xlsx", "csv"] : ["docx"]),
     createOutput: async (args) => { calls.push(["create", args]); return { output_id: OID("e"), job_id: "svj-1", status: "queued" }; },
     regenerateOutput: async (id, opts) => { calls.push(["regenerate", id, opts]); return { output_id: id, job_id: "svj-2", status: "queued" }; },
-    getOutput: async (id) => { calls.push(["getOutput", id]); return { ...aggItem({ output_id: id }), settings, evidence: [], assets: [], revision: null }; },
+    getOutput: async (id) => { calls.push(["getOutput", id]); if (getOutputFails) throw Object.assign(new Error("x"), { code: "RESOURCE_UNAVAILABLE" }); return { ...aggItem({ output_id: id }), settings, evidence: [], assets: [], revision: null }; },
     getTableProfile: async (params) => {
       calls.push(["profile", params]);
       if (profile) return profile(params);
@@ -631,4 +631,24 @@ test("OpenAPI 계약의 표 정보에 선택 error_code가 있다", async () => 
   const schema = contract.components.schemas.StudioV2TableProfile;
   assert.ok(schema.properties.error_code, "error_code 속성");
   assert.ok(!schema.required.includes("error_code"), "error_code는 선택");
+});
+
+test("다시 생성: 지난 표 소스를 읽지 못하면(getOutput 실패) 다른 소스로 채우지 않고 만들기를 끈다", async () => {
+  const { module, cleanup } = await bundle("packages/ui/src/studio-panel.jsx", "studio-panel-aggregation-missing-source");
+  const studio = fakeStudio({ outputs: [aggItem()], getOutputFails: true });
+  const view = await mount(module.StudioPanel, panelProps(studio));
+  try {
+    await view.click(findElements(view.container, (n) => n.getAttribute?.("aria-label") === "더보기: 데이터 집계")[0]);
+    const menu = findElements(view.container, (n) => n.getAttribute?.("role") === "menu")[0];
+    await view.click(findElements(menu, (n) => n.getAttribute?.("role") === "menuitem" && n.textContent.trim() === "설정 변경 후 다시 생성")[0]);
+    await wait(450);
+    const dialog = findElements(view.container, (n) => n.getAttribute?.("role") === "dialog")[0];
+    const select = byId(dialog, "studio-aggregation-source");
+    assert.equal(reactProps(select).disabled, true);
+    assert.notEqual(reactProps(select).value, "ver-xlsx");  // 첫 소스로 몰래 바꾸지 않는다
+    assert.equal(reactProps(submitButton(dialog)).disabled, true);
+    assert.ok(dialog.textContent.includes("지난 표 소스를 불러오지 못했습니다"), dialog.textContent);
+    await act(async () => { reactProps(findElements(dialog, (n) => n.tagName === "FORM")[0]).onSubmit({ preventDefault() {} }); });
+    assert.equal(studio.calls.filter(([kind]) => kind === "regenerate").length, 0);
+  } finally { await view.close(); await cleanup(); }
 });

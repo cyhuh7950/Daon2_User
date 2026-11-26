@@ -162,7 +162,8 @@ const validHeaderRow = (value) => /^\d{1,2}$/u.test(String(value)) && Number(val
 // lockSource: 설정 변경 후 다시 생성에서는 표 소스를 바꿀 수 없다(지금 소스를 보이고 잠근다, 검토 Ruling).
 export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {}, loading = false, lockSource = false, loadProfile, onSubmit, onCancel }) {
   const [request, setRequest] = useState(String(initial.aggregation_request ?? ""));
-  const [sourceId, setSourceId] = useState(String(initial.table_source_version_id ?? sources[0]?.sourceVersionId ?? ""));
+  // 다시 생성(lockSource)은 지난 표 소스만 쓴다. 읽지 못했으면 첫 소스로 채우지 않는다(서버도 출력 소스와 다른 표는 거부한다).
+  const [sourceId, setSourceId] = useState(String(initial.table_source_version_id ?? (lockSource ? "" : sources[0]?.sourceVersionId ?? "")));
   const [sheet, setSheet] = useState(String(initial.sheet ?? ""));
   const [headerRow, setHeaderRow] = useState(String(initial.header_row ?? 1));
   const [profile, setProfile] = useState({ status: "idle", data: null, error: null });
@@ -209,6 +210,7 @@ export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {
   const profileLoading = profile.status === "loading";
   // 고른 시트를 표로 못 읽음(TABLE_*): 만들기를 끈다. 503 바쁨(status error)은 다시 읽기만 보이고 만들기는 끄지 않는다.
   const tableError = profile.status === "ready" && typeof profile.data?.error_code === "string" ? profile.data.error_code : null;
+  const sourceUnknown = lockSource && !loading && !source;
   const blocked = requestMissing || !source || !headerOk || profileLoading || loading || Boolean(tableError);
   const submit = (event) => {
     event.preventDefault();
@@ -229,9 +231,10 @@ export function AggregationSettingsDialog({ typeLabel, sources = [], initial = {
         : <select id="studio-aggregation-source" required disabled={lockSource} value={source || lockSource ? sourceId : ""}
           onChange={(event) => { touched.current = true; setSourceId(event.target.value); setSheet(""); setSheetList([]); }}>
           {!source && !lockSource && <option value="">{msg("studio.aggregation.source.choose")}</option>}
-          {!source && lockSource && <option value={sourceId}>{sourceId}</option>}
+          {!source && lockSource && <option value={sourceId}>{sourceId || "-"}</option>}
           {sources.map((item) => <option key={item.sourceVersionId} value={item.sourceVersionId}>{item.filename ?? item.sourceVersionId}</option>)}
         </select>}
+      {sourceUnknown && <p role="alert">{msg("studio.aggregation.source.unknown")}</p>}
       {kind === "xlsx" && <>
         <label htmlFor="studio-aggregation-sheet">{msg("studio.aggregation.sheet")}</label>
         <select id="studio-aggregation-sheet" value={sheet} disabled={sheets.length === 0} onChange={touch(setSheet)}>
