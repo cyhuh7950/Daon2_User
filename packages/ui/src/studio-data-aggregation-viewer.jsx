@@ -143,7 +143,7 @@ export function AggregationChart({ body }) {
 /** 근거 범위 한 줄(``시트!F: 2–31, 45–60`` · ``행 2–31, 45–60 · 열``)의 행 묶음 수. 모양이 다르면 1. */
 export function rangeRunCount(text) {
   const value = String(text ?? "");
-  const match = /^행 (.+?) · /u.exec(value) ?? /^(?:.*!)?[A-Z]+: (.+)$/u.exec(value);
+  const match = /^\u{D589} (.+?) · /u.exec(value) ?? /^(?:.*!)?[A-Z]+: (.+)$/u.exec(value);
   return match ? match[1].split(", ").length : 1;
 }
 
