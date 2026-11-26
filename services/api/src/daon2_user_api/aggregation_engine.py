@@ -249,7 +249,7 @@ def _parse_spec(table: Table, spec):
             _invalid()
         position, column = _resolve(table, item.get('column'))
         month = item.get('month', False)
-        if not isinstance(month, bool) or (month and column.kind != 'date'):
+        if not isinstance(month, bool) or column.kind != ('date' if month else 'text'):
             _invalid()
         key = f'{column.name}(월)' if month else column.name
         groups.append((position, column, month, key, key))

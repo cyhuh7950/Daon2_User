@@ -264,7 +264,9 @@ class DataAggregationGeneratorTests(unittest.TestCase):
         self.assertEqual(len(audit.drafts), 1)
         draft = audit.drafts[0]
         self.assertEqual(draft.action, "studio_v2.aggregation.run")
-        self.assertEqual(set(draft.metadata), {"rows_read", "elapsed_ms", "source_sha256"})
+        self.assertEqual(set(draft.metadata), {"outcome", "rows_read", "elapsed_ms", "source_sha256", "result_sha256"})
+        self.assertEqual(draft.outcome.value, "succeeded")
+        self.assertEqual(draft.metadata["outcome"], "succeeded")
         self.assertEqual(draft.metadata["rows_read"], 4)
         self.assertEqual(draft.metadata["source_sha256"], sha(CSV))
         self.assertEqual((draft.tenant_id, draft.workspace_id, draft.actor_id, draft.target_id),
@@ -276,6 +278,71 @@ class DataAggregationGeneratorTests(unittest.TestCase):
         events = store.list(tenant_id=CTX.tenant_id, action="studio_v2.aggregation.run").items
         self.assertEqual(len(events), 1)
         self.assertEqual(dict(events[0].metadata)["source_sha256"], sha(CSV))
+
+    def test_audit_result_hash_is_sha256_of_stored_rows(self):
+        audit = FakeAudit()
+        result, _, _ = run(GOOD_SPEC, audit=audit)
+        rows = result.content["body"]["rows"]
+        expected = hashlib.sha256(json.dumps(rows, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+        self.assertEqual(audit.drafts[0].metadata["result_sha256"], expected)
+
+    def test_audit_records_failed_runs_without_cell_values(self):
+        cases = [
+            (dict(settings={**SETTINGS, "header_row": 9}), "TABLE_HEADER_INVALID"),
+            (dict(responses=(BAD_SPEC, BAD_SPEC)), "STUDIO_VALIDATION_FAILED"),
+            (dict(responses=({**GOOD_SPEC, "filters": [{"column": "지역", "op": "eq", "value": "없는마을"}]},)), "AGGREGATION_FILTER_VALUE_NOT_FOUND"),
+        ]
+        for kwargs, code in cases:
+            audit = FakeAudit()
+            responses = kwargs.pop("responses", (GOOD_SPEC,))
+            with self.assertRaises(StudioError):
+                run(*responses, audit=audit, **kwargs)
+            self.assertEqual(len(audit.drafts), 1, code)
+            draft = audit.drafts[0]
+            self.assertEqual((draft.action, draft.outcome.value), ("studio_v2.aggregation.run", "failed"))
+            self.assertEqual(draft.metadata["outcome"], "failed")
+            self.assertEqual(draft.metadata["error_code"], code)
+            self.assertNotIn("result_sha256", draft.metadata)
+            flat = json.dumps(dict(draft.metadata), ensure_ascii=False)
+            self.assertNotIn(SECRET_CITY, flat)
+            self.assertNotIn(SECRET_AMOUNT, flat)
+            self.assertNotIn("없는마을", flat)
+        # 실제 감사 저장소 검사도 통과한다.
+        from daon2_user_api.audit import AuditEventStore
+        store = AuditEventStore()
+        with self.assertRaises(StudioError):
+            run(GOOD_SPEC, settings={**SETTINGS, "header_row": 9}, audit=store)
+        events = store.list(tenant_id=CTX.tenant_id, action="studio_v2.aggregation.run").items
+        self.assertEqual(dict(events[0].metadata)["error_code"], "TABLE_HEADER_INVALID")
+
+    def test_unsupported_warning_numbers_not_in_request_are_hidden(self):
+        spec = {**GOOD_SPEC, "unsupported": ["2027년 금액 999억 예측"]}
+        result, _, _ = run(spec)
+        warnings = result.content["body"]["warnings"]
+        self.assertIn("하지 않은 요청: …년 금액 …억 예측", warnings)
+        self.assertFalse(any("999" in w or "2027" in w for w in warnings))
+        result, _, _ = run(spec, settings={**SETTINGS, "aggregation_request": "지역별 금액 합계, 2027년 예측도"})
+        self.assertIn("하지 않은 요청: 2027년 금액 …억 예측", result.content["body"]["warnings"])
+
+    def test_cancel_check_reaches_table_read_and_compute(self):
+        from daon2_user_api import studio_generators
+        seen = {}
+        real_read, real_run = studio_generators.read_table, studio_generators.aggregation_run
+
+        def read(*args, **kwargs):
+            seen["read"] = kwargs.get("cancel_check")
+            return real_read(*args, **kwargs)
+
+        def compute(*args, **kwargs):
+            seen["run"] = kwargs.get("cancel_check")
+            return real_run(*args, **kwargs)
+        llm = ScriptedLLM(GOOD_SPEC)
+        ctx, _ = agg_ctx()
+        with patch("daon2_user_api.studio_generators.read_table", side_effect=read), \
+                patch("daon2_user_api.studio_generators.aggregation_run", side_effect=compute):
+            DataAggregationGenerator(make_reader()[0], llm).generate(ctx)
+        self.assertIs(seen["read"], ctx.cancel_check)
+        self.assertIs(seen["run"], ctx.cancel_check)
 
     def test_result_too_large_message(self):
         with patch("daon2_user_api.studio_generators.content_size_ok", return_value=False):

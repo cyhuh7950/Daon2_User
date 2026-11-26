@@ -91,11 +91,35 @@ class Table:
     row_numbers: tuple[int, ...]
 
 
+_LEADING_ZERO_CODE = re.compile(r'0[0-9]+')
+
+
 def _fail(code: str):
     raise TableReadError(code)
 
 
+class _Guard:
+    """Deadline plus the job's cancel check, passed where a deadline goes.
+    Remembers the cancellation so read_table does not mask it as a parse error."""
+    __slots__ = ('deadline', 'cancel_check', 'cancelled')
+
+    def __init__(self, deadline, cancel_check):
+        self.deadline = deadline; self.cancel_check = cancel_check; self.cancelled = None
+
+    def check(self):
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            _fail('TABLE_TIMEOUT')
+        try:
+            self.cancel_check()
+        except BaseException as error:
+            self.cancelled = error
+            raise
+
+
 def _check_deadline(deadline):
+    if isinstance(deadline, _Guard):
+        deadline.check()
+        return
     if deadline is not None and time.monotonic() > deadline:
         _fail('TABLE_TIMEOUT')
 
@@ -177,10 +201,14 @@ def _serial_date(serial: Decimal, date1904: bool) -> date | None:
 
 
 def _infer_and_convert(raw_rows, width, deadline):
-    """raw values: None, str, Decimal (typed numeric cell) or date."""
+    """raw values: None, str, Decimal (typed numeric cell) or date.
+
+    Any text value that looks like a code with a leading zero (``0101``)
+    makes the column text, so ``0101`` and ``101`` never merge as numbers."""
     kinds = []
     for j in range(width):
         nonempty = numbers = dates = 0
+        codes = False
         _check_deadline(deadline)
         for i, row in enumerate(raw_rows):
             if i % _DEADLINE_EVERY == 0:
@@ -193,11 +221,15 @@ def _infer_and_convert(raw_rows, width, deadline):
                 numbers += 1
             elif isinstance(value, date):
                 dates += 1
+            elif _LEADING_ZERO_CODE.fullmatch(value.strip()):
+                codes = True
             elif parse_number(value) is not None:
                 numbers += 1
             elif parse_date_text(value) is not None:
                 dates += 1
-        if nonempty and numbers * 10 >= nonempty * 9:
+        if codes:
+            kinds.append('text')
+        elif nonempty and numbers * 10 >= nonempty * 9:
             kinds.append('number')
         elif nonempty and dates * 10 >= nonempty * 9:
             kinds.append('date')
@@ -773,7 +805,11 @@ def list_sheets(content: bytes, *, deadline: float | None = None) -> list[str]:
 
 
 def read_table(content: bytes, *, file_name: str, source_format: str, sheet: str | None, header_row: int,
-               limits: TableLimits = TableLimits(), deadline: float | None = None) -> Table:
+               limits: TableLimits = TableLimits(), deadline: float | None = None, cancel_check=None) -> Table:
+    """``cancel_check`` (optional) is called wherever the deadline is checked;
+    whatever it raises propagates unchanged."""
+    if cancel_check is not None:
+        deadline = _Guard(deadline, cancel_check)
     if not isinstance(content, (bytes, bytearray)) or source_format not in {'xlsx', 'csv'}:
         _fail('TABLE_FORMAT_UNSUPPORTED')
     if isinstance(header_row, bool) or not isinstance(header_row, int) or not 1 <= header_row <= _MAX_EXCEL_ROW:
@@ -786,7 +822,9 @@ def read_table(content: bytes, *, file_name: str, source_format: str, sheet: str
         return _read_csv(content, file_name=file_name, header_row=header_row, limits=limits, deadline=deadline)
     except TableReadError:
         raise
-    except _PARSE_ERRORS:
+    except _PARSE_ERRORS as error:
+        if isinstance(deadline, _Guard) and deadline.cancelled is error:
+            raise
         _fail('TABLE_FORMAT_UNSUPPORTED')
 
 

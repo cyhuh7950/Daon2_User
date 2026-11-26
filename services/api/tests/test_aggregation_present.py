@@ -144,11 +144,17 @@ def test_series_keyed_by_value_not_display():
 
 
 def test_multi_group_without_month_has_x_label_and_first_group_x_key():
-    result, spec = build(raw_spec([PRODUCT, {'column': '청구일', 'month': False}]))
+    # 묶음은 글자 열만 된다(최종 검토 I2): 두 번째 글자 열 '지역'을 둔 표.
+    columns = COLUMNS + (Column('지역', 'D', 3, 'text'),)
+    rows = tuple(tuple(r) + (('서울', '부산')[i % 2],) for i, r in enumerate(ROWS))
+    t = Table(file_name='t.xlsx', source_format='xlsx', sheet='S', header_row=1, columns=columns,
+              rows=rows, row_numbers=tuple(range(2, 2 + len(rows))))
+    spec, _ = normalize(raw_spec([PRODUCT, {'column': '지역', 'month': False}]), t)
+    result = run(t, spec)
     chart = build_chart(result, spec)
     assert chart['kind'] == 'bar'
     assert chart['x_key'] == '상품'
-    assert chart['x_label'] == '상품 · 청구일'
+    assert chart['x_label'] == '상품 · 지역'
     assert all(' · ' in p['x'] and p['x'].split(' · ')[0] in ('암보험', '실손') for p in chart['series'][0]['points'])
     single, spec1 = build(raw_spec([PRODUCT]))
     assert build_chart(single, spec1)['x_label'] == '상품'

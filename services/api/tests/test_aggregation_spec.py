@@ -179,3 +179,53 @@ def test_between_list_copied_and_unsupported_truncated():
                                    unsupported=['가' * 300]), table)
     assert spec['filters'][0]['value'] == [10, 20] and spec['filters'][0]['value'] is not source
     assert warnings == ['하지 않은 요청: ' + '가' * 200]
+
+
+# ------------------------------------------------------------------ final review fixes
+
+def test_group_by_only_on_text_columns():
+    t = make_table()
+    reasons = reasons_of(t, raw(group_by=[{'column': '지급금액', 'month': False}]))
+    assert any('글자 열' in r and '지급금액' in r for r in reasons), reasons
+    reasons = reasons_of(t, raw(group_by=[{'column': '청구일', 'month': False}]))
+    assert any('글자 열' in r and '청구일' in r for r in reasons), reasons
+    spec, _ = normalize(raw(group_by=[{'column': '상품', 'month': False}, {'column': '청구일', 'month': True}]), t)
+    assert spec['group_by'] == [{'column': '상품', 'month': False}, {'column': '청구일', 'month': True}]
+    # 계산기도 같은 규칙을 지킨다.
+    with pytest.raises(ValueError, match='AGGREGATION_SPEC_INVALID'):
+        aggregation_engine.run(t, {'filters': [], 'group_by': [{'column': '지급금액', 'month': False}],
+                                   'measures': [{'id': 'n', 'func': 'count', 'column': None}], 'growth': [], 'sort': None, 'limit': None})
+
+
+def test_leading_zero_codes_stay_distinct_groups_and_filter_exactly():
+    from daon2_user_api.table_reader import read_table
+    csv = '상품코드,월,지급액\n0101,2026-01-05,100\n101,2026-01-06,200\n0101,2026-02-01,300\n102,2026-03-01,1\n'.encode()
+    t = read_table(csv, file_name='a.csv', source_format='csv', sheet=None, header_row=1)
+    assert [(c.name, c.kind) for c in t.columns] == [('상품코드', 'text'), ('월', 'date'), ('지급액', 'number')]
+    spec, _ = normalize(raw(group_by=[{'column': '상품코드', 'month': False}],
+                            measures=[{'id': 's', 'func': 'sum', 'column': '지급액'}]), t)
+    result = aggregation_engine.run(t, spec)
+    assert [[c['display'] for c in row] for row in result['rows']] == [['0101', '400'], ['101', '200'], ['102', '1']]
+    spec, _ = normalize(raw(filters=[{'column': '상품코드', 'op': 'eq', 'value': '0101'}]), t)
+    (row,) = aggregation_engine.run(t, spec)['rows']
+    assert row[0]['value'] == '2'
+    spec, _ = normalize(raw(filters=[{'column': '상품코드', 'op': 'eq', 'value': 101}]), t)
+    (row,) = aggregation_engine.run(t, spec)['rows']
+    assert row[0]['value'] == '1'
+
+
+def test_unsupported_warning_hides_numbers_not_in_request():
+    t = make_table()
+    request = '2026년 상품별 건수를 보여주고 2027년 지급액 999억 예측도 해줘'
+    _, warnings = normalize(raw(unsupported=['2027년 지급액 999억 예측', '다른 파일 3개와 비교', '12.5% 성장 가정']), t, request=request)
+    assert warnings == ['하지 않은 요청: 2027년 지급액 999억 예측', '하지 않은 요청: 다른 파일 …개와 비교',
+                        '하지 않은 요청: ….…% 성장 가정']
+    # 요청 글을 주지 않으면 모든 숫자를 가린다.
+    _, warnings = normalize(raw(unsupported=['2027년 예측']), t)
+    assert warnings == ['하지 않은 요청: …년 예측']
+    # 요청 글의 숫자 일부만 맞는 더 긴 숫자도 가린다(숫자 묶음 단위로 비교).
+    _, warnings = normalize(raw(unsupported=['20270 예측']), t, request='2027 예측')
+    assert warnings == ['하지 않은 요청: … 예측']
+    with pytest.raises(SpecUnsupported) as caught:
+        normalize(raw(measures=[], unsupported=['2027년 999억 예측']), t, request='2027년 예측')
+    assert caught.value.items == ['2027년 …억 예측']

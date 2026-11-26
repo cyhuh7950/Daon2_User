@@ -8,6 +8,7 @@ consumes. Column names must match exactly (no nearest-name substitution).
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import date
 from typing import Any
@@ -31,6 +32,7 @@ _FUNCS = ('count', 'sum', 'avg')
 _FUNC_LABEL = {'count': '건수', 'sum': '합계', 'avg': '평균'}
 _OP_SYMBOL = {'eq': '=', 'ne': '≠', 'gt': '>', 'gte': '≥', 'lt': '<', 'lte': '≤'}
 _NOT_FOUND = 'AGGREGATION_FILTER_VALUE_NOT_FOUND'
+_DIGITS = re.compile(r'[0-9]+')
 
 _SCALAR = {'anyOf': [{'type': 'string'}, {'type': 'integer'}]}
 SPEC_SCHEMA: dict[str, Any] = {
@@ -195,8 +197,17 @@ def _filter(table: Table, item, reasons: list[str], cache: dict[int, set[str]]):
     return {'column': name, 'op': op, 'value': list(value)}
 
 
-def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
+def _mask_numbers(text: str, allowed: set[str]) -> str:
+    """Model-written text: every digit run not found in the request becomes '…'
+    so numbers the model invented never reach the screen."""
+    return _DIGITS.sub(lambda m: m.group(0) if m.group(0) in allowed else '…', text)
+
+
+def normalize(raw: Mapping, table: Table, *, request: str = '') -> tuple[dict, list[str]]:
     """Validate the model's proposal and return ``(spec, warnings)``.
+
+    ``request`` is the user's request text; digit runs in ``unsupported``
+    items that do not appear in it are replaced with '…'.
 
     Raises ``SpecInvalid`` (retry with reasons), ``SpecUnsupported`` (nothing
     supported was requested) or ``ValueError('AGGREGATION_FILTER_VALUE_NOT_FOUND:값(열)')``
@@ -214,7 +225,8 @@ def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
     if not isinstance(raw_unsupported, list) or not all(isinstance(u, str) for u in raw_unsupported):
         reasons.append('unsupported 형식 오류')
         raw_unsupported = []
-    unsupported = [u.strip()[:MAX_UNSUPPORTED_TEXT] for u in raw_unsupported if u.strip()]
+    allowed = set(_DIGITS.findall(request if isinstance(request, str) else ''))
+    unsupported = [_mask_numbers(u.strip()[:MAX_UNSUPPORTED_TEXT], allowed) for u in raw_unsupported if u.strip()]
     warnings = [f'하지 않은 요청: {u}' for u in unsupported]
     if not _list(raw, 'measures') and unsupported and not reasons:
         raise SpecUnsupported(unsupported)
@@ -235,6 +247,8 @@ def normalize(raw: Mapping, table: Table) -> tuple[dict, list[str]]:
             reasons.append(f'월 묶기 값 형식 오류: {name}'); continue
         if month and by_name[name].kind != 'date':
             reasons.append(f'월 묶기는 날짜 열만 가능: {name}'); continue
+        if not month and by_name[name].kind != 'text':
+            reasons.append(f'묶기는 글자 열만 가능(날짜 열은 월 묶기): {name}'); continue
         groups.append({'column': name, 'month': month})
     if len(raw_groups) > MAX_GROUPS:
         reasons.append(f'묶음 열은 최대 {MAX_GROUPS}개')

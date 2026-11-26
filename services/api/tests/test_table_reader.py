@@ -172,6 +172,37 @@ class TableReaderTests(unittest.TestCase):
         self.assertEqual(d.rows[-1][0], NotDate("모름"))
         self.assertEqual(d.rows[0][0], date(2026, 1, 1))
 
+    def test_leading_zero_codes_make_column_text(self):
+        # 앞자리 0이 있는 코드가 하나라도 있으면 글자 열(숫자로 읽어 0101과 101이 합쳐지지 않게).
+        values = ["101", "102", "0101", "103", "104", "105", "106", "107", "108", "109"]
+        t = read_csv(("코드\n" + "\n".join(values)).encode())
+        self.assertEqual(t.columns[0].kind, "text")
+        self.assertEqual([r[0] for r in t.rows][:3], ["101", "102", "0101"])
+        # 0, 0.5 같은 값은 코드로 보지 않는다.
+        self.assertEqual(read_csv("a\n0\n0.5\n1\n2\n".encode()).columns[0].kind, "number")
+        xml = sheet_xml([["코드"], [101], ["0102"], [103]])
+        self.assertEqual(read_xlsx(workbook([("S", xml)])).columns[0].kind, "text")
+
+    def test_cancel_check_called_and_not_masked(self):
+        class Cancelled(RuntimeError):
+            pass
+        calls = []
+
+        def cancel():
+            calls.append(1)
+            if len(calls) >= 2:
+                raise Cancelled("x")
+        content = ("a,b\n" + "\n".join(f"{i},{i}" for i in range(3000))).encode()
+        with self.assertRaises(Cancelled):  # RuntimeError가 TABLE_FORMAT_UNSUPPORTED로 바뀌지 않는다
+            read_table(content, file_name="a.csv", source_format="csv", sheet=None, header_row=1, cancel_check=cancel)
+        xml = sheet_xml([["a"]] + [[i] for i in range(3000)])
+        calls.clear()
+        with self.assertRaises(Cancelled):
+            read_table(workbook([("S", xml)]), file_name="a.xlsx", source_format="xlsx", sheet=None, header_row=1, cancel_check=cancel)
+        seen = []
+        read_table(content, file_name="a.csv", source_format="csv", sheet=None, header_row=1, cancel_check=lambda: seen.append(1))
+        self.assertGreaterEqual(len(seen), 3)
+
     def test_csv_utf8_bom_and_tab(self):
         content = "﻿이름\t금액\t메모\n가\t1,000\t\"a,b\"\n나\t2000\tc\n".encode("utf-8")
         table = read_csv(content)
