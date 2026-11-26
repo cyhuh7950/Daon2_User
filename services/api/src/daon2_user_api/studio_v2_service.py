@@ -55,8 +55,7 @@ def table_profile_from_original(content: bytes, file_name: str, source_format: s
 
 class StudioV2Service(PostgresStudioV2Repository):
     def __init__(self, cloud_store, *, object_storage=None, clock=None) -> None:  # type: ignore[no-untyped-def]
-        super().__init__(cloud_store, clock=clock)
-        self._object_storage = object_storage
+        super().__init__(cloud_store, clock=clock, object_storage=object_storage)
         self._knowledge_status = None
         self._knowledge_stale: dict[tuple[str, str, str], bool] = {}
 
@@ -224,7 +223,7 @@ class StudioV2Service(PostgresStudioV2Repository):
         if not text and kind and value is not None:
             # 근거 구간(span)이 없는 로케이터는 본문에서 다시 찾는다(생성기가 만든 쪽·섹션 근거).
             from .studio_source_reader import StudioSourceReader
-            found = StudioSourceReader(self._cloud_store).read_section(context, source_version_id, str(kind), str(value))
+            found = StudioSourceReader(self._cloud_store, object_storage=self._object_storage).read_section(context, source_version_id, str(kind), str(value))
             if found is not None:
                 filename, text = found[0], found[1][:_MAX_EXCERPT_CHARS]
         body = json.dumps({"filename": filename, "locator": {"kind": kind, "value": value}, "page": evidence.get("page"),

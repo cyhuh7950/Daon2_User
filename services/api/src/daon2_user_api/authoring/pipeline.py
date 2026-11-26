@@ -12,7 +12,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ..knowledge_connector_service import ConnectorContext, ConnectorError, KnowledgeConnectorService
 from ..mcp_client import McpError
 from ..studio_context_builder import ContextPack, Passage, build_pack
-from ..studio_source_reader import StudioSourceReader
+from ..studio_source_reader import SourceText, StudioSourceReader
 from ..studio_text_generation import StudioPrompt, StudioTextGenerator
 from ..studio_v2_generation import GenerationContext, GenerationResult
 from ..studio_validation import Warnings, check_anchors, text_field
@@ -20,9 +20,9 @@ from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
-from .diff import split_sentences, summarize, tag_section
+from .diff import normalize, scoped_deletion_candidates, split_sentences, summarize, tag_section
 from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
-from .session import SESSION_SCHEMA, source_versions, transition
+from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
@@ -168,14 +168,18 @@ class AuthoringPipeline:
     def _connector_ctx(self, ctx: GenerationContext) -> ConnectorContext:
         return ConnectorContext(ctx.context.tenant_id, ctx.context.actor_id, ctx.context.trace_id, ctx.context.workspace_id, ctx.context.policy_version)
 
-    def _rfp_pack(self, ctx: GenerationContext, session: Mapping[str, Any]) -> ContextPack:
-        return build_pack(self._reader.read(ctx.context, source_versions(session["inputs"]["rfp_document"])), budget_chars=self._context_chars)
+    def _rfp_pack(self, ctx: GenerationContext, session: Mapping[str, Any], *, budget_chars: int | None = None) -> ContextPack:
+        return build_pack(self._reader.read(ctx.context, source_versions(session["inputs"]["rfp_document"])), budget_chars=budget_chars or self._context_chars)
 
     def _scan_rfp(self, ctx: GenerationContext, session: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         """요구사항은 파일 전체를 구간별로 읽어 뽑는다."""
         versions = source_versions(session["inputs"]["rfp_document"])
         sources = self._reader.read(ctx.context, versions, max_chars_per_source=MAX_WINDOWS * self._context_chars)
         return scan_requirements(sources, self._llm, ctx.context, budget_chars=self._context_chars, progress=ctx.progress, cancel_check=ctx.cancel_check)
+
+    def _reference_sources(self, ctx: GenerationContext, template: AuthoringTemplate, session: Mapping[str, Any]) -> tuple[SourceText, ...]:
+        versions = reference_versions(template, session)
+        return self._reader.read(ctx.context, versions, require_body=True) if versions else ()
 
     # ------------------------------------------------------------------ 분석(요구사항 + 계획)
     def analyze(self, ctx: GenerationContext, session: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +217,7 @@ class AuthoringPipeline:
         """LLM이 이번 문서에 맞는 소목차를 정한다(K-3, K-4). 사람은 review 상태에서 확정한다."""
         requirements: list[dict[str, Any]] = []
         scan_warnings: list[str] = []
+        reference_sources = self._reference_sources(ctx, template, session)
         if template.analysis == "rfp_requirements":
             ctx.progress(15, "RFP 읽기")
             requirements = session["requirements"]
@@ -223,11 +228,15 @@ class AuthoringPipeline:
         goal = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         sections = "\n".join(f"- {s['key']}: {s['title']} ({s.get('guidance', '')})" for s in template.sections)
         pages = session.get("target_pages")
+        reference_outline = ""
+        if reference_sources:
+            sample = build_pack(reference_sources, budget_chars=self._context_chars // 2, focus=" ".join([*goal.values(), sections]))
+            reference_outline = f"\n[참고 문서 또는 기준 약관]\n{sample.render()}\n"
         prompt = StudioPrompt(system=OUTLINE_SYSTEM, user=(
             f"[요청] {session.get('request_text') or ''}\n[입력] {goal or '없음'}\n[목표 분량] {str(pages) + '페이지' if pages else '지정 없음'}\n"
             f"[템플릿 절. 이 절은 없앨 수 없고 key를 그대로 씁니다]\n{sections}\n"
             "[요구사항]\n" + ("\n".join(f"- {r['id']}: {r['text'][:120]}" for r in requirements[:60]) or "- 없음") +
-            "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요."),
+            reference_outline + "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요."),
             json_schema=OUTLINE_SCHEMA, max_output_tokens=2000, prompt_version="authoring-outline-v1", schema_name="authoring_outline")
         try:
             outline = self._llm.generate(ctx.context, prompt).data
@@ -275,12 +284,26 @@ class AuthoringPipeline:
             material.append(row)
         return material
 
-    def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack, knowledge: list[dict[str, Any]]) -> dict[str, Any]:
+    def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack,
+                    knowledge: list[dict[str, Any]], reference_pack: ContextPack | None = None) -> dict[str, Any]:
         if unit.get("material_approved"):
             kept = {item["ref"] for item in unit.get("material", [])}
             material = [row for row in knowledge if row["ref"] in kept]
         else:
             material = self._gather_unit(ctx, unit, knowledge)
+        reference_role = ""
+        reference_refs: list[str] = []
+        if reference_pack is not None:
+            refs = reference_pack.passages
+            if unit.get("material_approved"):
+                refs = tuple(p for p in refs if p.ref in kept)
+            reference_refs = [p.ref for p in refs]
+            if template.style == "terms":
+                reference_role = "\n[기준 약관 구간] 사용자 변경 요청을 반영하고 새 조건이나 수치를 임의로 정하지 마세요. 근거 라벨: "
+            else:
+                reference_role = "\n[기존 제안서 구간] 참고 자료입니다. 지난 고객명·가격·실적·일정을 이번 사업의 사실이나 RFP 요구로 옮기지 마세요. 근거 라벨: "
+            reference_role += ", ".join(reference_refs) or "없음"
+            pack = ContextPack(pack.passages + refs, pack.truncated or reference_pack.truncated, pack.total_sections + reference_pack.total_sections)
         done = [other for other in session["units"] if other["status"] in ("done", "needs_review") and other["key"] != unit["key"]]
         inputs = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         requirements = {r["id"]: r for r in session["requirements"]}
@@ -290,7 +313,7 @@ class AuthoringPipeline:
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         prompt = StudioPrompt(system=UNIT_SYSTEM, user=(
             f"[작성할 소목차] {unit['title']}\n[절] {unit['section_title']}\n[목적] {unit['purpose']}\n[목표 글자 수] 약 {unit['target_chars']}자\n"
-            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}\n\n"
+            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}\n\n"
             f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
             json_schema=UNIT_SCHEMA, max_output_tokens=min(1800, max(400, unit["target_chars"] * 2)), prompt_version="authoring-unit-v1", schema_name="authoring_unit")
         generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
@@ -327,10 +350,12 @@ class AuthoringPipeline:
         if not paragraphs:
             raise StudioError("STUDIO_VALIDATION_FAILED", 502)
         lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
+        compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
         return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
                 "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
                 "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
-                "warnings": list(warnings.items), "error_code": None, "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
+                "warnings": list(warnings.items), "error_code": None, **({"reference_refs": compared} if reference_pack is not None else {}),
+                "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
 
     @staticmethod
     def _written_chars(data: Mapping[str, Any]) -> int:
@@ -339,7 +364,10 @@ class AuthoringPipeline:
     def generate_units(self, ctx: GenerationContext, session: dict[str, Any]) -> GenerationResult:
         """소목차마다 묻고, 찾고, 쓰고, 검증하고, 저장한다. 멈췄다가도 저장소의 다음 미완료 소목차부터 이어진다(K-7)."""
         template = self._registry.get(session["template_id"], ctx.context.tenant_id, session.get("template_version"))
-        pack = self._rfp_pack(ctx, session) if template.source_input else ContextPack((), False, 0)
+        reference_sources = self._reference_sources(ctx, template, session)
+        pack = (self._rfp_pack(ctx, session, budget_chars=self._context_chars // 2 if reference_sources else None)
+                if template.source_input else ContextPack((), False, 0))
+        ref_offset = len(pack.passages)
         total = max(1, len(session["units"]))
         current = session
         provider: tuple[str, str, str] = ("", "", "")
@@ -350,12 +378,20 @@ class AuthoringPipeline:
                 continue
             ctx.progress(5 + int(85 * index / total), f"소목차 작성 {index + 1}/{total}: {unit['title']}")
             knowledge = copy.deepcopy(current.get("knowledge") or [])
+            reference_pack = None
+            if reference_sources:
+                reference_pack = build_pack(reference_sources, budget_chars=self._context_chars // 2,
+                                            focus=f"{unit['section_title']} {unit['title']} {unit['purpose']}", stable_ref_offset=ref_offset)
             try:
                 if current.get("confirm_material") and not unit.get("material_approved"):
                     rows = self._gather_unit(ctx, unit, knowledge)
-                    result = {"status": "material_review", "material": [{"ref": r["ref"], "heading": r["heading"], "page": r["page"], "text": r["text"][:300]} for r in rows], "error_code": None}
+                    review_rows = [{"ref": r["ref"], "heading": r["heading"], "page": r["page"], "text": r["text"][:300]} for r in rows]
+                    if reference_pack is not None:
+                        review_rows.extend({"ref": p.ref, "heading": p.heading or p.filename, "page": p.locator_value, "text": p.text[:300]}
+                                           for p in reference_pack.passages)
+                    result = {"status": "material_review", "material": review_rows, "error_code": None}
                 else:
-                    result = self._write_unit(ctx, current, template, unit, pack, knowledge)
+                    result = self._write_unit(ctx, current, template, unit, pack, knowledge, reference_pack)
                     provider = result.pop("provider")
             except (ExternalEvidenceError, StudioError) as error:
                 result = {"status": "failed", "error_code": getattr(error, "code", "STUDIO_JOB_PROCESSING_FAILED")}
@@ -366,7 +402,11 @@ class AuthoringPipeline:
                 return self._paused(current, result["status"])
         if any(unit["status"] == "failed" for unit in current["units"]):
             return self._paused(current, "unit_failed")
-        return self._finish_units(ctx, current, template, pack, provider)
+        references = None
+        if reference_sources:
+            references = build_pack(reference_sources, budget_chars=sum(len(section.text) for source in reference_sources for section in source.sections),
+                                    stable_ref_offset=ref_offset)
+        return self._finish_units(ctx, current, template, pack, provider, references)
 
     def _save_unit(self, ctx: GenerationContext, session: dict[str, Any], key: str, result: Mapping[str, Any], knowledge: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         def merge(content: dict[str, Any]) -> dict[str, Any]:
@@ -400,7 +440,8 @@ class AuthoringPipeline:
             return {**base, "status": "skipped", "reason": "knowledge_unavailable"}
         return term_consistency(sections, concepts) if concepts else {**base, "status": "skipped", "reason": "no_approved_concepts"}
 
-    def _finish_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate, pack: ContextPack, provider: tuple[str, str, str]) -> GenerationResult:
+    def _finish_units(self, ctx: GenerationContext, session: dict[str, Any], template: AuthoringTemplate, pack: ContextPack, provider: tuple[str, str, str],
+                      references: ContextPack | None = None) -> GenerationResult:
         ctx.progress(92, "점검")
         knowledge = session.get("knowledge") or []
         document_sections = [{"key": u["key"], "title": u["title"], "paragraphs": u["paragraphs"], "open_items": u["open_items"]} for u in session["units"]]
@@ -409,6 +450,11 @@ class AuthoringPipeline:
             by_section.setdefault(unit["section_key"], {"key": unit["section_key"], "paragraphs": []})["paragraphs"] += unit["paragraphs"]
         coverage = self.coverage(session["requirements"], session["plan"], list(by_section.values())) if template.analysis == "rfp_requirements" else []
         checks: list[dict[str, Any]] = []
+        if references is not None:
+            if template.style == "terms":
+                checks.append(self._compare_terms(session, document_sections, references))
+            pack = ContextPack(pack.passages + references.passages, pack.truncated or references.truncated,
+                               pack.total_sections + references.total_sections)
         if coverage:
             checks.append({"id": "rfp_requirement_coverage", "title": "요구사항 대응표", "status": "done", "summary": {s: sum(1 for c in coverage if c["status"] == s) for s in ("covered", "partial", "missing")}})
         checks.append(self.ruleset(ctx, template, document_sections))
@@ -419,12 +465,45 @@ class AuthoringPipeline:
         warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]
         open_items = list(dict.fromkeys(item for unit in session["units"] for item in unit["open_items"]))
         final = transition(session, "completed")
-        final["document"] = {"template_id": template.template_id, "title": f"{template.title} 초안", "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
+        final["document"] = {"template_id": template.template_id, "analysis": template.analysis, "title": f"{template.title} 초안",
+                             "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
                              "checks": checks, "assumptions": session["assumptions"], "open_items": open_items, "notice": NOTICES[template.style], "style": template.style}
         used = [ref for unit in session["units"] for p in unit["paragraphs"] for ref in p["refs"]]
-        sources = [{"source_version_id": version} for version in source_versions(session["inputs"][template.source_input])] if template.source_input else []
+        if references is not None and template.style == "terms":
+            used.extend(ref for unit in session["units"] for ref in unit.get("reference_refs", []))
+        sources = [{"source_version_id": version} for version in generation_versions(template, session)]
         return GenerationResult(content={**final, "language": "ko", "warnings": warnings}, warnings=warnings, sources=sources, evidence=evidence_for(used, pack, knowledge),
                                 generated_with={"provider": provider[0], "model": provider[1], "connection": provider[2], "prompt_version": "authoring-unit-v1"})
+
+    @staticmethod
+    def _compare_terms(session: Mapping[str, Any], sections: list[dict[str, Any]], references: ContextPack) -> dict[str, Any]:
+        """작성에 제공된 조문만 비교하고, 처리하지 못한 범위는 삭제 제안에서 뺀다."""
+        consulted = {ref for unit in session["units"] for ref in unit.get("reference_refs", [])}
+        base_sentences = list(dict.fromkeys(
+            sentence for passage in references.passages if passage.ref in consulted
+            for sentence in split_sentences(passage.text.removeprefix(f"{passage.heading}\n") if passage.heading else passage.text)
+        ))
+        paragraphs = [paragraph for section in sections for paragraph in section["paragraphs"]]
+        if not base_sentences:
+            return {"id": "terms_change_summary", "title": "기준 약관 대비 변경 요약", "status": "skipped", "reason": "기준 약관 미비교"}
+        planned_chapters = {s["key"]: normalize(s["title"]) for s in (session.get("plan") or {}).get("sections", [])}
+        chapter_refs: dict[str, set[str]] = {}
+        for unit in session["units"]:
+            chapter = planned_chapters.get(unit.get("section_key"))
+            if chapter:
+                chapter_refs.setdefault(chapter, set()).update(unit.get("reference_refs", []))
+        deletions = scoped_deletion_candidates(references.passages, chapter_refs)
+        diffs, removed = tag_section([p["text"] for p in paragraphs], base_sentences, exact_unchanged=True, deletion_candidates=deletions)
+        cursor = 0
+        for section in sections:
+            size = len(section["paragraphs"])
+            section["paragraphs"] = [{**paragraph, "diff": diff} for paragraph, diff in zip(section["paragraphs"], diffs[cursor:cursor + size], strict=True)]
+            cursor += size
+        if removed and sections:
+            sections[-1]["delete_suggested"] = removed
+        return {"id": "terms_change_summary", "title": "기준 약관 대비 변경 요약", "status": "done",
+                "summary": summarize(sections), "uncompared_passages": len(references.passages) - len(consulted),
+                "source_truncated": references.truncated}
 
     @staticmethod
     def _plan_from_template(template: AuthoringTemplate, knowledge: Sequence[Mapping[str, Any]], previous: Mapping[str, Any] | None) -> dict[str, Any]:

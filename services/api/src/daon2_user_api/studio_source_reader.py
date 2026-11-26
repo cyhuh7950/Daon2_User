@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from .authorization import Action
 from .cloud_storage import CloudAccessContext
 from .studio_workspace import StudioContext, StudioError
 
@@ -21,7 +23,7 @@ _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
 class SourceSection:
     source_version_id: str
     evidence_span_id: str | None
-    locator_kind: str      # 'page' | 'section'
+    locator_kind: str      # 'page' | 'section' | 'docx_block'
     locator_value: str
     heading: str | None
     text: str
@@ -103,13 +105,16 @@ def split_sections(source_version_id: str, parser: Mapping[str, object], *, max_
 
 
 class StudioSourceReader:
-    def __init__(self, cloud_store) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, cloud_store, *, object_storage=None) -> None:  # type: ignore[no-untyped-def]
         self._store = cloud_store
+        self._storage = object_storage
 
-    def read(self, context: StudioContext, source_version_ids: Sequence[str], *, max_chars_per_source: int = 120_000) -> tuple[SourceText, ...]:
+    def read(self, context: StudioContext, source_version_ids: Sequence[str], *, max_chars_per_source: int = 120_000,
+             require_body: bool = False, action: Action = Action.GENERATE, connection=None) -> tuple[SourceText, ...]:  # type: ignore[no-untyped-def]
         result: list[SourceText] = []
         scope = CloudAccessContext(context.tenant_id, context.workspace_id, context.actor_id, "studio.v2.read")
-        with self._store._transaction(scope) as connection:
+        transaction = self._store._transaction(scope) if connection is None else nullcontext(connection)
+        with transaction as connection:
             for version_id in source_version_ids:
                 row = connection.execute(
                     "SELECT sv.source_id,COALESCE(sv.canonical_json->>'filename',s.canonical_json->>'filename',sv.record_id),"
@@ -121,6 +126,8 @@ class StudioSourceReader:
                     "AND d.source_id=sv.source_id AND d.source_active=false)",
                     (context.tenant_id, context.workspace_id, version_id)).fetchone()
                 if row is None:
+                    if require_body:
+                        raise StudioError("AUTHORING_REFERENCE_UNAVAILABLE", 409)
                     continue
                 spans = {}
                 for span_id, canonical in connection.execute(
@@ -131,6 +138,10 @@ class StudioSourceReader:
                         spans[page] = str(span_id)
                 parser = row[2] if isinstance(row[2], dict) else {}
                 sections, truncated = split_sections(version_id, parser, max_chars=max_chars_per_source, spans_by_page=spans)
+                if require_body and not sections and str(row[1]).lower().endswith(".docx"):
+                    sections, truncated = self._docx_sections(context, version_id, max_chars_per_source, action, connection)
+                if require_body and not sections:
+                    raise StudioError("AUTHORING_REFERENCE_UNAVAILABLE", 409)
                 if not sections:
                     # 본문이 없으면 근거 구간 텍스트라도 쓴다(색인 핵심 사실).
                     for span_id, canonical in connection.execute(
@@ -145,9 +156,35 @@ class StudioSourceReader:
             raise StudioError("STUDIO_NO_READY_SOURCE", 409)
         return tuple(result)
 
+    def _docx_sections(self, context: StudioContext, version_id: str, max_chars: int, action: Action,
+                       connection) -> tuple[list[SourceSection], bool]:  # type: ignore[no-untyped-def]
+        from .docx_source import encode_docx_block, read_docx
+        from .source_ingest import SourceRejected
+        from .studio_original_reader import StudioOriginalReader
+
+        if self._storage is None:
+            raise StudioError("AUTHORING_REFERENCE_UNAVAILABLE", 409)
+        try:
+            original = StudioOriginalReader(self._store, self._storage).read_docx(context, version_id, action=action, connection=connection)
+            document = read_docx(original)
+        except SourceRejected:
+            raise StudioError("AUTHORING_REFERENCE_UNAVAILABLE", 409) from None
+        sections: list[SourceSection] = []
+        total = 0
+        for block in document.blocks:
+            body = block["text"]
+            if not body.strip():
+                continue
+            if total + len(body) > max_chars:
+                return sections, True
+            locator = encode_docx_block(block["block_id"], 0, len(body))
+            sections.append(SourceSection(version_id, None, "docx_block", locator, None, body))
+            total += len(body)
+        return sections, False
+
     def read_section(self, context: StudioContext, source_version_id: str, locator_kind: str, locator_value: str) -> tuple[str, str] | None:
         """(파일명, 본문) — 근거 보기에서 span이 없는 로케이터를 다시 찾는다."""
-        for source in self.read(context, [source_version_id]):
+        for source in self.read(context, [source_version_id], require_body=locator_kind == "docx_block", action=Action.VIEW):
             matches = [s.text for s in source.sections if s.locator_kind == locator_kind and s.locator_value == locator_value]
             if matches:
                 return source.filename, "\n\n".join(matches)

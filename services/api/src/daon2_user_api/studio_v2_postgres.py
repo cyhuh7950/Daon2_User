@@ -116,8 +116,9 @@ READY_SOURCE_VERSIONS_SQL = (
 
 
 class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
-    def __init__(self, cloud_store, *, clock=None) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, cloud_store, *, clock=None, object_storage=None) -> None:  # type: ignore[no-untyped-def]
         self._cloud_store = cloud_store
+        self._object_storage = object_storage
         self._scope = PostgresStudioWorkspaceRepository(None)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -528,12 +529,14 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
         return {"output_id": output_id, "replayed": False}
 
     def authoring_apply(self, context: StudioContext, output_id: str, expected_revision: int, mutate, *, enqueue_step: str | None = None,  # type: ignore[no-untyped-def]
-                        source_version_ids: Sequence[str] = (), connection=None, generated_with: Mapping[str, object] | None = None) -> dict[str, object]:
+                        source_version_ids: Sequence[str] = (), reference_version_ids: Sequence[str] = (),
+                        connection=None, generated_with: Mapping[str, object] | None = None) -> dict[str, object]:
         """세션 최신 리비전을 읽어 mutate(content)로 새 리비전을 쌓고, 필요하면 같은 트랜잭션에서 작업을 등록한다."""
         notebook_id = self._require_notebook(context)
         if connection is None:
             with self._cloud_store._transaction(self._cloud(context, "studio.v2.write")) as inner:
-                return self.authoring_apply(context, output_id, expected_revision, mutate, enqueue_step=enqueue_step, source_version_ids=source_version_ids, connection=inner, generated_with=generated_with)
+                return self.authoring_apply(context, output_id, expected_revision, mutate, enqueue_step=enqueue_step, source_version_ids=source_version_ids,
+                                            reference_version_ids=reference_version_ids, connection=inner, generated_with=generated_with)
         row = self._owned_output(connection, context, output_id, lock=True)
         if row[1] != "authored_document":
             raise StudioError("RESOURCE_UNAVAILABLE", 404)
@@ -546,8 +549,16 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
             (context.tenant_id, context.workspace_id, output_id, expected_revision)).fetchone()
         import copy as _copy
         content = mutate(_copy.deepcopy(current[0]))
-        if enqueue_step is not None and source_version_ids:
-            self.require_scope(connection, context, list(source_version_ids))
+        scoped_versions = source_version_ids if enqueue_step is not None else reference_version_ids
+        if scoped_versions:
+            self.require_scope(connection, context, list(scoped_versions))
+        if reference_version_ids:
+            from .studio_source_reader import StudioSourceReader
+
+            if not set(reference_version_ids) <= set(self.ready_source_versions(connection, context)):
+                raise StudioError("AUTHORING_REFERENCE_UNAVAILABLE", 409)
+            StudioSourceReader(self._cloud_store, object_storage=self._object_storage).read(
+                context, reference_version_ids, max_chars_per_source=4000, require_body=True, connection=connection)
         number = self.add_revision(context, output_id, "user_edit", content, generated_with=generated_with, connection=connection)
         if enqueue_step is not None:
             connection.execute("UPDATE studio_v2_outputs SET status='queued',error_code=NULL,source_version_ids=%s,updated_at=now() WHERE tenant_id=%s AND workspace_id=%s AND output_id=%s",
@@ -578,7 +589,10 @@ class PostgresStudioV2Repository(StudioV2EditTurnsMixin):
                                      (context.tenant_id, context.workspace_id, output_id, row[8])).fetchone()
         if rev is None:
             raise StudioError("RESOURCE_UNAVAILABLE", 404)
-        return int(row[8]), str(row[4]), rev[0]
+        content = rev[0]
+        if row[4] == "failed" and row[5] and content.get("schema") == "studio.authoring_session.v1":
+            content = {**content, "error_code": row[5]}
+        return int(row[8]), str(row[4]), content
 
     def provenance(self, context: StudioContext, output_id: str, revision: int | None = None) -> dict[str, object]:
         """설계서 §6.5.2. 시스템 프롬프트 원문과 generated_with는 포함하지 않는다."""

@@ -396,6 +396,7 @@ export function StudioPanel({ studio, sourceStats = {}, sources = [], checkedSou
     </header>
     {state.error && <p className="studio-alert" role="alert">{studioErrorMessage(state.error)} <button type="button" className="studio-btn" onClick={() => dispatch({ type: "ERROR_CLEARED" })}>{msg("studio.dialog.close")}</button></p>}
     {authoringOpen ? <AuthoringWizard studio={studio} sources={sources} outputId={authoringOpen.outputId} onChanged={() => reload().catch(() => {})}
+      onOpenEvidence={(outputId, revision, ref) => openEvidence({ output_id: outputId, current_revision: revision }, ref)}
       onClose={() => { setAuthoringOpen(null); reload().catch(() => {}); }} /> : selected ? <Detail key={selected} studio={studio} outputId={selected} canEdit={canEdit} onMemoSourceChanged={onMemoSourceChanged} onOutlineConfirmed={outlineConfirmed} onDiscoveryAdded={onDiscoveryAdded} onBack={() => { dispatch({ type: "SELECT", outputId: null }); reload().catch(() => {}); }}
       onOpenEvidence={openEvidence} onAskAboutNode={onAskAboutNode} onError={(code) => dispatch({ type: "ERROR", code })} /> : <>
       <div className="studio-v2-tiles" role="group" aria-label={msg("studio.create_group")}>

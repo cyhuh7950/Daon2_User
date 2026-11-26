@@ -56,6 +56,7 @@ async function mount(studio, props = {}) {
 }
 
 const text = (v) => v.container.textContent;
+const reactProps = (node) => node[Object.keys(node).find((key) => key.startsWith("__reactProps"))];
 
 test("템플릿 선택 → 세션 생성 → 필수 질문(소스 선택)이 보인다", async () => {
   const studio = fakeStudio([{ ...base, state: "collecting", pending_questions: REQUIRED, requests: [{ request: "select_source", key: "rfp_document" }] }]);
@@ -91,6 +92,50 @@ test("제안요청서를 여러 파일 고를 수 있고 고른 파일이 모두
     await view.flush();
     const [, input] = studio.calls.find((c) => c[0] === "answer");
     assert.deepEqual(input.answers, [{ key: "rfp_document", source_version_ids: ["sv-b", "sv-a"] }]);
+  } finally { await view.close(); }
+});
+
+for (const [name, key, inputs, maxSources] of [
+  ["기존 제안서로 새 제안서", "reference_proposals", {}, undefined],
+  ["RFP와 참고 제안서", "reference_proposals", { rfp_document: { source_version_ids: ["sv-first"] } }, undefined],
+  ["기준 약관 한 건", "base_terms", {}, 1],
+]) {
+  test(`${name} 선택을 버전으로 보낸다`, async () => {
+    const session = { ...base, state: "collecting", inputs, pending_questions: [{ key, kind: "source_ref",
+      question: name, required: true, max_sources: maxSources }] };
+    const studio = fakeStudio([session, session, { ...session, state: "review", pending_questions: [],
+      inputs: { ...inputs, [key]: { source_version_ids: ["sv-second"] } } }]);
+    const sources = [{ sourceVersionId: "sv-first", filename: "첫 문서.pdf", ready: true },
+      { sourceVersionId: "sv-second", filename: "둘째 문서.docx", ready: true }];
+    const view = await mount(studio, { outputId: OID, sources });
+    try {
+      await view.flush();
+      const picks = findElements(view.container, (node) => node.tagName === "INPUT");
+      const [first, second] = picks.map(reactProps);
+      if (inputs.rfp_document) assert.equal(first.disabled, true);
+      if (maxSources === 1) {
+        assert.equal(first.type, "radio");
+        await view.act(async () => first.onChange());
+      }
+      await view.act(async () => second.onChange());
+      const form = findElements(view.container, (node) => node.tagName === "FORM")[0];
+      await view.act(async () => reactProps(form).onSubmit({ preventDefault() {} }));
+      await view.flush();
+      assert.deepEqual(studio.calls.find(([action]) => action === "answer")[1].answers, [{ key, source_version_ids: ["sv-second"] }]);
+      assert.match(text(view), /둘째 문서\.docx/u);
+    } finally { await view.close(); }
+  });
+}
+
+test("작성 결과의 근거를 현재 리비전으로 연다", async () => {
+  const clicked = [];
+  const document = { ...DOCUMENT, analysis: "base_document" };
+  const studio = fakeStudio([{ ...base, state: "completed", revision_no: 9, document }]);
+  const view = await mount(studio, { outputId: OID, onOpenEvidence: (...args) => clicked.push(args) });
+  try {
+    await view.flush();
+    await view.click(buttonByText(view.container, "[S1]"));
+    assert.deepEqual(clicked, [[OID, 9, "S1"]]);
   } finally { await view.close(); }
 });
 

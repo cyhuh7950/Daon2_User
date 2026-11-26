@@ -4518,7 +4518,8 @@
             "type": "array"
           },
           "pending_questions": {
-            "type": "array"
+            "type": "array",
+            "description": "노트북 소스 선택 질문의 kind는 source_ref이다. 기준 약관 질문은 max_sources=1을 함께 반환한다."
           },
           "requests": {
             "type": "array"
@@ -4563,7 +4564,8 @@
           },
           "answers": {
             "type": "array",
-            "maxItems": 10
+            "maxItems": 10,
+            "description": "소스 답변은 key와 source_version_ids를 보낸다. rfp_document는 제안요청서, reference_proposals는 기존 제안서, base_terms는 기준 약관 한 건이다. 기존 knowledge_ref 답변은 해당 템플릿·세션에서 계속 지원한다."
           },
           "skip_remaining": {
             "type": "boolean"

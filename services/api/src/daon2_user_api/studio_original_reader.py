@@ -1,4 +1,4 @@
-"""Studio 원본 파일 리더(WO-N9 데이터 집계). 노트북에 연결된 활성 소스 판의 XLSX·CSV 원본만 읽는다.
+"""Studio 원본 파일 리더. 노트북에 연결된 활성 소스 판의 원본을 읽는다.
 
 질문 답변의 원본 읽기(question_answering_postgres: ObjectKeyPolicy.validate_final, 크기·sha256 확인)와
 StudioSourceReader의 범위(조직·워크스페이스, 삭제된 소스 제외)를 따른다. 노트북 연결·권한 검사는
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import nullcontext
 
 from .authorization import Action
 from .cloud_storage import CloudAccessContext
@@ -19,6 +20,7 @@ from .table_reader import TableLimits
 XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 CSV_CONTENT_TYPE = "text/csv"
 _FORMATS = {".xlsx": ("xlsx", XLSX_CONTENT_TYPE), ".csv": ("csv", CSV_CONTENT_TYPE)}
+_DOCX = {".docx": ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 
 _ORIGINAL_SQL = (
@@ -48,12 +50,20 @@ class StudioOriginalReader:
 
     def read(self, context: StudioContext, source_version_id: str, *, action: Action = Action.GENERATE) -> tuple[bytes, str, str, str]:
         """(content, file_name, source_format, sha256). 그 노트북·워크스페이스의 활성 소스 판만 읽는다."""
+        return self._read(context, source_version_id, _FORMATS, self._limits.max_bytes, "TABLE_TOO_LARGE", action)
+
+    def read_docx(self, context: StudioContext, source_version_id: str, *, action: Action, connection=None) -> bytes:  # type: ignore[no-untyped-def]
+        return self._read(context, source_version_id, _DOCX, 32 * 1024 * 1024, "STUDIO_SOURCE_TOO_LARGE", action, connection)[0]
+
+    def _read(self, context: StudioContext, source_version_id: str, formats: dict[str, tuple[str, str]], byte_limit: int,
+              size_error: str, action: Action, connection=None) -> tuple[bytes, str, str, str]:  # type: ignore[no-untyped-def]
         if context.notebook_id is None:
             raise StudioError("NOTEBOOK_SCOPE_REQUIRED", 400)
         if not isinstance(source_version_id, str) or not _SAFE_ID.fullmatch(source_version_id):
             raise StudioError("STUDIO_INPUT_INVALID", 400)
         scope = CloudAccessContext(context.tenant_id, context.workspace_id, context.actor_id, "studio.v2.read")
-        with self._store._transaction(scope) as connection:
+        transaction = self._store._transaction(scope) if connection is None else nullcontext(connection)
+        with transaction as connection:
             # 노트북 연결·현재 권한·소스 접근 거부·노트북 삭제를 생성 범위 검사와 같은 규칙으로 확인한다.
             self._scope._require_generation_scope(connection, context, (source_version_id,), action=action)
             row = connection.execute(_ORIGINAL_SQL, (context.tenant_id, context.workspace_id, source_version_id,
@@ -62,11 +72,11 @@ class StudioOriginalReader:
             raise StudioError("STUDIO_SOURCE_UNAVAILABLE", 409)
         file_name, object_key, digest, byte_size, content_type = str(row[0] or ""), str(row[1]), str(row[2]), int(row[3]), str(row[4] or "")
         suffix = file_name.lower()[file_name.rfind("."):] if "." in file_name else ""
-        fmt = _FORMATS.get(suffix)
+        fmt = formats.get(suffix)
         if fmt is None or content_type.split(";", 1)[0].strip().lower() != fmt[1]:
             raise StudioError("STUDIO_INPUT_INVALID", 400)
-        if byte_size > self._limits.max_bytes:
-            raise StudioError("TABLE_TOO_LARGE", 422)  # 받기 전에 거부해 메모리를 아낀다
+        if byte_size > byte_limit:
+            raise StudioError(size_error, 422)  # 받기 전에 거부해 메모리를 아낀다
         try:
             ObjectKeyPolicy().validate_final(CloudAccessContext(context.tenant_id, context.workspace_id, context.actor_id, "object.read"),
                                              "source", object_key)
