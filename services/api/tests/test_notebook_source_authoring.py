@@ -335,6 +335,20 @@ def test_terms_body_repair_is_checked_before_completing(writing):
                for unit in completed["units"] for p in unit["paragraphs"])
 
 
+def test_terms_review_accepts_only_matching_words_when_the_model_flattens_whitespace():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    original = "제13조 청구 결과\n인편으로 전달한다."
+    context = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": [
+        {"unit_key": "payment-1", "quote": "제13조 청구 결과 인편으로 전달한다.", "reason": "삭제 요청과 충돌"},
+    ]}))
+    units = [{"key": "payment-1", "section_title": "보험금의 지급", "title": "청구 결과",
+              "paragraphs": [{"text": original}]}]
+    issues = review_terms_body(context, model, changes="인편 전달을 삭제한다.", units=units, context_chars=10000)
+    assert issues == [{"unit_key": "payment-1", "quote": original, "reason": "삭제 요청과 충돌"}]
+
+
 def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):
     client, repo, model, worker = writing
     model.review_unavailable = True

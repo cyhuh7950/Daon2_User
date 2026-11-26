@@ -30,8 +30,10 @@ const LABELS = {
   Notifications: "Notifications"
 };
 
-function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings }) {
-  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} providerSettings={providerSettings} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
+function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings, onLogout }) {
+  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} providerSettings={providerSettings}
+    onLogout={onLogout} onSettingsNavigate={openWebSettings}
+    state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
 }
 
 const WEB_SETTINGS = Object.freeze({
@@ -51,6 +53,12 @@ const WEB_ROUTES = Object.freeze({
   Notifications: ["/notifications", "알림"],
 });
 
+function openWebSettings(path) {
+  if (Object.values(WEB_SETTINGS).some(([destination]) => destination === path)) {
+    window.open("https://daon2-user.sinsan.kr" + path, "_blank", "noopener,noreferrer");
+  }
+}
+
 function WebSettingsLink({ destination, onClose }) {
   const [path, label] = destination;
   return <section className="desktop-safe-surface" aria-label={label}>
@@ -60,9 +68,9 @@ function WebSettingsLink({ destination, onClose }) {
   </section>;
 }
 
-function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings }) {
+function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings, onLogout }) {
   if (routeKey === "WorkspaceDetail") {
-    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} providerSettings={providerSettings} />;
+    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} providerSettings={providerSettings} onLogout={onLogout} />;
   }
   const destination = WEB_ROUTES[routeKey];
   return destination ? <WebSettingsLink destination={destination} /> : null;
@@ -439,7 +447,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
       <div className="desktop-content" inert={activeModal ? "" : undefined} aria-hidden={activeModal ? "true" : undefined}>
         {routes.map((route) => (
             <section key={route.key} hidden={route.key !== activeKey} aria-label={LABELS[route.key]}>
-              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} providerSettings={providerApi ? <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} embedded /> : null} />
+              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} providerSettings={providerApi ? <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} embedded /> : null} onLogout={logout} />
             </section>
         ))}
       </div>

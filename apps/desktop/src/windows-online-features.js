@@ -1,4 +1,7 @@
 import { createProviderSettingsApi } from "../../web/lib/provider-settings-api.js";
+import { getWorkspaceOperationsStatus, getWorkspaceOutputVersionSettings, issueStudioStepUp, saveWorkspaceOutputVersionSettings } from "../../web/lib/product-workspace-api.js";
+import { getEffectiveEgressPolicy } from "../../web/lib/egress-policy-api.js";
+import { approveWorkspaceSyncOperation, listWorkspaceSyncOperations } from "../../web/lib/sync-approval-settings-api.js";
 import { createStudioV2Adapter } from "../../web/lib/studio-v2-adapter.js";
 import { askGroundedQuestion, authorizeGroundedQuestion, citationContentUrl } from "../../web/lib/question-answering-api.js";
 import { downloadManualAsset, getManualManifest, readManualDocument } from "../../web/lib/manual-api.js";
@@ -51,6 +54,13 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
   const citationResponse = (citation, { signal } = {}) => fetchImpl(citationUrl(citation).split("#", 1)[0], { signal });
   return {
     providerSettings: createProviderSettingsApi(fetchImpl),
+    getOperationsStatus: (options) => getWorkspaceOperationsStatus(workspaceId, { ...options, fetchImpl }),
+    getOutputVersionSettings: (options) => getWorkspaceOutputVersionSettings(workspaceId, { ...options, fetchImpl }),
+    saveOutputVersionSettings: (settings, options) => saveWorkspaceOutputVersionSettings(workspaceId, settings, { ...options, fetchImpl }),
+    getEgressPolicy: (options) => getEffectiveEgressPolicy({ ...options, workspaceId, fetchImpl }).then(result => result.data),
+    listSyncOperations: (options) => listWorkspaceSyncOperations(workspaceId, { ...options, fetchImpl }),
+    approveSyncOperation: (operation, input, options) => approveWorkspaceSyncOperation(workspaceId, operation, input, { ...options, fetchImpl }),
+    issueStudioStepUp: (group, target, password, options) => issueStudioStepUp(group, target, password, { ...options, fetchImpl }),
     studioV2: createStudioV2Adapter(workspaceId, notebookId, { fetchImpl }),
     askQuestion: (input, options) => askGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),
     authorizeQuestion: (input, options) => authorizeGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),

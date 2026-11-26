@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
@@ -72,7 +73,14 @@ def review_terms_body(ctx: GenerationContext, llm: StudioTextGenerator, *, chang
             if not isinstance(item, Mapping) or not all(isinstance(item.get(key), str) for key in ("unit_key", "quote", "reason")):
                 raise StudioError("STUDIO_VALIDATION_FAILED", 502)
             key, quote, reason = item["unit_key"], item["quote"].strip(), item["reason"].strip()
-            if not quote or not reason or not any(row["unit_key"] == key and quote in row["text"] for row in batch):
+            if not quote or not reason:
                 raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-            issues.setdefault(key, {"unit_key": key, "quote": quote[:600], "reason": reason[:300]})
+            # 모델이 편집기 줄바꿈을 공백으로 바꿔 인용할 수 있다. 같은 문단과 같은 단어만 인정하고,
+            # 화면과 후속 재작성에는 저장된 원문의 실제 문자열을 제공한다.
+            pattern = re.compile(r"\s+".join(re.escape(part) for part in quote.split()))
+            original = next((match.group(0) for row in batch if row["unit_key"] == key
+                             and (match := pattern.search(row["text"])) is not None), None)
+            if original is None:
+                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+            issues.setdefault(key, {"unit_key": key, "quote": original[:600], "reason": reason[:300]})
     return list(issues.values())

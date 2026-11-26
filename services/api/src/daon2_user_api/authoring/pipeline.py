@@ -440,7 +440,7 @@ class AuthoringPipeline:
         issues_by_key = {issue["unit_key"]: issue for issue in issues}
         for unit in current["units"]:
             issue = issues_by_key.get(unit["key"])
-            if issue is None:
+            if issue is None or unit.get("locked"):
                 continue
             ctx.cancel_check()
             if current.get("pause_requested"):

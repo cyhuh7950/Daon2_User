@@ -65,8 +65,11 @@ impl NotebookRequest {
                 *ws == workspace && *nb == notebook && query.is_empty() && self.method == "GET"
             }
             ["session"] => self.method == "GET" && query.is_empty(),
-            ["workspaces", ws, "model-defaults"] => *ws == workspace && query.is_empty()
+            ["workspaces", ws, "model-defaults" | "output-version-settings"] => *ws == workspace && query.is_empty()
                 && matches!(self.method.as_str(), "GET" | "PATCH"),
+            ["workspaces", ws, "egress-policy" | "sync-operations"] => *ws == workspace && query.is_empty() && self.method == "GET",
+            ["workspaces", ws, "operations", "status"] => *ws == workspace && self.method == "GET",
+            ["sync-operations", _, "approve"] => self.method == "POST" && query.is_empty(),
             ["provider-credentials"] => self.method == "GET" && query.is_empty(),
             ["admin", "provider-connections", "test" | "model-preview"] if self.method == "POST" => query.is_empty(),
             ["provider-credentials", _] | ["admin", "provider-connections", _] => query.is_empty()
@@ -81,7 +84,8 @@ impl NotebookRequest {
             ["knowledge-connectors"] | ["knowledge-connectors", _, "documents"] => self.method == "GET",
             ["session", "step-up"] => self.method == "POST" && query.is_empty()
                 && self.body.as_ref().and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
-                    .as_ref().and_then(|value| value.get("action_group")).and_then(serde_json::Value::as_str) == Some("studio_export_download"),
+                    .as_ref().and_then(|value| value.get("action_group")).and_then(serde_json::Value::as_str)
+                    .is_some_and(|group| matches!(group, "studio_export_download" | "data_area_move")),
             _ => false,
         }
     }

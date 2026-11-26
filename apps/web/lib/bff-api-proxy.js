@@ -1113,10 +1113,13 @@ const NATIVE_STUDIO_MEDIA = [
 ];
 
 function nativeNotebookRoute(method, segments) {
-  const scopedModel = segments.length === 3 && segments[0] === "workspaces" && segments[2] === "model-defaults";
+  const workspaceSettings = segments[0] === "workspaces" && (
+    (segments.length === 3 && ["model-defaults", "output-version-settings", "egress-policy", "sync-operations"].includes(segments[2]))
+    || (segments.length === 4 && segments[2] === "operations" && segments[3] === "status"));
+  const syncApproval = segments.length === 3 && segments[0] === "sync-operations" && segments[2] === "approve";
   const providerRoute = segments[0] === "provider-credentials" || (segments[0] === "admin"
     && ["provider-connections", "provider-health-settings", "provider-catalog", "provider-models", "model-reasoning"].includes(segments[1]));
-  if (scopedModel || providerRoute) return routeFor(method, segments);
+  if (workspaceSettings || syncApproval || providerRoute) return routeFor(method, segments);
   if (segments[0] === "workspaces" && segments[2] === "notebooks" && NATIVE_NOTEBOOK_FEATURES.has(segments[4])) {
     return routeFor(method, segments);
   }
