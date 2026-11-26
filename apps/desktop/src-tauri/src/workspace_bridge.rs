@@ -393,11 +393,41 @@ pub struct WorkspaceSource {
     pub source_state: String,
     pub processing_state: String,
     pub job_state: String,
+    // 서버가 붙일 수 있는 선택 키(WO-N9 집계 전용, NB1-F2 메모 출처, 안전한 오류 코드). 없으면 None, 내보낼 때도 뺀다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggregation_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memo_origin: Option<WorkspaceMemoOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub safe_error_code: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceMemoOrigin {
+    pub memo_output_id: String,
+    pub memo_exists: bool,
+}
+
+fn valid_memo_output_id(value: &str) -> bool {
+    value.len() == 36
+        && value.starts_with("sv2-")
+        && value[4..].bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn valid_source_error_code(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (3..=64).contains(&bytes.len())
+        && bytes[0].is_ascii_uppercase()
+        && bytes.iter().all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
 }
 
 impl WorkspaceSource {
     fn valid(&self) -> bool {
-        valid_id(&self.source_id)
+        self.aggregation_only.map_or(true, |flag| flag)
+            && self.memo_origin.as_ref().map_or(true, |origin| valid_memo_output_id(&origin.memo_output_id))
+            && self.safe_error_code.as_deref().map_or(true, valid_source_error_code)
+            && valid_id(&self.source_id)
             && valid_id(&self.source_version_id)
             && valid_filename(&self.filename)
             && matches!(
@@ -1376,5 +1406,35 @@ mod tests {
             code: "INTERNAL_DECISION".into(), action: "unsafe".into(),
         });
         assert!(!invalid_warning.valid());
+    }
+
+    #[test]
+    fn source_accepts_optional_projection_keys() {
+        let base = r#""source_id":"source-1","source_version_id":"version-1","filename":"a.pdf","source_state":"ready","processing_state":"completed","job_state":"completed""#;
+        let plain: WorkspaceSource = serde_json::from_str(&format!("{{{base}}}")).unwrap();
+        assert!(plain.valid());
+        assert!(serde_json::to_string(&plain).unwrap().find("aggregation_only").is_none());
+        let full: WorkspaceSource = serde_json::from_str(&format!(
+            r#"{{{base},"aggregation_only":true,"memo_origin":{{"memo_output_id":"sv2-{}","memo_exists":false}},"safe_error_code":"XLSX_LIMIT"}}"#,
+            "a".repeat(32)
+        ))
+        .unwrap();
+        assert!(full.valid());
+        let null_code: WorkspaceSource = serde_json::from_str(&format!(r#"{{{base},"safe_error_code":null}}"#)).unwrap();
+        assert!(null_code.valid());
+        for invalid in [
+            format!(r#"{{{base},"aggregation_only":false}}"#),
+            format!(r#"{{{base},"memo_origin":{{"memo_output_id":"memo-1","memo_exists":true}}}}"#),
+            format!(r#"{{{base},"safe_error_code":"lower"}}"#),
+        ] {
+            let source: WorkspaceSource = serde_json::from_str(&invalid).unwrap();
+            assert!(!source.valid(), "{invalid}");
+        }
+        assert!(serde_json::from_str::<WorkspaceSource>(&format!(r#"{{{base},"website":{{}}}}"#)).is_err());
+        assert!(serde_json::from_str::<WorkspaceSource>(&format!(
+            r#"{{{base},"memo_origin":{{"memo_output_id":"sv2-{}","memo_exists":true,"extra":1}}}}"#,
+            "a".repeat(32)
+        ))
+        .is_err());
     }
 }

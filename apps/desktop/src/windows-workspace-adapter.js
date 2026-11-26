@@ -25,6 +25,25 @@ function exact(value, keys) {
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
+const SOURCE_KEYS = ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"];
+const SOURCE_OPTIONAL_KEYS = new Set(["aggregation_only", "memo_origin", "safe_error_code"]);
+const SAFE_SOURCE_ERROR = /^[A-Z][A-Z0-9_]{2,63}$/u;
+const MEMO_OUTPUT_ID = /^sv2-[0-9a-f]{32}$/u;
+
+// 소스 목록 한 줄: 필수 6개 키 + 서버가 붙일 수 있는 선택 키(집계 전용 WO-N9, 메모 출처 NB1-F2, 안전한 오류 코드)만.
+function validSource(source) {
+  if (source === null || typeof source !== "object" || Array.isArray(source)) return false;
+  const keys = Object.keys(source);
+  if (!SOURCE_KEYS.every((key) => keys.includes(key)) || !keys.every((key) => SOURCE_KEYS.includes(key) || SOURCE_OPTIONAL_KEYS.has(key))) return false;
+  if ("aggregation_only" in source && source.aggregation_only !== true) return false;
+  if ("memo_origin" in source && !(exact(source.memo_origin, ["memo_output_id", "memo_exists"])
+    && typeof source.memo_origin.memo_output_id === "string" && MEMO_OUTPUT_ID.test(source.memo_origin.memo_output_id)
+    && typeof source.memo_origin.memo_exists === "boolean")) return false;
+  if ("safe_error_code" in source && source.safe_error_code !== null
+    && !(typeof source.safe_error_code === "string" && SAFE_SOURCE_ERROR.test(source.safe_error_code))) return false;
+  return id(source.source_id) && id(source.source_version_id);
+}
+
 function normalizeError(error) {
   if (error instanceof Error && SAFE_ERROR_CODES.has(error.code)) return fail(error.code);
   if (exact(error, ["code", "retryable"]) && SAFE_ERROR_CODES.has(error.code) && typeof error.retryable === "boolean") {
@@ -111,7 +130,7 @@ export function createWindowsWorkspaceAdapter(workspaceId, { invoke = nativeInvo
   const adapter = {
     async listSources({ signal } = {}) {
       const value = assertArray(await call("workspace_list_sources", { workspace_id: workspaceId, notebook_id: notebookId }, signal), "SOURCE_LIST_RESPONSE_INVALID");
-      if (value.length > 1_000 || !value.every((source) => exact(source, ["source_id", "source_version_id", "filename", "source_state", "processing_state", "job_state"]) && id(source.source_id) && id(source.source_version_id))) {
+      if (value.length > 1_000 || !value.every(validSource)) {
         throw fail("SOURCE_LIST_RESPONSE_INVALID");
       }
       return value;
