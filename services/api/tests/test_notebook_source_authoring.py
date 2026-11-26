@@ -125,6 +125,8 @@ class FixtureModel:
             if self.review_unavailable:
                 raise StudioError("STUDIO_VALIDATION_FAILED", 502)
             rows = json.loads(prompt.user.split("[검사할 본문]\n", 1)[1])
+            assert rows and {row["section_title"] for row in rows} == {"제3장 보험금의 지급"}
+            assert "확정한 각 문단의 section_title" in prompt.system
             data = {"issues": [{"unit_key": row["unit_key"], "quote": row["text"], "reason": "삭제 요청한 인편 배달을 본문에 유지했습니다."}
                                for row in rows if row["text"] == RETAINED]}
         else:
