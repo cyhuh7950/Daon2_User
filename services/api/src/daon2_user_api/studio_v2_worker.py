@@ -258,9 +258,9 @@ def _registry(cloud_store) -> GeneratorRegistry:  # type: ignore[no-untyped-def]
     from .studio_egress import StudioEgressGate
     gate = StudioEgressGate(EgressPolicyService(PostgresEgressPolicyRepository(cloud_store)))
     llm = StudioTextGenerator(resolver, StudioModelCatalog(cloud_store), egress_gate=gate)
-    reader = StudioSourceReader(cloud_store)
     context_chars = int(os.environ.get("DAON_STUDIO_V2_CONTEXT_CHARS", "16000"))
     storage = _object_storage_from_env()
+    reader = StudioSourceReader(cloud_store, object_storage=storage)
     original_reader = None
     if storage is not None:
         from .studio_original_reader import StudioOriginalReader

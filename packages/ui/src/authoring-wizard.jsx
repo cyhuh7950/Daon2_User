@@ -90,7 +90,10 @@ function Questions({ session, sources, adapter, onSubmit, busy }) {
     {session.pending_questions.map((q) => <fieldset key={q.key} style={{ border: 0, padding: 0, margin: "12px 0" }}>
       <legend><strong>{q.question}</strong>{q.required ? <span aria-label={msg("authoring.required")}> *</span> : <span> {msg("authoring.optional")}</span>}</legend>
       {q.kind === "source_ref" && <div role="group" aria-label={q.question}>{sources.filter((s) => s.ready).map((s) => <label key={s.sourceVersionId} style={{ display: "block" }}>
-        <input type="checkbox" checked={(values[q.key] ?? []).includes(s.sourceVersionId)} onChange={() => setValues((v) => {
+        <input type={q.max_sources === 1 ? "radio" : "checkbox"} name={q.key} checked={(values[q.key] ?? []).includes(s.sourceVersionId)}
+          disabled={q.key === "reference_proposals" && (session.inputs?.rfp_document?.source_version_ids ?? []).includes(s.sourceVersionId)}
+          onChange={() => setValues((v) => {
+          if (q.max_sources === 1) return { ...v, [q.key]: [s.sourceVersionId] };
           const list = v[q.key] ?? [];
           return { ...v, [q.key]: list.includes(s.sourceVersionId) ? list.filter((id) => id !== s.sourceVersionId) : [...list, s.sourceVersionId].slice(0, MAX_SOURCE_FILES) };
         })} /> {s.filename ?? s.sourceId}</label>)}
@@ -116,16 +119,28 @@ function Questions({ session, sources, adapter, onSubmit, busy }) {
   </form>;
 }
 
-function Review({ session, onConfirm, busy }) {
+function Review({ session, sources = [], onConfirm, busy }) {
   const [requirements, setRequirements] = useState(session.requirements);
   const [sections, setSections] = useState(session.plan?.sections ?? []);
   const [formats, setFormats] = useState(session.output_formats ?? ["docx"]);
   const baseOnly = session.analysis === "base_document";
   const choices = session.output_choices ?? ["docx", "pptx"];
+  const sourceRoles = ["rfp_document", "reference_proposals", "base_terms"].flatMap((key) => {
+    const input = session.inputs?.[key];
+    if (!input) return [];
+    const versions = input.source_version_ids ?? (input.source_version_id ? [input.source_version_id] : []);
+    return versions.length ? [[key, versions.map((id) => sources.find((source) => source.sourceVersionId === id)?.filename ?? id)]] : [];
+  });
   const hasSourceNames = requirements.some((r) => r.source_name);
   const scanWarnings = (session.analysis_warnings ?? []).map(scanWarning).filter(Boolean);
   const move = (index, delta) => setSections((list) => { const next = list.slice(); const j = index + delta; if (j < 0 || j >= next.length) return list; [next[index], next[j]] = [next[j], next[index]]; return next; });
   return <div>
+    {sourceRoles.length > 0 && <dl>{sourceRoles.map(([key, names]) => <div key={key}>
+      <dt>{msg(`authoring.review.source.${key}`)}</dt><dd>{names.join(", ")}</dd>
+    </div>)}</dl>}
+    {["purpose", "changes"].map((key) => typeof session.inputs?.[key] === "string" && <p key={key}>
+      <strong>{msg(`authoring.review.input.${key}`)}</strong> {session.inputs[key]}
+    </p>)}
     {baseOnly ? <p><small>{msg("authoring.review.base_only")}</small></p> : <>
     <h3>{msg("authoring.review.requirements", { count: requirements.length })}</h3>
     <p><small>{msg("authoring.review.requirements_help")}</small></p>
@@ -157,20 +172,25 @@ const RESULT_TABS = {
   contract: [tabEntry("body"), tabEntry("law"), tabEntry("checks"), tabEntry("open")],
 };
 
-function Result({ document, formats = ["docx", "pptx"], onDownload }) {
+function Result({ document, formats = ["docx", "pptx"], onDownload, onOpenEvidence }) {
   const [tab, setTab] = useState("body");
   const style = document.style ?? "proposal";
-  const tabs = RESULT_TABS[style] ?? RESULT_TABS.proposal;
+  const tabs = (RESULT_TABS[style] ?? RESULT_TABS.proposal).filter(([id]) => id !== "coverage" || document.analysis !== "base_document");
   const lawCheck = (document.checks ?? []).find((c) => c.id === "law_crosscheck");
+  const changes = (document.checks ?? []).find((c) => c.id === "terms_change_summary");
   return <div>
     <p className="studio-chip" role="note">{document.notice}</p>
     <div className="studio-row" role="tablist" aria-label={msg("authoring.result")}>{tabs.map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={tab === id} className="studio-btn" onClick={() => setTab(id)}>{label}</button>)}</div>
     {tab === "body" && document.sections.map((s) => <section key={s.key}><h3>{s.title}</h3>{s.paragraphs.map((p, i) => <p key={i}>{p.text.split(PLACEHOLDER).flatMap((part, j, arr) => j < arr.length - 1 ? [part, <mark key={j}>{PLACEHOLDER}</mark>] : [part])}
-      {p.refs.length ? <small> {p.refs.map((r) => `[${r}]`).join("")}</small> : <span className="studio-warning">{msg("authoring.new_sentence")}</span>}</p>)}</section>)}
-    {tab === "diff" && document.sections.map((s) => <section key={s.key}><h3>{s.title}</h3>
-      {s.paragraphs.map((p, i) => <p key={i}>{(p.diff?.sentences ?? [{ text: p.text, tag: "new" }]).map((sentence, j) => <span key={j} data-diff={sentence.tag} title={sentence.base ? msg("authoring.diff.base", { text: sentence.base }) : undefined}>
-        <mark className="studio-chip" aria-label={DIFF_LABEL[sentence.tag]}>{DIFF_LABEL[sentence.tag]}</mark> {sentence.text} </span>)}</p>)}
-      {s.delete_suggested?.length ? <div role="note"><strong>{msg("authoring.delete_suggested")}</strong><ul>{s.delete_suggested.map((text, k) => <li key={k}><del>{text}</del></li>)}</ul></div> : null}</section>)}
+      {p.refs.length ? <small> {p.refs.map((ref) => onOpenEvidence ? <button key={ref} type="button" className="studio-btn" onClick={() => onOpenEvidence(ref)}
+        aria-label={msg("authoring.evidence.open", { ref })}>[{ref}]</button> : <span key={ref}>[{ref}]</span>)}</small> : <span className="studio-warning">{msg("authoring.new_sentence")}</span>}</p>)}</section>)}
+    {tab === "diff" && <>
+      {(changes?.uncompared_passages > 0 || changes?.source_truncated || changes?.status === "skipped") && <p role="note">{msg("authoring.diff.uncompared")}</p>}
+      {document.sections.map((s) => <section key={s.key}><h3>{s.title}</h3>
+        {s.paragraphs.map((p, i) => <p key={i}>{p.diff ? p.diff.sentences.map((sentence, j) => <span key={j} data-diff={sentence.tag} title={sentence.base ? msg("authoring.diff.base", { text: sentence.base }) : undefined}>
+          <mark className="studio-chip" aria-label={DIFF_LABEL[sentence.tag]}>{DIFF_LABEL[sentence.tag]}</mark> {sentence.text} </span>) : p.text}</p>)}
+        {s.delete_suggested?.length ? <div role="note"><strong>{msg("authoring.delete_suggested")}</strong><ul>{s.delete_suggested.map((text, k) => <li key={k}><del>{text}</del></li>)}</ul></div> : null}</section>)}
+    </>}
     {tab === "law" && (lawCheck?.rows?.length ? <div><p role="note">{lawCheck.notice}</p><table className="studio-table"><thead><tr><th>{msg("authoring.law.col.clause")}</th><th>{msg("authoring.law.col.law")}</th><th>{msg("authoring.law.col.judgement")}</th><th>{msg("authoring.law.col.memo")}</th></tr></thead>
       <tbody>{lawCheck.rows.map((r, i) => <tr key={i}><td>{r.section_title}</td><td>{r.law}</td><td>{RELATION_LABEL[r.relation] ?? r.relation}</td><td>{r.note}</td></tr>)}</tbody></table></div>
       : <p>{msg("authoring.law.none", { reason: lawCheck?.reason ? `(${lawCheck.reason})` : "" })}</p>)}
@@ -244,7 +264,7 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
 }
 
 /** 작성 마법사: 세션을 만들거나 이어서 열고, 상태에 맞는 화면을 보여 준다. authoring = adapter.studioV2.authoring */
-export function AuthoringWizard({ studio, sources = [], outputId = null, onClose, onChanged }) {
+export function AuthoringWizard({ studio, sources = [], outputId = null, onClose, onChanged, onOpenEvidence }) {
   const authoring = studio.authoring;
   const [session, setSession] = useState(null);
   const [id, setId] = useState(outputId);
@@ -261,7 +281,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
   const load = useCallback(async () => { if (!id) return; try { setSession(await authoring.getSession(id)); } catch (e) { fail(e); } }, [authoring, id, fail]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (!session) return undefined;
+    if (!session || session.job_status === "failed") return undefined;
     const waiting = (session.state === "analyzing" || session.state === "generating") || session.job_status === "queued" || session.job_status === "generating";
     if (!waiting) return undefined;
     timer.current = setTimeout(load, POLL_MS);
@@ -325,14 +345,15 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
       {session && <>
         <StepBar state={session.state} />
         {session.state === "collecting" && <Questions session={session} sources={sources} adapter={authoring} busy={busy} onSubmit={submit} />}
-        {(session.state === "analyzing" || session.state === "generating") && <p role="status"><StudioIcon name="spinner" size={18} /> {session.state === "analyzing" ? (session.analysis === "base_document" ? msg("authoring.wait.base") : msg("authoring.wait.rfp")) : msg("authoring.wait.generating")}</p>}
+        {session.job_status !== "failed" && (session.state === "analyzing" || session.state === "generating") && <p role="status"><StudioIcon name="spinner" size={18} /> {session.state === "analyzing" ? (session.analysis === "base_document" ? msg("authoring.wait.base") : msg("authoring.wait.rfp")) : msg("authoring.wait.generating")}</p>}
         {session.mode === "agent" && (session.state === "generating" || session.state === "paused") && session.units?.length > 0 && <UnitProgress session={session} busy={busy} onPause={pause} onResume={resume} onEdit={editUnit} onOutline={changeOutline} onRedo={redoUnit} onMaterial={applyMaterial} />}
         {session.mode === "agent" && session.state === "completed" && <button type="button" className="studio-btn" disabled={busy} onClick={reopen}>{msg("authoring.reopen")}</button>}
-        {session.state === "review" && <Review session={session} busy={busy} onConfirm={confirm} />}
-        {session.state === "completed" && session.document && <Result document={session.document} formats={session.output_choices ?? ["docx", "pptx"]} onDownload={download} />}
+        {session.state === "review" && <Review session={session} sources={sources} busy={busy} onConfirm={confirm} />}
+        {session.state === "completed" && session.document && <Result document={session.document} formats={session.output_choices ?? ["docx", "pptx"]}
+          onDownload={download} onOpenEvidence={onOpenEvidence && ((ref) => onOpenEvidence(id, session.revision_no, ref))} />}
         {session.mode === "agent" && session.state === "completed" && typeof studio.listEditTurns === "function"
           && <StudioChatEdit studio={studio} outputId={id} onApplied={async () => { await load(); onChanged?.(); }} />}
-        {session.state === "failed" && <p role="alert">{studioErrorMessage(session.error_code)}</p>}
+        {(session.state === "failed" || session.job_status === "failed") && <p role="alert">{studioErrorMessage(session.error_code)}</p>}
       </>}
     </div>
   </section>;

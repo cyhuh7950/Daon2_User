@@ -83,7 +83,8 @@ def parse_template(raw: Mapping[str, Any]) -> AuthoringTemplate:
     source_input = raw.get("source_input", "rfp_document" if analysis == "rfp_requirements" else None)
     if analysis == "rfp_requirements" and (source_input not in seen or next(i for i in raw["inputs"] if i["key"] == source_input)["kind"] != "source_ref"):
         raise _fail("source_input")
-    if analysis == "base_document" and not any(i["kind"] == "knowledge_ref" and i["required"] for i in raw["inputs"]):
+    base_kind = "source_ref" if raw["template_id"] == "reference_proposal_draft" else "knowledge_ref"
+    if analysis == "base_document" and not any(i["kind"] == base_kind and i["required"] for i in raw["inputs"]):
         raise _fail("base document input")
     formats = raw["output"].get("formats", [])
     if not formats or not set(formats) <= {"docx", "pptx"} or not set(raw["output"].get("default", [])) <= set(formats):

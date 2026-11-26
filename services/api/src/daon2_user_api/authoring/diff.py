@@ -26,6 +26,11 @@ def _bigrams(text: str) -> set[str]:
     return {text[i:i + 2] for i in range(len(text) - 1)} or ({text} if text else set())
 
 
+def _exact_text(text: str) -> str:
+    # 수치의 소수점이나 부호가 바뀌면 유지로 분류하지 않는다.
+    return re.sub(r"\s+", "", text).rstrip(".。!?").casefold()
+
+
 def similarity(a: str, b: str) -> float:
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
@@ -36,27 +41,27 @@ def similarity(a: str, b: str) -> float:
     return 2 * len(ga & gb) / (len(ga) + len(gb))
 
 
-def tag_sentence(sentence: str, base: Sequence[str]) -> tuple[str, str | None, float]:
+def tag_sentence(sentence: str, base: Sequence[str], *, exact_unchanged: bool = False) -> tuple[str, str | None, float]:
     best, best_text = 0.0, None
     for candidate in base:
         score = similarity(sentence, candidate)
-        if score > best:
+        if score > best or (score == best and exact_unchanged and _exact_text(sentence) == _exact_text(candidate)):
             best, best_text = score, candidate
-    if best >= UNCHANGED_AT:
+    if best >= UNCHANGED_AT and (not exact_unchanged or _exact_text(sentence) == _exact_text(best_text or "")):
         return "unchanged", best_text, best
     if best >= MODIFIED_AT:
         return "modified", best_text, best
     return "new", None, best
 
 
-def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *, exact_unchanged: bool = False) -> tuple[list[dict[str, Any]], list[str]]:
     """문단별 변경 태그와, 새 초안 어디에도 이어지지 않은 기준 문장(삭제 제안)을 돌려준다."""
     paragraphs: list[dict[str, Any]] = []
     new_sentences: list[str] = []
     for text in paragraph_texts:
         rows = []
         for sentence in split_sentences(text) or [text]:
-            tag, matched, score = tag_sentence(sentence, base_sentences)
+            tag, matched, score = tag_sentence(sentence, base_sentences, exact_unchanged=exact_unchanged)
             rows.append({"text": sentence, "tag": tag, "base": matched, "score": round(score, 3)})
             new_sentences.append(sentence)
         tags = {r["tag"] for r in rows}

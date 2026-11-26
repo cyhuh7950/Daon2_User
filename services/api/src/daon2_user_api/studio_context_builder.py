@@ -73,7 +73,8 @@ def _score(text: str, tokens: set[str]) -> int:
     return len(found & tokens)
 
 
-def build_pack(sources: Sequence[SourceText], *, budget_chars: int = DEFAULT_CONTEXT_CHARS, focus: str | None = None) -> ContextPack:
+def build_pack(sources: Sequence[SourceText], *, budget_chars: int = DEFAULT_CONTEXT_CHARS, focus: str | None = None,
+               stable_ref_offset: int | None = None) -> ContextPack:
     """예산 이내면 전체, 초과하면 포커스 점수 + 문서 전반을 고르게 표본으로 고른다(문서 순서 유지)."""
     flat = [(s, section) for s in sources for section in s.sections]
     total = sum(len(section.text) for _, section in flat)
@@ -105,6 +106,7 @@ def build_pack(sources: Sequence[SourceText], *, budget_chars: int = DEFAULT_CON
     for number, i in enumerate(chosen, 1):
         source, section = flat[i]
         text = section.text if len(section.text) <= budget_chars else section.text[:budget_chars]
-        passages.append(Passage(f"S{number}", source.source_version_id, source.source_id, source.filename,
+        ref_number = number if stable_ref_offset is None else stable_ref_offset + i + 1
+        passages.append(Passage(f"S{ref_number}", source.source_version_id, source.source_id, source.filename,
                                 section.evidence_span_id, section.locator_kind, section.locator_value, section.heading, text))
     return ContextPack(tuple(passages), truncated, len(flat))

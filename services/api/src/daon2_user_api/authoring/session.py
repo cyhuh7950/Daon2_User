@@ -17,6 +17,11 @@ STATES = ("collecting", "analyzing", "review", "generating", "paused", "complete
 MAX_QUESTIONS = 3
 MAX_SOURCE_FILES = 10
 MAX_REQUIREMENTS = 1000
+REFERENCE_INPUTS = {
+    "rfp_response_proposal": "reference_proposals",
+    "reference_proposal_draft": "reference_proposals",
+    "insurance_terms_draft": "base_terms",
+}
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TRANSITIONS = {"collecting": {"analyzing", "cancelled"}, "analyzing": {"review", "failed", "cancelled"}, "review": {"generating", "analyzing", "cancelled"},
                 "generating": {"completed", "failed", "cancelled", "paused"}, "paused": {"generating", "cancelled"}, "failed": {"analyzing", "generating"}, "completed": set(), "cancelled": set()}
@@ -32,14 +37,30 @@ def transition(session: Mapping[str, Any], new_state: str) -> dict[str, Any]:
 
 def _question(item: Mapping[str, Any]) -> dict[str, Any]:
     return {"key": item["key"], "question": item["question"], "kind": item["kind"], "required": bool(item["required"]), "choices": list(item.get("choices", [])),
-            "document_type": item.get("document_type")}
+            "document_type": item.get("document_type"), **({"max_sources": item["max_sources"]} if "max_sources" in item else {})}
+
+
+def _inputs(template: AuthoringTemplate, session: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    if not session.get("notebook_references"):
+        return list(template.inputs)
+    reference_key = REFERENCE_INPUTS.get(template.template_id)
+    items: list[Mapping[str, Any]] = []
+    for item in template.inputs:
+        if item["key"] == reference_key:
+            if reference_key == "base_terms":
+                item = {**item, "kind": "source_ref", "question": "노트북에서 기준 약관 한 건을 선택해 주세요.", "max_sources": 1}
+            elif template.analysis == "rfp_requirements":
+                item = {**item, "kind": "source_ref", "question": "노트북에서 참고할 기존 제안서를 선택해 주세요.", "required": False}
+        elif reference_key == "base_terms" and item["key"] == "changes":
+            item = {**item, "required": True, "question": "기준 약관에서 바꾸려는 점을 적어 주세요."}
+        items.append(item)
+    return items
 
 
 def pending(template: AuthoringTemplate, session: Mapping[str, Any]) -> list[dict[str, Any]]:
     """아직 확정되지 않은 입력 중 다음에 물을 최대 3개. 필수가 먼저, 선택 입력은 필수가 다 찬 뒤 한 번만 제안한다."""
     done = set(session["inputs"]) | {a["key"] for a in session["assumptions"]}
-    # 소목차 방식은 노트북에서 고른 지식을 쓰므로 지식 문서를 따로 묻지 않는다.
-    asked = [i for i in template.inputs if not (session.get("mode") == "agent" and i["kind"] == "knowledge_ref")]
+    asked = [i for i in _inputs(template, session) if not (session.get("mode") == "agent" and i["kind"] == "knowledge_ref")]
     required = [i for i in asked if i["required"] and i["key"] not in done]
     if required:
         return [_question(i) for i in required[:MAX_QUESTIONS]]
@@ -53,12 +74,15 @@ def requests_for(questions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]
     return [{"request": mapping[q["kind"]], "key": q["key"]} for q in questions if q["kind"] in mapping]
 
 
-def new_session(template: AuthoringTemplate, *, request_text: str | None = None, mode: str = "legacy", target_pages: int | None = None, confirm_material: bool = False) -> dict[str, Any]:
+def new_session(template: AuthoringTemplate, *, request_text: str | None = None, mode: str = "legacy", target_pages: int | None = None,
+                confirm_material: bool = False, notebook_references: bool = False) -> dict[str, Any]:
     session: dict[str, Any] = {"schema": SESSION_SCHEMA, "template_id": template.template_id, "template_version": template.version, "analysis": template.analysis, "style": template.style, "output_choices": list(template.output["formats"]), "state": "collecting",
                                "request_text": (request_text or "")[:500], "inputs": {}, "assumptions": [], "pending_questions": [], "requests": [],
                                "requirements": [], "plan": None, "output_formats": list(template.output["default"]), "error_code": None}
     if mode == "agent":
         session.update({"mode": "agent", "target_pages": target_pages, "confirm_material": confirm_material, "units": [], "knowledge": [], "pause_requested": False, "pause_reason": None})
+        if notebook_references and template.template_id in REFERENCE_INPUTS:
+            session["notebook_references"] = True
     session["pending_questions"] = pending(template, session)
     session["requests"] = requests_for(session["pending_questions"])
     return session
@@ -68,6 +92,18 @@ def source_versions(value: Mapping[str, Any]) -> list[str]:
     """저장된 source_ref 입력의 버전 목록. 파일 1개로 시작한 이전 세션도 읽는다."""
     many = value.get("source_version_ids")
     return list(many) if isinstance(many, list) else [value["source_version_id"]]
+
+
+def reference_versions(template: AuthoringTemplate, session: Mapping[str, Any]) -> list[str]:
+    if not session.get("notebook_references"):
+        return []
+    reference = session["inputs"].get(REFERENCE_INPUTS.get(template.template_id))
+    return source_versions(reference) if reference and "source_version_ids" in reference else []
+
+
+def generation_versions(template: AuthoringTemplate, session: Mapping[str, Any]) -> list[str]:
+    primary = session["inputs"].get(template.source_input) if template.source_input else None
+    return list(dict.fromkeys([*(source_versions(primary) if primary else []), *reference_versions(template, session)]))
 
 
 def validate_value(item: Mapping[str, Any], answer: Mapping[str, Any]) -> Any:
@@ -83,7 +119,7 @@ def validate_value(item: Mapping[str, Any], answer: Mapping[str, Any]) -> Any:
         return answer["value"]
     if kind == "source_ref":
         versions = answer.get("source_version_ids", [answer.get("source_version_id")])
-        if (not isinstance(versions, list) or not 1 <= len(versions) <= MAX_SOURCE_FILES
+        if (not isinstance(versions, list) or not 1 <= len(versions) <= item.get("max_sources", MAX_SOURCE_FILES)
                 or any(not isinstance(version, str) or not _ID.fullmatch(version) for version in versions)):
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
         return {"source_version_ids": list(dict.fromkeys(versions))}
@@ -103,12 +139,12 @@ def apply_answers(template: AuthoringTemplate, session: Mapping[str, Any], answe
     if session["state"] != "collecting":
         raise AuthoringError("AUTHORING_STATE_INVALID", 409)
     updated = copy.deepcopy(dict(session))
-    valid_keys = {i["key"] for i in template.inputs}
+    items = {item["key"]: item for item in _inputs(template, updated)}
     for answer in answers:
         key = answer.get("key")
-        if key not in valid_keys:
+        if key not in items:
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
-        item = template.input(key)
+        item = items[key]
         if answer.get("skip") is True:
             if item["required"]:
                 raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
@@ -117,9 +153,12 @@ def apply_answers(template: AuthoringTemplate, session: Mapping[str, Any], answe
         updated["inputs"][key] = validate_value(item, answer)
         updated["assumptions"] = [a for a in updated["assumptions"] if a["key"] != key]
     if skip_remaining:
-        for item in template.inputs:
+        for item in items.values():
             if not item["required"] and item["key"] not in updated["inputs"] and all(a["key"] != item["key"] for a in updated["assumptions"]):
                 updated["assumptions"].append({"key": item["key"], "reason": "user_skipped", "default": "[작성 필요]"})
+    if template.analysis == "rfp_requirements" and template.source_input in updated["inputs"]:
+        if set(source_versions(updated["inputs"][template.source_input])).intersection(reference_versions(template, updated)):
+            raise AuthoringError("AUTHORING_SOURCE_ROLE_CONFLICT", 422)
     questions = pending(template, updated)
     if any(q["required"] for q in questions):
         updated["pending_questions"], updated["requests"] = questions, requests_for(questions)

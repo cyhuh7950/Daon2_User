@@ -42,7 +42,7 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
         if section.get("delete_suggested"):
             els += [("h2", f"{section['title']} — 삭제 제안(기준 약관에만 있는 문장)"), ("bullets", list(section["delete_suggested"]), [])]
     titles = {s["key"]: s["title"] for s in doc["sections"]}
-    if doc.get("style", "proposal") == "proposal":
+    if doc.get("style", "proposal") == "proposal" and doc.get("analysis") != "base_document":
         # 부록 A: 요구사항 대응표
         els += [("pagebreak",), ("h1", "부록 A. 요구사항 대응표")]
         rows = [["ID", "요구사항", "대응 섹션", "상태"]]
@@ -57,6 +57,8 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
             summary = check["summary"]
             els += [("h2", check["title"]), ("table", [["구분", "문장 수"], ["유지", str(summary.get("unchanged", 0))], ["수정", str(summary.get("modified", 0))],
                                                        ["신규", str(summary.get("new", 0))], ["삭제 제안", str(summary.get("delete_suggested", 0))]])]
+            if check.get("uncompared_passages") or check.get("source_truncated"):
+                els.append(("p", "비교하지 못한 기준 약관 구간은 삭제 제안에 포함하지 않았습니다.", []))
         elif check.get("id") == "law_crosscheck" and check.get("rows"):
             els += [("h2", check["title"]), ("p", str(check.get("notice") or ""), []),
                     ("table", [["조항", "관련 법령 조문", "판단", "메모"], *[[r["section_title"], r["law"], RELATION_LABEL.get(r["relation"], r["relation"]), r.get("note", "")] for r in check["rows"]]])]

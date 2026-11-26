@@ -1,0 +1,298 @@
+"""노트북 기준 문서의 입력 역할과 작성 작업 검수."""
+
+import copy
+import io
+import re
+from contextlib import nullcontext
+from types import SimpleNamespace
+from zipfile import ZipFile
+
+import pytest
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+
+from daon2_user_api import runtime
+from daon2_user_api.authoring import session
+from daon2_user_api.authoring.pipeline import AuthoringPipeline
+from daon2_user_api.authoring.service import AuthoringGenerator, AuthoringService
+from daon2_user_api.authoring.templates import AuthoringError, TemplateRegistry
+from daon2_user_api.studio_context_builder import build_pack
+from daon2_user_api.studio_source_reader import SourceSection, SourceText, StudioSourceReader
+from daon2_user_api.studio_v2_export import export_v2
+from daon2_user_api.studio_v2_generation import GeneratorRegistry
+from daon2_user_api.studio_v2_queue import StudioV2Job
+from daon2_user_api.studio_v2_routes import register_authoring_routes
+from daon2_user_api.studio_v2_worker import StudioV2Worker
+from daon2_user_api.studio_workspace import StudioContext, StudioError
+from test_docx_source import docx_bytes
+
+
+@pytest.mark.parametrize(("template_id", "answers", "versions"), [
+    ("reference_proposal_draft", [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "새 고객용 운영 제안서를 작성"},
+    ], ["proposal-v1"]),
+    ("rfp_response_proposal", [
+        {"key": "rfp_document", "source_version_ids": ["rfp-v1"]},
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+    ], ["rfp-v1", "proposal-v1"]),
+    ("insurance_terms_draft", [
+        {"key": "base_terms", "source_version_ids": ["terms-v1"]},
+        {"key": "product_type", "value": "자동차보험"},
+        {"key": "changes", "value": "지급 기한 변경"},
+    ], ["terms-v1"]),
+])
+def test_current_sessions_queue_reference_sources(template_id, answers, versions):
+    template = TemplateRegistry().get(template_id)
+    current = session.new_session(template, mode="agent", notebook_references=True)
+    updated = session.apply_answers(template, current, answers, skip_remaining=True)
+    assert updated["state"] == "analyzing"
+    assert session.generation_versions(template, updated) == versions
+
+
+def test_terms_requires_one_base_and_previous_session_still_reads():
+    template = TemplateRegistry().get("insurance_terms_draft")
+    previous = session.new_session(template, mode="agent")
+    current = session.new_session(template, mode="agent", notebook_references=True)
+    assert [question["key"] for question in previous["pending_questions"]] == ["product_type"]
+    assert "base_terms" in {question["key"] for question in current["pending_questions"]}
+    with pytest.raises(AuthoringError, match="AUTHORING_INPUT_INVALID"):
+        session.apply_answers(template, current, [{"key": "base_terms", "source_version_ids": ["one", "two"]}])
+
+
+def test_rfp_cannot_also_be_its_own_reference():
+    template = TemplateRegistry().get("rfp_response_proposal")
+    current = session.new_session(template, mode="agent", notebook_references=True)
+    answers = [{"key": key, "source_version_ids": ["rfp-v1"]} for key in ("rfp_document", "reference_proposals")]
+    with pytest.raises(AuthoringError, match="AUTHORING_SOURCE_ROLE_CONFLICT"):
+        session.apply_answers(template, current, answers)
+
+
+PROPOSAL = "시범 운영에서는 단계별 인수 목록을 사용한다."
+RFP = "서비스 전환 계획을 제출해야 한다."
+TERMS = "보험금은 서류를 받은 후 심사한다. 지급이 늦어지면 서면으로 통지한다. 증서는 인편으로 배달한다."
+MODIFIED = "지급이 늦어지면 전자우편으로 통지한다."
+ADDED = "계약자는 온라인 창구에서 진행 상태를 확인할 수 있다."
+PATH = "/api/v1/workspaces/ws-test/notebooks/nb-test/studio/authoring/sessions"
+
+
+class FixtureSources:
+    documents = {
+        "rfp-v1": ("요구서.pdf", RFP),
+        "proposal-v1": ("기존 제안서.docx", PROPOSAL),
+        "terms-v1": ("기준 약관.txt", TERMS),
+    }
+
+    def read(self, context, ids, **options):
+        return tuple(SourceText(version, version, self.documents[version][0],
+                                (SourceSection(version, None, "page", "7", None, self.documents[version][1]),), False)
+                     for version in ids)
+
+
+class FixtureModel:
+    def __init__(self):
+        self.prompts = []
+
+    def generate(self, context, prompt, cancel_check=None):
+        self.prompts.append(prompt)
+        name = prompt.schema_name
+        if name == "authoring_outline":
+            data = {"sections": []}
+        elif name == "authoring_unit":
+            def ref(text):
+                return re.search(r'<source id="(S[0-9]+)"[^>]*>\n[^<]*' + re.escape(text), prompt.user).group(1)
+
+            if "[기준 약관 구간]" in prompt.user:
+                assert "전자우편" in prompt.user
+                cited = ref(TERMS)
+                paragraphs = [{"text": text, "refs": [cited]} for text in (TERMS.split(". ")[0] + ".", MODIFIED, ADDED)]
+            else:
+                paragraphs = [{"text": PROPOSAL, "refs": [ref(PROPOSAL)]}]
+                if "요구서.pdf" in prompt.user:
+                    paragraphs.append({"text": RFP, "refs": [ref(RFP)]})
+            data = {"paragraphs": paragraphs, "summary": "작성 완료", "terms": []}
+        else:
+            data = {"items": []}
+        return SimpleNamespace(data=data, provider_code="FIXTURE", model_id="fixture", connection_short_code="FIXTURE")
+
+
+class FixtureRepository:
+    """라우트·작성 서비스·워커 간 계약의 저장소 및 큐 대역."""
+
+    output_id = "output-fixture"
+
+    def __init__(self):
+        self.content, self.revision, self.status = {}, 0, "completed"
+        self.jobs, self.allowed = [], set(FixtureSources.documents)
+        self.evidence, self.sources = [], []
+        self.error_code = None
+
+    def create_authoring_session(self, context, title, content, idempotency_key):
+        self.add_revision(context, self.output_id, "generated", content)
+        return {"output_id": self.output_id}
+
+    def latest_content(self, context, output_id):
+        content = copy.deepcopy(self.content)
+        if self.error_code:
+            content["error_code"] = self.error_code
+        return self.revision, self.status, content
+
+    def require_scope(self, connection, context, versions):
+        if not set(versions) <= self.allowed:
+            raise StudioError("NOTEBOOK_SCOPE_MISMATCH", 409)
+
+    def authoring_apply(self, context, output_id, expected_revision, mutate, *, enqueue_step=None,
+                        source_version_ids=(), reference_version_ids=()):
+        assert expected_revision == self.revision
+        versions = source_version_ids if enqueue_step else reference_version_ids
+        self.require_scope(None, context, versions)
+        self.authoring_merge(context, output_id, mutate)
+        if enqueue_step:
+            self.status = "queued"
+            request = {"notebook_id": context.notebook_id, "source_version_ids": list(versions), "mode": "authoring",
+                       "type_id": "authored_document", "settings": {"step": enqueue_step}}
+            self.jobs.append(StudioV2Job(context.tenant_id, context.workspace_id, enqueue_step, output_id, context.actor_id, 1, 3, 1, request))
+        return {"revision_no": self.revision, "queued": bool(enqueue_step), "state": self.content["state"]}
+
+    def authoring_merge(self, context, output_id, mutate):
+        self.add_revision(context, output_id, "generated", mutate(copy.deepcopy(self.content)))
+        return copy.deepcopy(self.content)
+
+    def add_revision(self, context, output_id, revision_type, content, *, sources=(), evidence=(), **kwargs):
+        self.revision += 1
+        self.content, self.sources, self.evidence = copy.deepcopy(content), list(sources), list(evidence)
+
+    def get_customization(self, context):
+        return {"instruction": ""}
+
+
+@pytest.fixture
+def writing(monkeypatch):
+    app = FastAPI()
+    monkeypatch.setattr(runtime, "_principal", lambda request, deps: SimpleNamespace(tenant_id="tenant-test", user_id="actor-test"))
+    dependencies = SimpleNamespace(settings=SimpleNamespace(policy_version="test"),
+                                   authorization_service=SimpleNamespace(authorize_action=lambda **_: None))
+
+    @app.middleware("http")
+    async def trace(request: Request, call_next):
+        request.state.trace_id = "trace-authoring-fixture"
+        return await call_next(request)
+
+    @app.exception_handler(StudioError)
+    async def studio_error(request: Request, error: StudioError):
+        return runtime._error_response(error.status, error.code, request.state.trace_id)
+
+    repository, model = FixtureRepository(), FixtureModel()
+    templates, generators = TemplateRegistry(), GeneratorRegistry()
+    pipeline = AuthoringPipeline(templates, FixtureSources(), model, None, repository.latest_content, checkpoint=repository.authoring_merge)
+    generators.register(AuthoringGenerator(pipeline))
+    register_authoring_routes(app, dependencies, AuthoringService(repository, templates))
+
+    def finish(job, worker_id, *, state, error_code=None):
+        repository.status, repository.error_code = state, error_code
+
+    queue = SimpleNamespace(start=lambda job, worker_id: job, heartbeat=lambda *args, **kwargs: False, finish=finish)
+    worker = StudioV2Worker(queue, repository, generators, SimpleNamespace(_transaction=lambda _: nullcontext()), worker_id="test-worker")
+    with TestClient(app, headers={"Idempotency-Key": "test-authoring-flow-key"}) as client:
+        yield client, repository, model, worker
+
+
+@pytest.mark.parametrize(("template", "answers", "versions"), [
+    ("reference_proposal_draft", [{"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+                                 {"key": "purpose", "value": "새 고객의 운영 절차를 제안"}], ["proposal-v1"]),
+    ("rfp_response_proposal", [{"key": "rfp_document", "source_version_ids": ["rfp-v1"]},
+                               {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]}], ["rfp-v1", "proposal-v1"]),
+    ("insurance_terms_draft", [{"key": "base_terms", "source_version_ids": ["terms-v1"]},
+                               {"key": "product_type", "value": "자동차보험"},
+                               {"key": "changes", "value": "지급 지연 시 전자우편으로 통지하고 온라인 확인 창구를 신설"}], ["terms-v1"]),
+])
+def test_three_paths_through_routes_worker_reload_references_and_docx(writing, template, answers, versions):
+    client, repo, model, worker = writing
+    opened = client.post(PATH, json={"template_id": template})
+    assert opened.status_code == 201, opened.text
+    output = PATH + "/" + opened.json()["data"]["output_id"]
+    receipt = client.post(output + "/answers", json={"expected_revision": 1, "answers": answers, "skip_remaining": True})
+    assert receipt.status_code == 202, receipt.text
+    job = repo.jobs.pop()
+    assert job.request_json["source_version_ids"] == versions
+    worker._process(job)
+
+    review = client.get(output).json()["data"]
+    assert review["state"] == "review", review["error_code"]
+    assert FixtureSources.documents[versions[-1]][1] in next(prompt.user for prompt in model.prompts if prompt.schema_name == "authoring_outline")
+    assert bool(review["requirements"]) == (template == "rfp_response_proposal")
+    receipt = client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                 "plan_sections": review["plan"]["sections"][:1], "output_formats": ["docx"]})
+    assert receipt.status_code == 202, receipt.text
+    job = repo.jobs.pop()
+    assert job.request_json["source_version_ids"] == versions
+    worker._process(job)
+
+    completed = client.get(output).json()["data"]
+    assert completed["state"] == "completed", completed["error_code"]
+    assert [source["source_version_id"] for source in repo.sources] == versions
+    assert {item["source_version_id"] for item in repo.evidence} == set(versions)
+    assert {item["locator_value"] for item in repo.evidence} == {"7"}
+    exported = export_v2("docx", {"output_id": repo.output_id, "title": completed["document"]["title"], "type_id": "authored_document",
+                                  "revision": {"content": completed}, "evidence": repo.evidence}).content
+    with ZipFile(io.BytesIO(exported)) as archive:
+        body = archive.read("word/document.xml").decode()
+    if template == "insurance_terms_draft":
+        changes = next(check for check in completed["document"]["checks"] if check["id"] == "terms_change_summary")
+        assert changes["summary"] == {"unchanged": 1, "modified": 1, "new": 1, "delete_suggested": 1}
+        assert "전자우편" in body and "삭제 제안" in body
+    else:
+        assert PROPOSAL in body
+        assert ("부록 A. 요구사항 대응표" in body) == (template == "rfp_response_proposal")
+
+
+def test_worker_rechecks_access_revoked_after_queue(writing):
+    client, repo, model, worker = writing
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    response = client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]}, {"key": "purpose", "value": "새 제안서"},
+    ]})
+    assert response.status_code == 202
+    repo.allowed.clear()
+    worker._process(repo.jobs.pop())
+    snapshot = client.get(output).json()["data"]
+    assert snapshot["job_status"] == "failed"
+    assert snapshot["error_code"] == "NOTEBOOK_SCOPE_MISMATCH"
+    assert model.prompts == []
+
+
+def test_docx_reference_reads_real_original_and_reopens_its_locator(monkeypatch):
+    from daon2_user_api.authorization import Action
+    from daon2_user_api.studio_original_reader import StudioOriginalReader
+
+    sample = docx_bytes("<w:p><w:r><w:t>앞부분 제안</w:t></w:r></w:p><w:p><w:r><w:t>후반부 운영 인수</w:t></w:r></w:p>")
+    calls = []
+
+    def read_original(self, context, version, *, action, connection):
+        calls.append((version, action))
+        return sample
+
+    class Connection:
+        def execute(self, sql, args):
+            return SimpleNamespace(fetchone=lambda: ("source-id", "기존 제안서.docx", {"block_evidence": []}), fetchall=lambda: [])
+
+    monkeypatch.setattr(StudioOriginalReader, "read_docx", read_original)
+    store = SimpleNamespace(_transaction=lambda _: nullcontext(Connection()))
+    reader = StudioSourceReader(store, object_storage=object())
+    context = StudioContext("tenant", "workspace", "actor", "trace", "policy", "notebook")
+    source, = reader.read(context, ["docx-v1"], require_body=True)
+    assert [section.text for section in source.sections] == ["앞부분 제안", "후반부 운영 인수"]
+    later = source.sections[-1]
+    assert reader.read_section(context, "docx-v1", later.locator_kind, later.locator_value) == ("기존 제안서.docx", "후반부 운영 인수")
+    assert calls == [("docx-v1", Action.GENERATE), ("docx-v1", Action.VIEW)]
+
+
+def test_terms_diff_excludes_unseen_clauses_and_tracks_changed_numbers():
+    parts = (SourceSection("terms-v1", None, "page", "1", None, "표준계약에서 연체 이율은 연 5.5퍼센트로 정한다."),
+             SourceSection("terms-v1", None, "page", "2", None, "구두 배서는 별도 심사를 받는다."))
+    references = build_pack([SourceText("terms", "terms-v1", "기준약관.pdf", parts, True)], stable_ref_offset=0)
+    sections = [{"paragraphs": [{"text": "표준계약에서 연체 이율은 연 55퍼센트로 정한다."}]}]
+    check = AuthoringPipeline._compare_terms({"units": [{"reference_refs": ["S1"]}]}, sections, references)
+    assert check["summary"] == {"unchanged": 0, "modified": 1, "new": 0, "delete_suggested": 0}
+    assert check["source_truncated"] and check["uncompared_passages"] == 1
