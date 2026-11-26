@@ -378,7 +378,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
       </div>;
     }
     if (activeModal === "model-connections" && providerApi) {
-      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+      return <div className="desktop-shell desktop-manual-page desktop-provider-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
         <button type="button" onClick={() => setActiveModal(null)}>홈으로 돌아가기</button>
         <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} />
       </div>;
@@ -399,7 +399,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
         onOpenSetting={(id) => setActiveModal(id === "screen" ? "settings" : id)}
         onLogout={logout}
       />
-      <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
+      <WorkspaceSettingsModal open={activeModal === "settings"} screenOnly onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
     </div>;
   }
   return (

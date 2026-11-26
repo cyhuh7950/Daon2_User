@@ -30,6 +30,13 @@ button, input, select, textarea { font: inherit; }
 .desktop-app-actions { display: flex; gap: 6px; }
 .desktop-manual-page { padding: clamp(12px, 3vw, 36px); }
 .desktop-manual-page .manual-settings-page { max-width: 1180px; margin: auto; }
+.desktop-provider-page .provider-settings-shell {
+  --workspace-surface: var(--daon-color-surface);
+  --workspace-border: var(--daon-color-border);
+  --workspace-text: var(--daon-color-text-primary);
+  --workspace-muted: var(--daon-color-text-secondary);
+  --workspace-violet: var(--daon-color-accent);
+}
 .desktop-manual-page .common-settings-header { display: flex; align-items: center; gap: 16px; }
 .desktop-manual-page .common-settings-header button { color: inherit; background: var(--workspace-surface); border: 1px solid var(--workspace-border); border-radius: 8px; padding: 6px 10px; }
 .workspace-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgb(23 21 29 / 48%); }

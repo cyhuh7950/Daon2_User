@@ -279,7 +279,11 @@ class OpenAICompatibleTextGenerationAdapter:
                 "messages": [
                     {"role": "system", "content": (
                         "First explain the supplied Source scope briefly. Answer questions inside that scope "
-                        "only from the supplied evidence JSON and cite only supplied chunk_id values. "
+                        "only from the text fields of evidence and cite only exact supplied chunk_id values. "
+                        "In the answer, do not repeat filenames, labels such as S1, question identifiers, "
+                        "or page metadata unless that exact value is present in the cited evidence text. "
+                        "Put citation identifiers only in cited_chunk_ids. "
+                        "For a quoted line or table value, copy its spelling, identifier and numeric form exactly. "
                         "If the question is outside the Source scope, explain the mismatch and the Source scope "
                         "without refusing with a generic insufficient message; return insufficient=true and "
                         "cited_chunk_ids=[] for that case. Do not invent facts. If current external information "
