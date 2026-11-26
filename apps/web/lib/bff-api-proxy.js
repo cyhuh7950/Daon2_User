@@ -1114,6 +1114,12 @@ function nativeRouteFor(method, segments, requestUrl) {
     matched = method === "POST"
       ? route("/api/v1/session/tenant", { requestMediaType: "application/json" })
       : { methodRejected: true };
+  } else if (segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1] ?? "") && segments[2] === "notebooks"
+    && (segments.length === 3 || (SAFE_SEGMENT.test(segments[3] ?? "")
+      && (segments.length === 4 || (segments.length === 5 && segments[4] === "context"))))) {
+    matched = method === "GET"
+      ? route(`/api/v1/${segments.map(encodeURIComponent).join("/")}`)
+      : { methodRejected: true };
   } else if (segments.length === 3 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "sources") {
     matched = new Set(["GET", "POST"]).has(method)
       ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, method === "POST" ? { maxRequestBytes: MAX_SOURCE_UPLOAD_BYTES, requestMediaTypes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "audio/wav"] } : {})

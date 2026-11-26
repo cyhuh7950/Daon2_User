@@ -23,6 +23,7 @@ from .checks import evidence_integrity, term_consistency
 from .diff import normalize, scoped_deletion_candidates, split_sentences, summarize, tag_section
 from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
 from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition
+from .terms_review import TERMS_BODY_RULES, review_terms_body
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
 MAX_KNOWLEDGE_PASSAGES = 40
@@ -311,7 +312,8 @@ class AuthoringPipeline:
         requirement_lines = "\n".join(f"- {requirements[r]['text']}" for r in section_ids if r in requirements)[:UNIT_REQUIREMENT_CHARS]
         earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
-        prompt = StudioPrompt(system=UNIT_SYSTEM, user=(
+        system = f"{UNIT_SYSTEM}\n{TERMS_BODY_RULES}" if template.style == "terms" else UNIT_SYSTEM
+        prompt = StudioPrompt(system=system, user=(
             f"[작성할 소목차] {unit['title']}\n[절] {unit['section_title']}\n[목적] {unit['purpose']}\n[목표 글자 수] 약 {unit['target_chars']}자\n"
             f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}\n\n"
             f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
@@ -402,6 +404,15 @@ class AuthoringPipeline:
                 return self._paused(current, result["status"])
         if any(unit["status"] == "failed" for unit in current["units"]):
             return self._paused(current, "unit_failed")
+        changes = current["inputs"].get("changes")
+        if template.style == "terms" and isinstance(changes, str) and changes.strip():
+            ctx.progress(90, "약관 본문과 변경 요청 대조")
+            try:
+                issues = review_terms_body(ctx, self._llm, changes=changes, units=current["units"], context_chars=self._context_chars)
+            except StudioError:
+                return self._paused(current, "terms_review_unavailable")
+            if issues:
+                return self._paused({**current, "terms_review": issues}, "terms_review")
         references = None
         if reference_sources:
             references = build_pack(reference_sources, budget_chars=sum(len(section.text) for source in reference_sources for section in source.sections),

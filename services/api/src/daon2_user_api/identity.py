@@ -1377,7 +1377,7 @@ class IdentityService:
     def local_native_login(
         self, *, login_id: str, password: str, trace_id: str, policy_version: str,
     ) -> SessionCredentials:
-        """Issue the Windows-only opaque credential pair for a verified local user."""
+        """Issue Windows credentials for a verified user or an initialized bootstrap administrator."""
         login = _checked_text(login_id).lower(); secret = _password(password)
         _checked_text(trace_id); _checked_text(policy_version)
         now = self._now()
@@ -1385,10 +1385,13 @@ class IdentityService:
             row = connection.execute(
                 "SELECT * FROM users WHERE login_id=? AND issuer='local'", (login,)
             ).fetchone()
+            initial_admin = row is not None and is_protected_initial_admin_record(row)
             try:
                 if (
                     row is None or row["password_digest"] is None
-                    or row["email_verified_at"] is None or row["state"] != "active"
+                    or row["state"] != "active"
+                    or (row["email_verified_at"] is None and not initial_admin)
+                    or (initial_admin and row["password_change_required"])
                 ):
                     raise VerifyMismatchError()
                 PASSWORD_HASHER.verify(str(row["password_digest"]), secret)

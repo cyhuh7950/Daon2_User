@@ -10,7 +10,9 @@ import "./studio-panel.css";
 const STATE_LABEL = { collecting: msg("authoring.state.collecting"), analyzing: msg("authoring.state.analyzing"), review: msg("authoring.state.review"), generating: msg("authoring.state.generating"), completed: msg("authoring.state.completed"), failed: msg("authoring.state.failed"), cancelled: msg("authoring.state.cancelled") };
 const STEPS = ["collecting", "analyzing", "review", "generating", "completed"];
 const UNIT_LABEL = { pending: msg("authoring.unit.pending"), done: msg("authoring.unit.done"), needs_review: msg("authoring.unit.needs_review"), failed: msg("authoring.unit.failed"), material_review: msg("authoring.unit.material_review") };
-const REASON_LABEL = { user: msg("authoring.reason.user"), needs_review: msg("authoring.reason.needs_review"), unit_failed: msg("authoring.reason.unit_failed"), material_review: msg("authoring.reason.material_review") };
+const REASON_LABEL = { user: msg("authoring.reason.user"), needs_review: msg("authoring.reason.needs_review"), unit_failed: msg("authoring.reason.unit_failed"),
+  material_review: msg("authoring.reason.material_review"), terms_review: msg("authoring.reason.terms_review"),
+  terms_review_unavailable: msg("authoring.reason.terms_review_unavailable") };
 const PAGE_CHOICES = [1, 5, 10, 20];
 const STATUS_LABEL = { covered: msg("authoring.coverage.covered"), partial: msg("authoring.coverage.partial"), missing: msg("authoring.coverage.missing") };
 const POLL_MS = 3000;
@@ -224,6 +226,7 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
   const [titles, setTitles] = useState({});
   const [impact, setImpact] = useState(null);
   const units = session.units ?? [];
+  const termsReview = session.terms_review ?? [];
   const paused = session.state === "paused";
   const finished = units.filter((unit) => unit.status === "done" || unit.status === "needs_review").length;
   const change = units.map((unit) => titles[unit.key] !== undefined && titles[unit.key] !== unit.title ? { key: unit.key, title: titles[unit.key] } : { key: unit.key });
@@ -238,11 +241,14 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
     {session.pause_requested && !paused && <p role="status">{msg("authoring.pause.requested")}</p>}
     <div className="studio-row">
       {session.state === "generating" && <button type="button" className="studio-btn" disabled={busy || session.pause_requested} onClick={onPause}>{msg("authoring.pause")}</button>}
-      {paused && <button type="button" className="studio-btn studio-btn--primary" disabled={busy} onClick={onResume}>{msg("authoring.resume")}</button>}
+      {paused && <button type="button" className="studio-btn studio-btn--primary" disabled={busy || termsReview.length > 0} onClick={onResume}>{msg("authoring.resume")}</button>}
     </div>
     <ol>{units.map((unit) => <li key={unit.key}>
       {paused ? <input aria-label={msg("authoring.unit.title", { title: unit.title })} value={titles[unit.key] ?? unit.title} maxLength={120} onChange={(event) => { const value = event.target.value; setImpact(null); setTitles((old) => ({ ...old, [unit.key]: value })); }} /> : <strong>{unit.title}</strong>}
       {" "}<small>{UNIT_LABEL[unit.status] ?? unit.status}{unit.locked ? ` · ${msg("authoring.unit.locked")}` : ""}</small>
+      {paused && termsReview.filter((issue) => issue.unit_key === unit.key).map((issue) => <div className="studio-warning" key={issue.unit_key}>
+        <p>{issue.reason}</p><blockquote>{issue.quote}</blockquote>
+      </div>)}
       {paused && unit.status === "material_review" && <MaterialChoice unit={unit} busy={busy} onApply={onMaterial} />}
       {paused && unit.paragraphs?.length > 0 && editing !== unit.key && <>
         {unit.paragraphs.map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}

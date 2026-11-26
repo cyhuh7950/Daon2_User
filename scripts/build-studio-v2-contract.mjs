@@ -150,9 +150,11 @@ Object.assign(schemas, {
   StudioV2AuthoringOutlineRequest: exact({ expected_revision: { type: "integer", minimum: 1 }, units: { type: "array", minItems: 1, maxItems: 60, items: { type: "object" } }, confirm: { type: "boolean" } }, ["expected_revision", "units"]),
   StudioV2AuthoringControlReceipt: { type: "object", required: ["output_id"], properties: { output_id: id, revision_no: { type: "integer" }, state: { type: "string" }, queued: { type: "boolean" }, pause_requested: { type: "boolean" }, affected: { type: "array", items: { type: "string" } }, applied: { type: "boolean" } } },
   StudioV2AuthoringSession: { type: "object", required: ["state", "template_id", "revision_no"], properties: {
-    output_id: id, template_id: { type: "string" }, analysis: { type: ["string", "null"] }, style: { type: ["string", "null"] }, state: { type: "string", enum: ["collecting", "analyzing", "review", "generating", "completed", "failed", "cancelled"] },
+    output_id: id, template_id: { type: "string" }, analysis: { type: ["string", "null"] }, style: { type: ["string", "null"] }, state: { type: "string", enum: ["collecting", "analyzing", "review", "generating", "paused", "completed", "failed", "cancelled"] },
     inputs: { type: "object" }, assumptions: { type: "array" }, pending_questions: { type: "array", description: "노트북 소스 선택 질문의 kind는 source_ref이다. 기준 약관 질문은 max_sources=1을 함께 반환한다." }, requests: { type: "array" }, requirements: { type: "array" },
-    plan: { type: ["object", "null"] }, output_formats: { type: "array" }, document: { type: ["object", "null"] }, revision_no: { type: "integer" }, job_status: { type: "string" } } },
+    plan: { type: ["object", "null"] }, output_formats: { type: "array" }, document: { type: ["object", "null"] }, revision_no: { type: "integer" }, job_status: { type: "string" },
+    pause_reason: { type: ["string", "null"] },
+    terms_review: { type: ["array", "null"], items: exact({ unit_key: id, quote: { type: "string", maxLength: 600 }, reason: { type: "string", maxLength: 300 } }, ["unit_key", "quote", "reason"]) } } },
   StudioV2AuthoringAnswersRequest: exact({ expected_revision: { type: "integer", minimum: 1 }, answers: { type: "array", maxItems: 10,
     description: "소스 답변은 key와 source_version_ids를 보낸다. rfp_document는 제안요청서, reference_proposals는 기존 제안서, base_terms는 기준 약관 한 건이다. 기존 knowledge_ref 답변은 해당 템플릿·세션에서 계속 지원한다." }, skip_remaining: { type: "boolean" } }, ["expected_revision", "answers"]),
   StudioV2AuthoringReviewRequest: exact({ expected_revision: { type: "integer", minimum: 1 }, requirements: { type: "array" }, plan_sections: { type: "array" },

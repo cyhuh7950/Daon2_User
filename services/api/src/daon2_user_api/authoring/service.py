@@ -16,7 +16,7 @@ TYPE_ID = "authored_document"
 
 def _view(content: Mapping[str, Any], revision: int, status: str) -> dict[str, Any]:
     keys = ("template_id", "analysis", "style", "output_choices", "state", "request_text", "inputs", "assumptions", "pending_questions", "requests", "requirements", "plan", "output_formats",
-            "error_code", "document", "analysis_warnings", "mode", "units", "pause_requested", "pause_reason", "target_pages", "confirm_material")
+            "error_code", "document", "analysis_warnings", "mode", "units", "pause_requested", "pause_reason", "target_pages", "confirm_material", "terms_review")
     data = {k: content.get(k) for k in keys}
     data["knowledge_count"] = len(content.get("knowledge") or [])
     data["revision_no"] = revision

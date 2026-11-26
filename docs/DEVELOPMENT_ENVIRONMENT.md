@@ -57,7 +57,7 @@
 
 | 항목 | 버전 |
 | --- | --- |
-| Next.js | 16.4.3 |
+| Next.js | 16.4.5 |
 | React | 19.2.8 |
 | TypeScript | 7.0.2 |
 | React Native | 0.86.3 |
