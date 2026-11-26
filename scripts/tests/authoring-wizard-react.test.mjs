@@ -328,6 +328,23 @@ test("멈춘 뒤 사유가 보이고 이어서 작성을 요청한다", async ()
   } finally { await view.close(); }
 });
 
+test("약관 본문 충돌 문장과 이유를 표시하고 수정 전에는 이어서 작성을 막는다", async () => {
+  const studio = withControls(fakeStudio([agent("paused", { style: "terms", pause_reason: "terms_review", revision_no: 9,
+    terms_review: [{ unit_key: "s1__u1", quote: "증서는 인편으로 배달한다.", reason: "삭제 요청한 조항을 유지했습니다." }] })]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.match(text(view), /증서는 인편으로 배달한다/u);
+    assert.match(text(view), /삭제 요청한 조항/u);
+    const resume = buttonByText(view.container, "이어서 작성");
+    assert.equal(resume.disabled, true);
+    await view.click(resume);
+    assert.equal(studio.calls.some(([action]) => action === "control"), false);
+    await view.click(findElements(view.container, (node) => node.tagName === "BUTTON" && node.textContent === "본문 수정")[0]);
+    assert.ok(buttonByText(view.container, "저장"));
+  } finally { await view.close(); }
+});
+
 test("멈춘 동안 소목차 하나만 다시 쓰게 요청한다", async () => {
   const studio = withControls(fakeStudio([agent("paused", { pause_reason: "user", revision_no: 9 })]));
   const view = await mount(studio, { outputId: OID });

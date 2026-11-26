@@ -177,6 +177,7 @@ export const STUDIO_ERRORS = Object.freeze({
   REQUEST_TOO_LARGE: "한 번에 보내기에 내용이 너무 많습니다. 항목을 줄여 다시 시도하세요.",
   STUDIO_NO_READY_SOURCE: "사용할 수 있는 소스가 없습니다. 소스 처리가 끝났는지 확인하세요.",
   AUTHORING_REFERENCE_UNAVAILABLE: "기준 문서의 본문을 읽을 수 없습니다. 처리 상태를 확인하고 기준 문서를 다시 선택하세요.",
+  AUTHORING_TERMS_REVIEW_REQUIRED: "약관 본문 검사에서 표시된 소목차를 수정하거나 다시 작성하세요.",
   AUTHORING_SOURCE_ROLE_CONFLICT: "제안요청서와 참고 제안서는 서로 다른 소스를 선택하세요.",
   NOTEBOOK_SCOPE_MISMATCH: "선택한 소스를 이 노트북에서 사용할 수 없습니다. 소스 목록을 확인한 뒤 다시 선택하세요.",
   STUDIO_TYPE_UNAVAILABLE: "아직 제공하지 않는 유형입니다.",

@@ -4506,6 +4506,7 @@
               "analyzing",
               "review",
               "generating",
+              "paused",
               "completed",
               "failed",
               "cancelled"
@@ -4547,6 +4548,41 @@
           },
           "job_status": {
             "type": "string"
+          },
+          "pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "terms_review": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "unit_key",
+                "quote",
+                "reason"
+              ],
+              "properties": {
+                "unit_key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+                },
+                "quote": {
+                  "type": "string",
+                  "maxLength": 600
+                },
+                "reason": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              }
+            }
           }
         }
       },

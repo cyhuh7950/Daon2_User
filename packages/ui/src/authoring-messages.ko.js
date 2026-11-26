@@ -20,6 +20,8 @@ export const AUTHORING_MESSAGES = {
   "authoring.reason.user": "일시 정지했습니다. 본문이나 구조를 고친 뒤 이어서 작성할 수 있습니다.",
   "authoring.reason.needs_review": "자료가 없거나 검증에 걸린 내용이 있습니다. 확인하고 고친 뒤 이어서 작성해 주세요.",
   "authoring.reason.unit_failed": "일부 소목차를 쓰지 못했습니다. 이어서 작성하면 그 소목차부터 다시 씁니다.",
+  "authoring.reason.terms_review": "약관 본문에서 변경 요청과 충돌하는 문장을 찾았습니다. 표시된 소목차를 수정하거나 다시 작성하면 본문을 다시 검사할 수 있습니다.",
+  "authoring.reason.terms_review_unavailable": "약관 본문 검사를 마치지 못했습니다. 이어서 작성하면 저장한 본문을 다시 검사합니다.",
   "authoring.unit.edit": "본문 수정",
   "authoring.unit.material_review": "자료 확인",
   "authoring.reason.material_review": "이 소목차에 쓸 자료를 찾았습니다. 뺄 자료를 해제한 뒤 이어서 작성해 주세요.",

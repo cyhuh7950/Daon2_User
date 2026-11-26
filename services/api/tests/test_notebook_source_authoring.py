@@ -2,6 +2,7 @@
 
 import copy
 import io
+import json
 import re
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -76,6 +77,8 @@ TERMS = ("별빛 자동차보험 약관\n제1장 총칙\n계약자는 보험계�
          "제4장 면책\n계약이 정한 면책 사유를 통지한다.")
 MODIFIED = "지급이 늦어지면 전자우편으로 통지한다."
 ADDED = "계약자는 온라인 창구에서 진행 상태를 확인할 수 있다."
+RETAINED = "증서는 인편으로 배달한다."
+EDITORIAL = "증서의 인편 배달 조항을 삭제한다."
 PATH = "/api/v1/workspaces/ws-test/notebooks/nb-test/studio/authoring/sessions"
 
 
@@ -95,6 +98,8 @@ class FixtureSources:
 class FixtureModel:
     def __init__(self):
         self.prompts = []
+        self.conflicting_terms = False
+        self.review_unavailable = False
 
     def generate(self, context, prompt, cancel_check=None):
         self.prompts.append(prompt)
@@ -109,11 +114,19 @@ class FixtureModel:
                 assert "전자우편" in prompt.user
                 cited = ref(TERMS)
                 paragraphs = [{"text": text, "refs": [cited]} for text in ("보험금은 서류를 받은 후 심사한다.", MODIFIED, ADDED)]
+                if self.conflicting_terms:
+                    paragraphs.extend({"text": text, "refs": [cited]} for text in (RETAINED, EDITORIAL))
             else:
                 paragraphs = [{"text": PROPOSAL, "refs": [ref(PROPOSAL)]}]
                 if "요구서.pdf" in prompt.user:
                     paragraphs.append({"text": RFP, "refs": [ref(RFP)]})
             data = {"paragraphs": paragraphs, "summary": "작성 완료", "terms": []}
+        elif name == "authoring_terms_body_review":
+            if self.review_unavailable:
+                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+            rows = json.loads(prompt.user.split("[검사할 본문]\n", 1)[1])
+            data = {"issues": [{"unit_key": row["unit_key"], "quote": row["text"], "reason": "삭제 요청한 인편 배달을 본문에 유지했습니다."}
+                               for row in rows if row["text"] == RETAINED]}
         else:
             data = {"items": []}
         return SimpleNamespace(data=data, provider_code="FIXTURE", model_id="fixture", connection_short_code="FIXTURE")
@@ -252,6 +265,73 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     else:
         assert PROPOSAL in body
         assert ("부록 A. 요구사항 대응표" in body) == (template == "rfp_response_proposal")
+
+
+def _generate_payment_terms(writing):
+    client, repo, _, worker = writing
+    opened = client.post(PATH, json={"template_id": "insurance_terms_draft"})
+    assert opened.status_code == 201, opened.text
+    output = PATH + "/" + opened.json()["data"]["output_id"]
+    receipt = client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "base_terms", "source_version_ids": ["terms-v1"]},
+        {"key": "product_type", "value": "자동차보험"},
+        {"key": "changes", "value": "전자우편으로 통지하고 인편 배달을 삭제"},
+    ]})
+    assert receipt.status_code == 202, receipt.text
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    sections = [section for section in review["plan"]["sections"] if section["key"] == "payment"]
+    receipt = client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                 "plan_sections": sections, "output_formats": ["docx"]})
+    assert receipt.status_code == 202, receipt.text
+    worker._process(repo.jobs.pop())
+    return output, client.get(output).json()["data"]
+
+
+def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
+    client, repo, model, worker = writing
+    model.conflicting_terms = True
+    output, paused = _generate_payment_terms(writing)
+    assert (paused["state"], paused["pause_reason"], paused["document"]) == ("paused", "terms_review", None)
+    issue, = paused["terms_review"]
+    assert issue["quote"] == RETAINED
+    receipt = client.post(output + "/control", json={"action": "resume", "expected_revision": paused["revision_no"]})
+    assert receipt.status_code == 409, receipt.text
+    assert "AUTHORING_TERMS_REVIEW_REQUIRED" in receipt.text
+    assert not repo.jobs
+    receipt = client.put(output + "/units/" + issue["unit_key"],
+                         json={"expected_revision": paused["revision_no"], "paragraphs": [MODIFIED]})
+    assert receipt.status_code == 202, receipt.text
+    edited = client.get(output).json()["data"]
+    receipt = client.post(output + "/control", json={"action": "resume", "expected_revision": edited["revision_no"]})
+    assert receipt.status_code == 202, receipt.text
+    worker._process(repo.jobs.pop())
+    completed = client.get(output).json()["data"]
+    assert completed["state"] == "completed"
+    assert not completed["terms_review"]
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    exported = export_v2("docx", {"output_id": repo.output_id, "title": completed["document"]["title"],
+                                  "type_id": "authored_document", "revision": {"content": completed},
+                                  "evidence": repo.evidence}).content
+    with ZipFile(io.BytesIO(exported)) as archive:
+        body = archive.read("word/document.xml").decode()
+    assert MODIFIED in body
+    # 기준 조항은 변경 추적에 표시될 수 있지만 편집 지시 문장은 내보내지 않는다.
+    assert EDITORIAL not in body
+
+
+def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):
+    client, repo, model, worker = writing
+    model.review_unavailable = True
+    output, paused = _generate_payment_terms(writing)
+    assert (paused["state"], paused["pause_reason"], paused["document"]) == ("paused", "terms_review_unavailable", None)
+    model.review_unavailable = False
+    count = [prompt.schema_name for prompt in model.prompts].count("authoring_unit")
+    receipt = client.post(output + "/control", json={"action": "resume", "expected_revision": paused["revision_no"]})
+    assert receipt.status_code == 202, receipt.text
+    worker._process(repo.jobs.pop())
+    assert client.get(output).json()["data"]["state"] == "completed"
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_unit") == count
 
 
 def test_worker_rechecks_access_revoked_after_queue(writing):

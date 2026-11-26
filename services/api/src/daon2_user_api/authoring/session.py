@@ -184,6 +184,8 @@ def _unit_index(session: Mapping[str, Any], key: str) -> int:
 
 def resume(session: Mapping[str, Any]) -> dict[str, Any]:
     """사람이 빠지면 다음 미완료 소목차부터 이어진다. 확인을 기다리던 소목차는 확인된 것으로, 실패한 소목차는 다시 쓴다."""
+    if session.get("terms_review"):
+        raise AuthoringError("AUTHORING_TERMS_REVIEW_REQUIRED", 409)
     updated = transition(session, "generating")
     updated.update({"pause_requested": False, "pause_reason": None})
     for unit in updated["units"]:
@@ -227,6 +229,7 @@ def redo_unit(session: Mapping[str, Any], key: str) -> dict[str, Any]:
     if unit["locked"]:
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
     unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
+    _allow_terms_recheck(updated, {key})
     return updated
 
 
@@ -239,9 +242,17 @@ def edit_unit(session: Mapping[str, Any], key: str, paragraphs: Sequence[str]) -
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
     updated = copy.deepcopy(dict(session))
     unit = updated["units"][_unit_index(updated, key)]
+    if texts != [paragraph["text"] for paragraph in unit["paragraphs"]]:
+        _allow_terms_recheck(updated, {key})
     unit.update({"status": "done", "locked": True, "error_code": None, "paragraphs": [{"text": text, "refs": [], "origin": "user"} for text in texts],
                  "summary": " ".join(texts)[:300]})
     return updated
+
+
+def _allow_terms_recheck(session: dict[str, Any], edited: set[str]) -> None:
+    # 한쪽 문장을 고치면 여러 소목차 사이의 충돌이 함께 해소될 수 있으므로 본문 전체를 다시 검사한다.
+    if any(item["unit_key"] in edited for item in session.get("terms_review", [])):
+        session.pop("terms_review")
 
 
 def _changed(unit: Mapping[str, Any], item: Mapping[str, Any]) -> bool:
@@ -278,6 +289,7 @@ def apply_outline(session: Mapping[str, Any], change: Sequence[Mapping[str, Any]
             unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
         units.append(unit)
     updated["units"] = units
+    _allow_terms_recheck(updated, affected | (set(known) - set(keys)))
     return updated
 
 

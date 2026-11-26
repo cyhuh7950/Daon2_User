@@ -21,8 +21,8 @@ fn valid_id(value: &str) -> bool {
 
 fn valid_filename(value: &str) -> bool {
     !value.is_empty()
+        && !matches!(value, "." | "..")
         && value.chars().count() <= 255
-        && value.to_ascii_lowercase().ends_with(".pdf")
         && !value.chars().any(char::is_control)
         && !value.contains(['/', '\\'])
 }
@@ -147,6 +147,7 @@ pub fn valid_workspace_id_for_contract(value: &str) -> bool {
 }
 pub fn valid_pdf_upload_for_contract(filename: &str, mime_type: &str, bytes: &[u8]) -> bool {
     valid_filename(filename)
+        && filename.to_ascii_lowercase().ends_with(".pdf")
         && mime_type == "application/pdf"
         && (5..=MAX_WORKSPACE_PDF_BYTES).contains(&bytes.len())
         && bytes.starts_with(b"%PDF-")
@@ -1299,6 +1300,33 @@ mod tests {
         for invalid in ["tab\tname.pdf", "line\nname.pdf", "folder/name.pdf"] {
             assert!(!valid_filename(invalid), "invalid filename: {invalid:?}");
         }
+        assert!(!valid_filename(".."));
+        assert!(valid_pdf_upload_for_contract("승인 운영 지침.PDF", "application/pdf", b"%PDF-1.7"));
+        assert!(!valid_pdf_upload_for_contract("운영표.xlsx", "application/pdf", b"%PDF-1.7"));
+    }
+
+    #[test]
+    fn source_list_accepts_mixed_notebook_filenames() {
+        let filenames = ["기준 문서.pdf", "운영표.xlsx", "정산.csv", "메모.md", "기존 약관.docx"];
+        let sources: Vec<_> = filenames.iter().enumerate().map(|(index, filename)| serde_json::json!({
+            "source_id": format!("source-{index}"),
+            "source_version_id": format!("version-{index}"),
+            "filename": filename,
+            "source_state": "ready",
+            "processing_state": "completed",
+            "job_state": "completed",
+        })).collect();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "data": {"sources": sources},
+            "meta": {"trace_id": "trace-1", "workspace_id": "workspace-1"},
+        })).unwrap();
+        let response = NativeWorkspaceResponse {
+            status: 200, content_type: Some("application/json".into()),
+            citation_page: None, body: Zeroizing::new(body),
+        };
+        let data: SourceListData = parse_json(response, "workspace-1", false).unwrap();
+        assert!(data.sources.iter().all(WorkspaceSource::valid));
+        assert!(data.sources.iter().map(|source| source.filename.as_str()).eq(filenames));
     }
 
     #[test]
