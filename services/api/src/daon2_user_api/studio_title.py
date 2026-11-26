@@ -29,7 +29,11 @@ def derive_title(content: Mapping[str, Any]) -> str:
         from .studio_web_page import verified_body
 
         body = verified_body(body)
-    candidates: list[object] = [body.get("title"), _first_sentence(body.get("summary"))]
+    if content.get("schema") == "studio.data_aggregation.v1":
+        # 데이터 집계(WO-N9): 사용자가 적은 요청 글의 첫 문장을 제목으로 쓴다. 요약은 숫자가 든 문장 목록이라 쓰지 않는다.
+        return _clip(_first_sentence(body.get("request")).rstrip(".!?。"))
+    summary = body.get("summary")
+    candidates: list[object] = [body.get("title"), _first_sentence(summary) if isinstance(summary, str) else None]
     nodes = body.get("nodes")
     if isinstance(nodes, list):
         root = next((n for n in nodes if isinstance(n, Mapping) and n.get("id") == body.get("root")), None)
