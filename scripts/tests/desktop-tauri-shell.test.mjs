@@ -367,8 +367,9 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     dom.document.body.appendChild(container);
     root = createRoot(container);
     window.location.hash = "#/notebooks";
+    window.__TAURI_INTERNALS__ = { invoke };
     await act(async () => {
-      root.render(createElement(StrictMode, null, createElement(DesktopShell, { nativeInvoke: invoke, sessionWatchOptions: { schedule: (poll) => { scheduledPoll = poll; return 1; }, cancel: () => {} } })));
+      root.render(createElement(StrictMode, null, createElement(DesktopShell, { sessionWatchOptions: { schedule: (poll) => { scheduledPoll = poll; return 1; }, cancel: () => {} } })));
     });
     assert.ok(scheduledPoll, "제품 Tree가 주입된 watch scheduler를 사용해야 한다");
     assert.equal(findElements(container, (node) => node.getAttribute("aria-label") === "Windows 주 탐색").length, 0);

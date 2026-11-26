@@ -48,7 +48,7 @@ const writeDesktopRoute = (method, hash) => {
   else window.location.hash = hash;
 };
 
-export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
+export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNALS__?.invoke, sessionWatchOptions } = {}) {
   const sessionBridge = useMemo(() => createNativeSessionBridge({ invoke: nativeInvoke }), [nativeInvoke]);
   const screenPreferences = useMemo(() => {
     try { return createScreenPreferencesBridge({ invoke: nativeInvoke }); }
