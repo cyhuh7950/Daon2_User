@@ -40,14 +40,35 @@
 
 ## 다음 할 일
 
-2026-11-16 기준
+2026-11-26 기준
+
+### 현재 상태
+
+- main c54cbb35, ysna ed71d8e(코드 기준 최신. 그 뒤 main 커밋은 기록 문서만). DB `alembic_version=0089`
+- 끝난 작업: WO-N1(43/43, UAT-01~14 통과)과 후속 A 묶음, WO-N8 웹 페이지 만들기, WO-N9 데이터 집계. 각 행은 /goal 실행 기록 표에 있음
+- 저장소: 로컬 브랜치는 main만, 원격 작업 브랜치·요청 태그·stash 없음, 작업 폴더(worktree) 없음. D:\tmp의 Daon2-User 임시 폴더 없음(잠겨 있던 daon2-user-nb4-u1도 지움). ysna에 Daon2-User 임시 로그·임시 백업 없음
+- 시험 기준선: API 알려진 실패 9건(notification_dispatch_runtime 1, recovery_postgres 2, tts_audio 6), Node 알려진 실패 96종(product-studio-click 9건은 main에도 있음). 부하에서 흔들리는 시험: website_source_import, open_law_mcp, notebook-overview, provider-model-picker-layout, 좁은 화면 배치
+
+### 다음 후보(신산님 결정)
+
+- 남은 B 묶음 설계: 웹 질문 도구·웹 자료 찾기·외부 검색 API(D-02), 웹사이트 가져오기 외부 전송 목적지 확인(C-7). 공개 노트북·실시간 음성은 들이지 않음으로 결정됨
+- 데스크톱 앱(Rust) 소스 목록: 파일 이름이 .pdf가 아니면 목록 전체를 거부(기존 제한, `workspace_bridge.rs` `valid_filename`). XLSX·CSV·메모 소스가 있는 노트북은 데스크톱에서 목록이 열리지 않음
+- 문서 작성의 기준 문서를 노트북 소스에서 고르기(신산님이 말한 핵심 필요: 기존 제안서·약관으로 새 문서 만들기. 지금 템플릿은 승인 지식에서만 기준 문서를 고름)
+
+### 후속 정리 거리(작음)
+
+- WO-N8: 휴대폰 폭에서 웹 페이지 칸이 좁음(대화로 고치기 칸이 최대 45%). 내려받은 HTML을 앱 밖 브라우저에서 직접 연 시험은 못 함(내용 검사로 대신)
+- WO-N9: 다시 생성 때 출력 소스 목록을 서버에서 갱신(지금은 화면에서 표 소스를 잠가 막음), '적용한 조건' 문장의 정렬 항목에 측정 id(예: avg_지급액)가 보임, 10만 행에서 합계 열 셋 이상은 크기 한도(2MiB) 초과
+- WO-N1: OmniRoute 응답 형식 오류(RESPONSE_INVALID)는 한 번 본 뒤 재현 안 됨(진단 로그 대기)
+
+### 2026-11-16 남은 항목(그 뒤 확인하지 않아 그대로 둠)
 
 - 신산님 화면 확인: 노트북 질문에서 GraphRAG·규칙 판정 근거, 패널의 패키지별 지식 표시와 인용 종류, 스튜디오 출력의 규칙 판정 근거, 연결 등록 화면(종류 직접 선택·도구 줄임 안내), 화면 정리 5차(로그인 뒤 홈)
 - 다른 쪽 대기: Daon2 제안서 작업 규칙 조건 개념명 수정(2026-11-16 전달, Daon2가 읽기 전용 원인 확인 중, 고친 뒤 범용 토큰으로 재확인), Daon2 Insurance 재생성(끝나면 Insurance 온톨로지·규칙·GraphRAG 재확인), ysna nginx proxy_read_timeout 300초(proxy_host 8의 anvil-web 설정 정리 후 proxy_host 21 고급 설정에 적용)
 - "PDF만 된다"는 증상: 재현 정보(파일 형식·올린 화면·나온 문구) 받으면 확인. 파일 업로드 칸은 모든 형식을 받고, PDF 전용 칸은 화면에서 누를 수 없는 숨은 칸(product-workspace-shell.jsx `source-legacy-input`)
 - 실서버 미확인: PDF 자료 질문(근거 검증 실패 시 `text_grounding_failure reason=` 로그로 원인 확인), 문서 작성 반복 정지 해소, TXT 업로드 처리, 운영 상태 화면 표시
 - ~~이미 색인된 TXT Source 재처리~~ → 하지 않음(2026-11-16 신산님 결정): 대상 admin 2개는 '화면 확인용 Notebook'에 붙여넣은 시험용 글(343·522바이트, 10-20), 나머지 10개는 시험용 조직(tenant-B…). 제품 재처리는 실패한 Source만 허용
-- 서버 임시 로그(`/tmp/*deploy*.log` 등)는 저장소 정리 때 삭제
+- ~~서버 임시 로그(`/tmp/*deploy*.log` 등)는 저장소 정리 때 삭제~~ → 2026-11-26 확인: ysna `/tmp`에 Daon2-User 배포 로그 없음(남은 `daon2_prev_sha`·`~/deploy/backups`의 항목은 Daon2·DishMoa·Media Bridge 것이라 두었음)
 
 ### 2026-10-20 당시 목록(참고)
 
