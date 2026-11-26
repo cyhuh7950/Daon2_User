@@ -13,6 +13,7 @@ import { createNativeNotebookBridge } from "./native-notebook-bridge.js";
 import { concealProtectedDesktop, revealProtectedDesktop } from "./desktop-protected-route.js";
 import { NativeAuthPanel } from "./native-auth-panel.jsx";
 import { createWindowsWorkspaceAdapter } from "./windows-workspace-adapter.js";
+import { createWindowsOnlineFeatures } from "./windows-online-features.js";
 import { createOfflineStudioState, reduceOfflineStudioState } from "./offline-studio-model.js";
 import { WorkspaceOperationsModal } from "./workspace-operations-modal.jsx";
 import { WorkspaceSettingsModal } from "./workspace-settings-modal.jsx";
@@ -27,13 +28,13 @@ const LABELS = {
   Notifications: "Notifications"
 };
 
-function DesktopWorkspaceRoute({ workspaceId, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
-  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} adapter={workspaceAdapter} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
+function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey }) {
+  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
 }
 
-function RouteSurface({ routeKey, workspaceId, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
+function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
   if (routeKey === "WorkspaceDetail") {
-    return <DesktopWorkspaceRoute workspaceId={workspaceId} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />;
+    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} />;
   }
   return <section className="desktop-safe-surface" role="status"><h2>{LABELS[routeKey]}</h2><p>실제 사용자 기능 연결 전에는 성공 데이터를 표시하지 않습니다.</p></section>;
 }
@@ -169,7 +170,8 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
     const base = createWindowsWorkspaceAdapter(nativeSession.workspaceId, {
       invoke: nativeInvoke, organizationId: nativeSession.tenantId, notebookId: selectedNotebook.notebookId,
     });
-    return createNotebookContextWorkspaceAdapter(base, selectedNotebook.context);
+    const online = createWindowsOnlineFeatures(nativeSession.workspaceId, selectedNotebook.notebookId, nativeInvoke);
+    return createNotebookContextWorkspaceAdapter({ ...base, ...online }, selectedNotebook.context);
   }, [nativeInvoke, nativeSession.authenticated, nativeSession.sessionId, nativeSession.tenantId, nativeSession.workspaceId, selectedNotebook]);
 
   const beginNotebookRequest = useCallback((targetHash) => {
@@ -388,7 +390,7 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
       <div className="desktop-content" inert={activeModal ? "" : undefined} aria-hidden={activeModal ? "true" : undefined}>
         {routes.map((route) => (
             <section key={route.key} hidden={route.key !== activeKey} aria-label={LABELS[route.key]}>
-              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />
+              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />
             </section>
         ))}
       </div>

@@ -548,6 +548,10 @@ impl Drop for NativeHttpResponse {
 }
 
 pub(crate) enum NativeWorkspaceOperation {
+    NotebookRequest {
+        workspace_id: String,
+        request: crate::notebook_transport::NotebookRequest,
+    },
     ListNotebooks {
         workspace_id: String,
     },
@@ -645,7 +649,8 @@ impl NativeWorkspaceOperation {
 
     pub(crate) fn workspace_id(&self) -> &str {
         match self {
-            Self::ListNotebooks { workspace_id }
+            Self::NotebookRequest { workspace_id, .. }
+            | Self::ListNotebooks { workspace_id }
             | Self::CreateNotebook { workspace_id, .. }
             | Self::GetNotebook { workspace_id, .. }
             | Self::GetNotebookContext { workspace_id, .. }
@@ -662,8 +667,9 @@ impl NativeWorkspaceOperation {
         }
     }
 
-    fn method_path(&self) -> (&'static str, String) {
+    fn method_path(&self) -> (&str, String) {
         match self {
+            Self::NotebookRequest { request, .. } => (&request.method, request.path.clone()),
             Self::ListNotebooks { workspace_id } => {
                 ("GET", format!("/api/v1/workspaces/{workspace_id}/notebooks"))
             }
@@ -726,6 +732,7 @@ impl NativeWorkspaceOperation {
 
     fn expected_status(&self, status: u16) -> bool {
         match self {
+            Self::NotebookRequest { .. } => (200..300).contains(&status) || (400..600).contains(&status),
             Self::CreateNotebook { .. } => status == 200 || status == 201,
             Self::UploadPdf { .. } => status == 202,
             Self::CreateReport { .. } => status == 200 || status == 201,
@@ -743,6 +750,7 @@ impl NativeWorkspaceOperation {
 impl fmt::Debug for NativeWorkspaceOperation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::NotebookRequest { .. } => "NativeWorkspaceOperation::NotebookRequest([redacted])",
             Self::ListNotebooks { .. } => "NativeWorkspaceOperation::ListNotebooks",
             Self::CreateNotebook { .. } => "NativeWorkspaceOperation::CreateNotebook([redacted])",
             Self::GetNotebook { .. } => "NativeWorkspaceOperation::GetNotebook",
@@ -766,6 +774,7 @@ pub(crate) struct NativeWorkspaceResponse {
     pub(crate) content_type: Option<String>,
     pub(crate) citation_page: Option<u32>,
     pub(crate) body: Zeroizing<Vec<u8>>,
+    pub(crate) headers: Vec<(String, String)>,
 }
 
 pub(crate) trait NativeWorkspaceTransport: Send + Sync {
@@ -898,6 +907,20 @@ impl NativeWorkspaceTransport for NativeWorkspaceClient {
                     },
                 );
             match &mut operation {
+                NativeWorkspaceOperation::NotebookRequest { request: input, .. } => {
+                    for (name, value) in &input.headers {
+                        let mut value = reqwest::header::HeaderValue::from_str(value)
+                            .map_err(|_| "INVALID_REQUEST")?;
+                        value.set_sensitive(name == "x-daon-step-up-authorization");
+                        request = request.header(name.as_str(), value);
+                    }
+                    if let Some(body) = input.body.take() {
+                        request = request
+                            .header(reqwest::header::CONTENT_TYPE, "application/json")
+                            .body(reqwest::Body::from(bytes::Bytes::from_owner(WorkspaceWireBuffer(Zeroizing::new(body.into_bytes())))));
+                    }
+                    request = request.timeout(std::time::Duration::from_secs(250));
+                }
                 NativeWorkspaceOperation::UploadPdf {
                     notebook_id,
                     filename,
@@ -972,7 +995,13 @@ impl NativeWorkspaceTransport for NativeWorkspaceClient {
                 .get("X-Citation-Page")
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.parse::<u32>().ok());
-            let maximum = if operation.expects_pdf() {
+            let extended = match &operation {
+                NativeWorkspaceOperation::NotebookRequest { request, .. } => Some(request),
+                _ => None,
+            };
+            let maximum = if let Some(input) = extended {
+                input.response_limit()
+            } else if operation.expects_pdf() {
                 MAX_WORKSPACE_PDF_BYTES
             } else {
                 MAX_RESPONSE_BYTES
@@ -982,19 +1011,28 @@ impl NativeWorkspaceTransport for NativeWorkspaceClient {
             } else {
                 "application/json"
             };
+            let response_media_type = content_type.as_deref().unwrap_or("").split(';').next().unwrap_or("").trim();
+            let media_allowed = match extended {
+                Some(input) => input.allows_response(status, response_media_type),
+                None => response_media_type.eq_ignore_ascii_case(expected_type),
+            };
             if !operation.expected_status(status)
                 || response.headers().contains_key(reqwest::header::SET_COOKIE)
-                || content_type
-                    .as_deref()
-                    .unwrap_or("")
-                    .to_ascii_lowercase()
-                    .split(';')
-                    .next()
-                    != Some(expected_type)
+                || !media_allowed
                 || content_length.is_some_and(|length| length > maximum)
             {
                 return Err(Self::status_error(status));
             }
+            let headers = if extended.is_some() {
+                ["content-type", "content-disposition", "etag", "retry-after", "x-citation-page",
+                    "x-citation-locator-kind", "x-citation-region"]
+                    .iter().filter_map(|name| Some((
+                        (*name).to_owned(),
+                        response.headers().get(*name)?.to_str().ok()?.to_owned(),
+                    ))).collect()
+            } else {
+                Vec::new()
+            };
             let mut body = Zeroizing::new(Vec::new());
             while let Some(chunk) = response
                 .chunk()
@@ -1027,6 +1065,7 @@ impl NativeWorkspaceTransport for NativeWorkspaceClient {
                 content_type,
                 citation_page,
                 body,
+                headers,
             })
         })
     }

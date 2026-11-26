@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packNativeResponse } from "./support/native-notebook-response.mjs";
 
 class MinimalEvent {
   constructor(type, options = {}) {
@@ -349,10 +350,10 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
         job_state: "completed"
       }];
       if (command === "workspace_list_studio_outputs") return [];
-      if (command === "workspace_ask_question") return {
+      if (command === "native_notebook_request" && args.request.path.endsWith("/questions")) return packNativeResponse(JSON.stringify({ data: {
         run_id: "run-1", run_result_id: "result-1", answer: "StrictMode 질문 성공", insufficient: false,
         citations: [{ citation_id: "citation-1", source_id: "source-workspace-1", source_version_id: "version-workspace-1", evidence_span_id: "span-1", page: 1, origin: "raw_source", context_item_id: "source-workspace-1", locator: { kind: "page", value: "1" } }]
-      };
+      }, meta: { trace_id: "trace-1", workspace_id: args.workspaceId } }));
       if (command === "recovery_cloud_list_backups") return { data: [], etag: null };
       if (command === "local_service_status") return { state: "ready", retryable: false, error_code: null };
       throw new Error(`unexpected:${command}`);
@@ -416,7 +417,7 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     const strictSubmit = findElements(strictQuestionForm, (node) => node.tagName === "BUTTON" && node.getAttribute("type") === "submit")[0];
     assert.equal(strictSubmit.disabled, false, "질문 state가 실제 composer에 반영되어야 한다");
     await act(async () => { strictQuestionForm.dispatchEvent(new MinimalEvent("submit")); await Promise.resolve(); });
-    assert.ok(calls.includes("workspace_ask_question"), `StrictMode 질문 Command 호출 필요: ${calls.join(",")} / ${container.textContent}`);
+    assert.ok(calls.includes("native_notebook_request"), `StrictMode 질문 Command 호출 필요: ${calls.join(",")} / ${container.textContent}`);
     assert.match(container.textContent, /StrictMode 질문 성공/u, "StrictMode effect 재실행 뒤에도 Session lifetime signal이 살아 있어야 한다");
     polledSession = { authenticated: true, session: sessionTwo };
     await act(async () => { await scheduledPoll(); await Promise.resolve(); });

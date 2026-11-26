@@ -49,7 +49,7 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     // 메모를 소스로(WO-N1 NB1-F2): 응답 {source_id, source_version_id, state} / 반영 {source_id, source_version_id}.
     createMemoSource: (outputId, options) => createMemoSource(workspaceId, outputId, scope(options)),
     reflectMemoSource: (outputId, options) => reflectMemoSource(workspaceId, outputId, scope(options)),
-    issueExportStepUp: (outputId, password, options) => issueExportStepUp(outputId, password, options),
+    issueExportStepUp: (outputId, password, options) => issueExportStepUp(outputId, password, { ...options, fetchImpl }),
     copyNotebook: (input) => copyNotebook(workspaceId, scope(input)),
     clearChatHistory: (options) => clearChatHistory(workspaceId, scope(options)),
     listChatTurns: (options) => listChatTurns(workspaceId, scope(options)),

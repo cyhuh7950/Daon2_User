@@ -1017,6 +1017,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [imageCitationLoaded, setImageCitationLoaded] = useState(false);
   const [imageCitationError, setImageCitationError] = useState(null);
   const [sheetCitation, setSheetCitation] = useState(null);
+  const [textCitation, setTextCitation] = useState(null);
+  const textCitationRequest = useRef(null);
   const sheetRequestRef = useRef(null);
   const [docxCitation, setDocxCitation] = useState(null);
   const [lawCitation,setLawCitation]=useState(null);
@@ -2331,6 +2333,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             // Citation을 눌렀을 때 소스 보기(원문 창)를 여는 함수. 답변 과정의 근거 항목도 같은 함수로 연다.
             const openCitation = (event, citation) => {
               if (citation.origin === "mcp_daon_rag") return;
+              textCitationRequest.current?.abort();
+              setTextCitation(null);
               if(citation.origin==='raw_source' && citation.locator.kind==='section' && /^law-source-[0-9a-f]{32}$/u.test(citation.source_id)){
                 event.preventDefault();lawCitationRequest.current?.abort();const controller=new AbortController();lawCitationRequest.current=controller;
                 const epoch=questionEpochRef.current;setLawCitation({citation,epoch,content:null,error:null});
@@ -2358,7 +2362,10 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                     if (!parse(citation.locator.value) || typeof citation.content_url !== "string"
                         || !citation.content_url.startsWith(expected) || !isSafeDtoId(citation.content_url.slice(expected.length))
                         || citation.content_url !== adapter.citationUrl(citation)) throw new Error("CITATION_CONTENT_UNAVAILABLE");
-                    const response=await globalThis.fetch(citation.content_url,{credentials:"same-origin",cache:"no-store",signal:lifetimeControllerRef.current?.signal});
+                    const options = { signal: lifetimeControllerRef.current?.signal };
+                    const response = adapter.citationResponse
+                      ? await adapter.citationResponse(citation, options)
+                      : await globalThis.fetch(citation.content_url, { ...options, credentials: "same-origin", cache: "no-store" });
                     if (!response.ok || response.headers.get("content-type")?.split(";",1)[0].trim() !== "application/json") throw new Error("CITATION_CONTENT_UNAVAILABLE");
                     const text=await response.text();
                     if(new TextEncoder().encode(text).length>32768)throw new Error("CITATION_CONTENT_UNAVAILABLE");
@@ -2386,7 +2393,10 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                         || !citation.content_url.startsWith(expected)
                         || !isSafeDtoId(citation.content_url.slice(expected.length))
                         || citation.content_url !== adapter.citationUrl(citation)) throw new Error("CITATION_CONTENT_UNAVAILABLE");
-                    const response = await globalThis.fetch(citation.content_url, { credentials: "same-origin", cache: "no-store", signal: lifetimeControllerRef.current?.signal });
+                    const options = { signal: lifetimeControllerRef.current?.signal };
+                    const response = adapter.citationResponse
+                      ? await adapter.citationResponse(citation, options)
+                      : await globalThis.fetch(citation.content_url, { ...options, credentials: "same-origin", cache: "no-store" });
                     if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/json") throw new Error("CITATION_CONTENT_UNAVAILABLE");
                     const text = await response.text();
                     if (new TextEncoder().encode(text).length > 262144) throw new Error("CITATION_CONTENT_UNAVAILABLE");
@@ -2406,6 +2416,27 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 setImageCitationLoaded(false);
                 setImageCitationError(null);
                 setImageCitation({ ...citation, region: parseImageRegion(citation.locator.value) });
+                return;
+              }
+              if (citation.locator.kind === "section" && adapter.citationResponse) {
+                event.preventDefault();
+                const controller = new AbortController();
+                textCitationRequest.current = controller;
+                setTextCitation({ citation, text: null, error: false });
+                const current = () => textCitationRequest.current === controller && !controller.signal.aborted && workspaceMountedRef.current;
+                void (async () => {
+                  try {
+                    const response = await adapter.citationResponse(citation, { signal: controller.signal });
+                    if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0] !== "text/plain"
+                        || response.headers.get("x-citation-locator-kind") !== "section") throw new Error("CITATION_CONTENT_UNAVAILABLE");
+                    const bytes = await response.arrayBuffer();
+                    if (bytes.byteLength > 524_288) throw new Error("CITATION_CONTENT_UNAVAILABLE");
+                    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+                    if (current()) setTextCitation({ citation, text, error: false });
+                  } catch {
+                    if (current()) setTextCitation({ citation, text: null, error: true });
+                  }
+                })();
                 return;
               }
               void openNativeCitation(event, {
@@ -2471,6 +2502,11 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             <button type="button" onClick={()=>{docxRequestRef.current=null;setDocxCitation(null);}}>원문 닫기</button>
             {docxCitation.error?<p role="alert">{docxCitation.citation.locator.kind==="audio_segment"?"음성":docxCitation.citation.locator.kind==="pptx_block"?"PPTX":"DOCX"} 원문을 확인할 수 없습니다. ({docxCitation.error})</p>:docxCitation.content?(docxCitation.citation.locator.kind==="audio_segment"?<AudioOriginalSegments key={`${docxCitation.citation.citation_id}:${docxCitation.requestEpoch}`} content={docxCitation.content} citation={docxCitation.citation}/>:docxCitation.citation.locator.kind==="pptx_block"?<PptxOriginalBlocks content={docxCitation.content}/>:<DocxOriginalBlocks content={docxCitation.content}/>):<p role="status">{docxCitation.citation.locator.kind==="audio_segment"?"음성":docxCitation.citation.locator.kind==="pptx_block"?"PPTX":"DOCX"} 원문을 불러오는 중입니다.</p>}
           </section>:null}
+          {textCitation && transcriptCitations(viewState).some(current => current.citation_id === textCitation.citation.citation_id && current.source_version_id === textCitation.citation.source_version_id) ? <section className="citation-sheet-view" aria-label="텍스트 원문">
+            <button type="button" onClick={() => { textCitationRequest.current?.abort(); setTextCitation(null); }}>원문 닫기</button>
+            {textCitation.error ? <p role="alert">텍스트 원문을 확인할 수 없습니다.</p> : textCitation.text === null
+              ? <p role="status">텍스트 원문을 불러오는 중입니다.</p> : <pre style={{ whiteSpace: "pre-wrap" }}>{textCitation.text}</pre>}
+          </section> : null}
           {sheetCitation && transcriptCitations(viewState).some(current => current.citation_id === sheetCitation.citation.citation_id && current.source_id === sheetCitation.citation.source_id && current.source_version_id === sheetCitation.citation.source_version_id && current.locator.kind === "sheet_cell" && current.locator.value === sheetCitation.citation.locator.value) ? <section className="citation-sheet-view" aria-label="셀 원문">
             <button type="button" onClick={() => { sheetRequestRef.current = null; setSheetCitation(null); }}>원문 닫기</button>
             {sheetCitation.error ? <p role="alert">셀 원문을 확인할 수 없습니다. ({sheetCitation.error})</p> : sheetCitation.content ? <SheetOriginalTable content={sheetCitation.content} /> : <p role="status">셀 원문을 불러오는 중입니다.</p>}

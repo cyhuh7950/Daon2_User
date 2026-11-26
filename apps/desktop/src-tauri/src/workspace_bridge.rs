@@ -549,6 +549,8 @@ pub struct WorkspaceCitation {
     pub origin: String,
     pub context_item_id: String,
     pub locator: WorkspaceCitationLocator,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_name: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -565,9 +567,10 @@ impl WorkspaceCitation {
             && valid_id(&self.source_version_id)
             && valid_id(&self.evidence_span_id)
             && self.page >= 1
-            && matches!(self.origin.as_str(), "raw_source" | "daon_knowledge")
+            && matches!(self.origin.as_str(), "raw_source" | "daon_knowledge" | "mcp_daon_rag")
             && valid_id(&self.context_item_id)
-            && matches!(self.locator.kind.as_str(), "page" | "section")
+            && matches!(self.locator.kind.as_str(), "page" | "section" | "sheet_cell" | "image_region" | "docx_block" | "pptx_block" | "audio_segment")
+            && self.document_name.as_deref().is_none_or(|value| safe_text(value, 255))
             && safe_text(&self.locator.value, 255)
     }
 }
@@ -1232,6 +1235,7 @@ mod tests {
             Box::pin(async move {
                 assert_eq!(access, b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
                 let kind = match operation {
+                    NativeWorkspaceOperation::NotebookRequest { .. } => "notebook_request",
                     NativeWorkspaceOperation::ListNotebooks { .. } => "list_notebooks",
                     NativeWorkspaceOperation::CreateNotebook { .. } => "create_notebook",
                     NativeWorkspaceOperation::GetNotebook { .. } => "get_notebook",
@@ -1249,7 +1253,7 @@ mod tests {
                 };
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 self.kinds.lock().expect("contract kinds").push(kind);
-                Ok(NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.to_vec()) })
+                Ok(NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.to_vec()), headers: Vec::new() })
             })
         }
     }
@@ -1323,7 +1327,7 @@ mod tests {
             br#"{"data":{"sources":[],"unknown":true},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.as_slice(),
             br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"},"access_credential":"secret"}"#.as_slice(),
         ] {
-            let response = NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(body.to_vec()) };
+            let response = NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(body.to_vec()), headers: Vec::new() };
             assert!(parse_json::<SourceListData>(response, "workspace-1", false).is_err());
         }
     }
@@ -1357,7 +1361,7 @@ mod tests {
         })).unwrap();
         let response = NativeWorkspaceResponse {
             status: 200, content_type: Some("application/json".into()),
-            citation_page: None, body: Zeroizing::new(body),
+            citation_page: None, body: Zeroizing::new(body), headers: Vec::new(),
         };
         let data: SourceListData = parse_json(response, "workspace-1", false).unwrap();
         assert!(data.sources.iter().all(WorkspaceSource::valid));
@@ -1439,6 +1443,7 @@ mod tests {
                 content_type: Some("application/json".into()),
                 citation_page: None,
                 body: Zeroizing::new(body(replayed).into_bytes()),
+                headers: Vec::new(),
             };
             assert_eq!(
                 parse_json::<SourceListData>(response, "workspace-1", true).is_ok(),
