@@ -576,6 +576,7 @@ pub(crate) enum NativeWorkspaceOperation {
         workspace_id: String,
         notebook_id: String,
         filename: String,
+        mime_type: String,
         bytes: Zeroizing<Vec<u8>>,
         idempotency_key: Zeroizing<String>,
     },
@@ -924,14 +925,15 @@ impl NativeWorkspaceTransport for NativeWorkspaceClient {
                 NativeWorkspaceOperation::UploadPdf {
                     notebook_id,
                     filename,
+                    mime_type,
                     bytes,
                     idempotency_key,
                     ..
                 } => {
                     let wire = WorkspaceWireBuffer(Zeroizing::new(std::mem::take(&mut **bytes)));
                     request = request
-                        .header(reqwest::header::CONTENT_TYPE, "application/pdf")
-                        .header("X-Source-Filename", filename.as_str())
+                        .header(reqwest::header::CONTENT_TYPE, mime_type.as_str())
+                        .header("X-Source-Filename", source_filename_header(filename))
                         .header("X-Notebook-Id", notebook_id.as_str())
                         .header("Idempotency-Key", idempotency_key.as_str())
                         .body(reqwest::Body::from(bytes::Bytes::from_owner(wire)));
@@ -1894,21 +1896,48 @@ impl NativeSessionRuntime {
         transport.execute(&credentials.access.0, request).await
     }
 
+    async fn workspace_access(
+        &self,
+        workspace_id: &str,
+    ) -> Result<NativeSessionCredentials, &'static str> {
+        let _guard = self.transition_gate.lock().await;
+        if self.revoke_pending.load(Ordering::Acquire) {
+            return Err("AUTHENTICATION_REQUIRED");
+        }
+        let read = || async {
+            self.vault_read().await
+                .map_err(|_| "AUTHENTICATION_REQUIRED")?
+                .filter(|entry| entry.projection().workspace_id() == workspace_id)
+                .ok_or("AUTHENTICATION_REQUIRED")
+        };
+        let current = read().await?;
+        let expiry = OffsetDateTime::parse(&current.projection().expires_at, &Rfc3339)
+            .map_err(|_| "AUTHENTICATION_REQUIRED")?;
+        if expiry > OffsetDateTime::now_utc() + time::Duration::seconds(30) {
+            return Ok(current);
+        }
+
+        let replacement = match self.client.refresh(&current).await {
+            Ok(value) => value,
+            Err(_) => return self.fail_closed().await.map_err(|_| "AUTHENTICATION_REQUIRED"),
+        };
+        let before = current.projection();
+        let after = replacement.projection();
+        if before.session_id != after.session_id || before.user_id != after.user_id
+            || before.tenant_id != after.tenant_id || before.workspace_id != after.workspace_id
+            || before.device_id != after.device_id || self.vault_write(&replacement).await.is_err()
+        {
+            return self.fail_closed().await.map_err(|_| "AUTHENTICATION_REQUIRED");
+        }
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        Ok(replacement)
+    }
+
     pub(crate) async fn execute_workspace_once(
         &self,
         operation: NativeWorkspaceOperation,
     ) -> Result<NativeWorkspaceResponse, &'static str> {
-        if self.revoke_pending.load(Ordering::Acquire) {
-            return Err("AUTHENTICATION_REQUIRED");
-        }
-        let credentials = self
-            .vault_read()
-            .await
-            .map_err(|_| "AUTHENTICATION_REQUIRED")?
-            .ok_or("AUTHENTICATION_REQUIRED")?;
-        if credentials.projection().workspace_id() != operation.workspace_id() {
-            return Err("AUTHENTICATION_REQUIRED");
-        }
+        let credentials = self.workspace_access(operation.workspace_id()).await?;
         let response = self
             .workspace_client
             .execute(&credentials.access.0, operation)
@@ -2012,6 +2041,18 @@ impl NativeSessionRuntime {
     }
 }
 
+fn source_filename_header(filename: &str) -> String {
+    if filename.is_ascii() && !filename.starts_with("UTF-8''") {
+        return filename.to_owned();
+    }
+    let mut encoded = String::from("UTF-8''");
+    for byte in filename.bytes() {
+        use std::fmt::Write;
+        write!(&mut encoded, "%{byte:02X}").expect("writing to a String cannot fail");
+    }
+    encoded
+}
+
 #[cfg(all(test, feature = "contract-test"))]
 mod workspace_transport_tests {
     use super::*;
@@ -2073,6 +2114,7 @@ mod workspace_transport_tests {
                     workspace_id: "workspace-1".into(),
                     notebook_id: "notebook-1".into(),
                     filename: "guide.pdf".into(),
+                    mime_type: "application/pdf".into(),
                     bytes: Zeroizing::new(b"%PDF-".to_vec()),
                     idempotency_key: Zeroizing::new("native-0123456789abcdef".into()),
                 },
@@ -2199,7 +2241,7 @@ mod workspace_transport_tests {
             (NativeWorkspaceOperation::GetNotebook { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into() }, 200, "GET /api/v1/workspaces/workspace-1/notebooks/notebook-1 HTTP/1.1", None),
             (NativeWorkspaceOperation::GetNotebookContext { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into() }, 200, "GET /api/v1/workspaces/workspace-1/notebooks/notebook-1/context HTTP/1.1", None),
             (NativeWorkspaceOperation::ListSources { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into() }, 200, "GET /api/v1/workspaces/workspace-1/sources?notebook_id=notebook-1 HTTP/1.1", None),
-            (NativeWorkspaceOperation::UploadPdf { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into(), filename: "guide.pdf".into(), bytes: Zeroizing::new(b"%PDF-".to_vec()), idempotency_key: Zeroizing::new("native-0123456789abcdef".into()) }, 202, "POST /api/v1/workspaces/workspace-1/sources HTTP/1.1", Some("x-notebook-id: notebook-1")),
+            (NativeWorkspaceOperation::UploadPdf { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into(), filename: "guide.pdf".into(), mime_type: "application/pdf".into(), bytes: Zeroizing::new(b"%PDF-".to_vec()), idempotency_key: Zeroizing::new("native-0123456789abcdef".into()) }, 202, "POST /api/v1/workspaces/workspace-1/sources HTTP/1.1", Some("x-notebook-id: notebook-1")),
             (NativeWorkspaceOperation::ProcessingStatus { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into(), processing_run_id: "run-1".into() }, 200, "GET /api/v1/workspaces/workspace-1/processing-runs/run-1?notebook_id=notebook-1 HTTP/1.1", None),
             (NativeWorkspaceOperation::AskQuestion { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into(), body: Zeroizing::new(br#"{"notebook_id":"notebook-1"}"#.to_vec()), idempotency_key: Zeroizing::new("native-0123456789abcdef".into()) }, 200, "POST /api/v1/workspaces/workspace-1/questions HTTP/1.1", Some("\"notebook_id\":\"notebook-1\"")),
             (NativeWorkspaceOperation::CitationContent { workspace_id: "workspace-1".into(), notebook_id: "notebook-1".into(), citation_id: "citation-1".into() }, 200, "GET /api/v1/workspaces/workspace-1/citations/citation-1/content?notebook_id=notebook-1 HTTP/1.1", None),

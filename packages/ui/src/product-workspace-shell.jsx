@@ -776,6 +776,47 @@ export async function openNativeCitation(event, { adapter, citation, signal, reg
   return true;
 }
 
+function OverviewSourcePreview({ studio, preview, onClose }) {
+  const { source, page } = preview;
+  const [content, setContent] = useState(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    let url;
+    async function load() {
+      try {
+        const response = await studio.getSourcePreview(source, { signal: controller.signal });
+        const type = response.headers.get("content-type")?.split(";", 1)[0];
+        if (!response.ok || !["text/plain", "application/pdf"].includes(type)) throw new Error();
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (controller.signal.aborted) return;
+        if (type === "text/plain" && bytes.byteLength <= 524_288) {
+          setContent({ text: new TextDecoder("utf-8", { fatal: true }).decode(bytes) });
+        } else if (type === "application/pdf" && bytes.byteLength <= 25 * 1024 * 1024
+            && [0x25, 0x50, 0x44, 0x46, 0x2d].every((byte, index) => bytes[index] === byte)) {
+          url = URL.createObjectURL(new Blob([bytes], { type }));
+          setContent({ url: `${url}#page=${page}` });
+        } else throw new Error();
+      } catch {
+        if (!controller.signal.aborted) setContent({ error: true });
+      }
+    }
+    void load();
+    return () => {
+      controller.abort();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [studio, source, page]);
+  return <section className="citation-sheet-view" aria-label="개요 근거 원문">
+    <button type="button" onClick={onClose}>원문 닫기</button>
+    <strong>{source.filename}</strong>
+    {!content ? <p role="status">원문을 불러오는 중입니다.</p> : content.error
+      ? <p role="alert">원문을 확인할 수 없습니다.</p> : content.url
+        ? <><a href={content.url} target="_blank" rel="noopener noreferrer">PDF 원문 새 창에서 열기</a>
+          <iframe title="개요 근거 PDF 원문" src={content.url} width="100%" height="450" /></>
+        : <pre style={{ whiteSpace: "pre-wrap" }}>{content.text}</pre>}
+  </section>;
+}
+
 const WORKSPACE_ADAPTER_KEYS = new WeakMap();
 let workspaceAdapterSequence = 0;
 function workspaceAdapterKey(adapter) {
@@ -911,13 +952,19 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     memoSourceRowRef.current?.scrollIntoView?.({ block: "nearest" });
     setMemoSourceFocusId(null);
   }, [memoSourceFocusId, viewState.sources]);
-  // 노트북 개요 인용 칩(NB2-U2): 개요 인용에는 소스 이름(source_title)만 있으므로 같은 이름의 소스를 목록에서 찾아
-  // 소스 보기(소스 선택 + 목록 줄로 이동)를 연다. 답변을 기다리는 중에는 질문을 끊지 않도록 선택은 바꾸지 않고 줄로만 이동한다.
-  const openOverviewSource = (citation) => {
+  const [overviewSourcePreview, setOverviewSourcePreview] = useState(null);
+  // 기간이 지난 개요는 같은 이름의 다른 버전을 원문으로 표시하지 않는다.
+  const openOverviewSource = (citation, { stale } = {}) => {
     const sources = Array.isArray(viewState.sources) ? viewState.sources : [];
     const named = sources.filter((item) => (item.lawSnapshot?.title ?? item.websiteSnapshot?.title ?? item.filename) === citation?.source_title);
     const source = named.find((item) => item.ready) ?? named[0];
     if (!source) return;
+    if (!stale && named.length === 1 && source.ready && /\.(pdf|csv|txt|md)$/iu.test(source.filename ?? "")
+        && typeof adapter?.studioV2?.getSourcePreview === "function") {
+      const page = Number(citation.page);
+      setOverviewSourcePreview({ source, page: Number.isSafeInteger(page) && page > 0 ? page : 1 });
+      return;
+    }
     setNarrowTab("sources");
     setMemoSourceFocusId(source.sourceId);
     const selected = viewState.selectedSource?.sourceId === source.sourceId && viewState.selectedSource?.sourceVersionId === source.sourceVersionId;
@@ -1019,6 +1066,16 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [sheetCitation, setSheetCitation] = useState(null);
   const [textCitation, setTextCitation] = useState(null);
   const textCitationRequest = useRef(null);
+  const pdfCitationRequest = useRef(null);
+  const [pdfCitation, setPdfCitation] = useState(null);
+  useEffect(() => {
+    if (!pdfCitation?.url) return undefined;
+    const url = pdfCitation.url.split("#", 1)[0];
+    return () => {
+      citationUrlsRef.current.delete(url);
+      URL.revokeObjectURL(url);
+    };
+  }, [pdfCitation?.url]);
   const sheetRequestRef = useRef(null);
   const [docxCitation, setDocxCitation] = useState(null);
   const [lawCitation,setLawCitation]=useState(null);
@@ -2325,6 +2382,10 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           {questionScopeNotice ? <div className="context-selection-status" role="status">{questionScopeNotice}</div> : null}
           <NotebookOverview studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} refreshKey={overviewRefreshKey}
             onAskQuestion={fillQuestionFromOverview} onOpenSource={openOverviewSource} />
+          {overviewSourcePreview && viewState.sources.some(source => source.ready
+            && source.sourceVersionId === overviewSourcePreview.source.sourceVersionId) && <OverviewSourcePreview studio={adapter.studioV2} preview={overviewSourcePreview}
+            key={`${overviewSourcePreview.source.sourceVersionId}:${overviewSourcePreview.page}`}
+            onClose={() => setOverviewSourcePreview(null)} />}
           {questionPending && !viewState.turns?.length ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
           {(() => {
             const turns = viewState.turns?.length ? viewState.turns
@@ -2439,6 +2500,29 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                 })();
                 return;
               }
+              if (adapter.citationResponse && citation.locator.kind === "page") {
+                event.preventDefault();
+                const requestId = Symbol("pdf-citation");
+                pdfCitationRequest.current = requestId;
+                setPdfCitation({ citation, url: null, error: false });
+                const current = () => workspaceMountedRef.current && pdfCitationRequest.current === requestId;
+                void openNativeCitation(event, {
+                  adapter, citation, signal: lifetimeControllerRef.current?.signal,
+                  openWindow: (url) => {
+                    if (current()) setPdfCitation({ citation, url, error: false });
+                    else {
+                      const objectUrl = url.split("#", 1)[0];
+                      citationUrlsRef.current.delete(objectUrl);
+                      URL.revokeObjectURL(objectUrl);
+                    }
+                  },
+                  registerObjectUrl: (url) => citationUrlsRef.current.add(url),
+                  unregisterObjectUrl: (url) => citationUrlsRef.current.delete(url),
+                  // Keep the PDF alive until it is closed or the workspace is unmounted.
+                  schedule: () => {},
+                }).catch(() => { if (current()) setPdfCitation({ citation, url: null, error: true }); });
+                return;
+              }
               void openNativeCitation(event, {
                 adapter,
                 citation,
@@ -2502,6 +2586,13 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             <button type="button" onClick={()=>{docxRequestRef.current=null;setDocxCitation(null);}}>원문 닫기</button>
             {docxCitation.error?<p role="alert">{docxCitation.citation.locator.kind==="audio_segment"?"음성":docxCitation.citation.locator.kind==="pptx_block"?"PPTX":"DOCX"} 원문을 확인할 수 없습니다. ({docxCitation.error})</p>:docxCitation.content?(docxCitation.citation.locator.kind==="audio_segment"?<AudioOriginalSegments key={`${docxCitation.citation.citation_id}:${docxCitation.requestEpoch}`} content={docxCitation.content} citation={docxCitation.citation}/>:docxCitation.citation.locator.kind==="pptx_block"?<PptxOriginalBlocks content={docxCitation.content}/>:<DocxOriginalBlocks content={docxCitation.content}/>):<p role="status">{docxCitation.citation.locator.kind==="audio_segment"?"음성":docxCitation.citation.locator.kind==="pptx_block"?"PPTX":"DOCX"} 원문을 불러오는 중입니다.</p>}
           </section>:null}
+          {pdfCitation && transcriptCitations(viewState).some(current => current.citation_id === pdfCitation.citation.citation_id && current.source_version_id === pdfCitation.citation.source_version_id) ? <section className="citation-sheet-view" aria-label="PDF 원문">
+            <button type="button" onClick={() => { pdfCitationRequest.current = null; setPdfCitation(null); }}>원문 닫기</button>
+            {pdfCitation.error ? <p role="alert">PDF 원문을 확인할 수 없습니다.</p> : pdfCitation.url
+              ? <><a href={pdfCitation.url} target="_blank" rel="noopener noreferrer">PDF 원문 새 창에서 열기</a>
+                <iframe title="PDF 원문" src={pdfCitation.url} width="100%" height="450" /></>
+              : <p role="status">PDF 원문을 불러오는 중입니다.</p>}
+          </section> : null}
           {textCitation && transcriptCitations(viewState).some(current => current.citation_id === textCitation.citation.citation_id && current.source_version_id === textCitation.citation.source_version_id) ? <section className="citation-sheet-view" aria-label="텍스트 원문">
             <button type="button" onClick={() => { textCitationRequest.current?.abort(); setTextCitation(null); }}>원문 닫기</button>
             {textCitation.error ? <p role="alert">텍스트 원문을 확인할 수 없습니다.</p> : textCitation.text === null

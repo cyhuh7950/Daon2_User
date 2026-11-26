@@ -14,6 +14,7 @@ import { concealProtectedDesktop, revealProtectedDesktop } from "./desktop-prote
 import { NativeAuthPanel } from "./native-auth-panel.jsx";
 import { createWindowsWorkspaceAdapter } from "./windows-workspace-adapter.js";
 import { createWindowsManualFetch, createWindowsOnlineFeatures } from "./windows-online-features.js";
+import { ProviderSettingsWorkspace } from "../../web/components/provider-settings-workspace.jsx";
 import { ManualSettingsPane } from "../../web/components/manual-settings-pane.jsx";
 import { createOfflineStudioState, reduceOfflineStudioState } from "./offline-studio-model.js";
 import { WorkspaceOperationsModal } from "./workspace-operations-modal.jsx";
@@ -29,15 +30,42 @@ const LABELS = {
   Notifications: "Notifications"
 };
 
-function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey }) {
-  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
+function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings }) {
+  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} providerSettings={providerSettings} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
 }
 
-function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
+const WEB_SETTINGS = Object.freeze({
+  license: ["/settings/license", "라이선스"],
+  "model-connections": ["/settings/model-connections", "LLM 설정"],
+  "organization-join": ["/organization/join", "조직 가입"],
+  "organization-policy": ["/settings/organization", "조직 정책"],
+  "user-management": ["/admin", "사용자 관리"],
+  "organization-admin": ["/organization-admin", "조직 관리"],
+  "tts-engines": ["/settings/tts-engines", "음성 엔진"],
+});
+
+const WEB_ROUTES = Object.freeze({
+  AccountSettings: ["/settings/account", "계정 설정"],
+  OrganizationSettings: ["/settings/organization", "조직 설정"],
+  Operations: ["/operations", "운영상태"],
+  Notifications: ["/notifications", "알림"],
+});
+
+function WebSettingsLink({ destination, onClose }) {
+  const [path, label] = destination;
+  return <section className="desktop-safe-surface" aria-label={label}>
+    {onClose ? <button type="button" onClick={onClose}>홈으로 돌아가기</button> : null}
+    <h2>{label}</h2>
+    <a href={'https://daon2-user.sinsan.kr' + path} target="_blank" rel="noopener noreferrer">웹에서 {label} 열기</a>
+  </section>;
+}
+
+function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings }) {
   if (routeKey === "WorkspaceDetail") {
-    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} />;
+    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} providerSettings={providerSettings} />;
   }
-  return <section className="desktop-safe-surface" role="status"><h2>{LABELS[routeKey]}</h2><p>실제 사용자 기능 연결 전에는 성공 데이터를 표시하지 않습니다.</p></section>;
+  const destination = WEB_ROUTES[routeKey];
+  return destination ? <WebSettingsLink destination={destination} /> : null;
 }
 
 const NOTEBOOK_HASH = /^#\/notebooks\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u;
@@ -167,6 +195,9 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
     try { return createNativeNotebookBridge({ invoke: nativeInvoke }); } catch { return null; }
   }, [nativeInvoke]);
   const manualFetch = useMemo(() => createWindowsManualFetch(nativeInvoke), [nativeInvoke]);
+  const providerApi = useMemo(() => nativeSession.authenticated
+    ? createWindowsOnlineFeatures(nativeSession.workspaceId, "settings", nativeInvoke).providerSettings
+    : null, [nativeSession.authenticated, nativeSession.workspaceId, nativeInvoke]);
   const workspaceAdapter = useMemo(() => {
     if (!nativeSession.authenticated || !selectedNotebook) return null;
     const base = createWindowsWorkspaceAdapter(nativeSession.workspaceId, {
@@ -346,7 +377,18 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
         <ManualSettingsPane fetchImpl={manualFetch} onBack={() => setActiveModal(null)} />
       </div>;
     }
-    return <div className="desktop-notebook-home" data-theme={effectiveScreenTheme} data-client-type="windows" data-session-tree-key={sessionTreeKey}>
+    if (activeModal === "model-connections" && providerApi) {
+      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <button type="button" onClick={() => setActiveModal(null)}>홈으로 돌아가기</button>
+        <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} />
+      </div>;
+    }
+    if (Object.hasOwn(WEB_SETTINGS, activeModal)) {
+      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <WebSettingsLink destination={WEB_SETTINGS[activeModal]} onClose={() => setActiveModal(null)} />
+      </div>;
+    }
+    return <div className="desktop-shell desktop-notebook-home" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows" data-session-tree-key={sessionTreeKey}>
       <NotebookHome
         state={notebookHome.state}
         notebooks={notebookHome.notebooks}
@@ -354,7 +396,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
         onReload={loadHome}
         onCreate={createNotebook}
         onOpenNotebook={({ notebookId }) => { void openNotebook({ notebookId }); }}
-        onOpenSetting={(id) => setActiveModal(id === "manual" ? "manual" : "settings")}
+        onOpenSetting={(id) => setActiveModal(id === "screen" ? "settings" : id)}
         onLogout={logout}
       />
       <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
@@ -397,7 +439,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
       <div className="desktop-content" inert={activeModal ? "" : undefined} aria-hidden={activeModal ? "true" : undefined}>
         {routes.map((route) => (
             <section key={route.key} hidden={route.key !== activeKey} aria-label={LABELS[route.key]}>
-              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />
+              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} providerSettings={providerApi ? <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} embedded /> : null} />
             </section>
         ))}
       </div>

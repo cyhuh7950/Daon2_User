@@ -866,6 +866,37 @@ class PostgresQuestionAnsweringRepository:
         return ReadyQuestionSource(str(row[0]), str(row[1]), filename,
                                    aggregation_only=xlsx_ready and len(row) >= 8 and row[7] is True)
 
+    def read_notebook_source_preview(
+        self, context: QuestionContext, source_id: str, source_version_id: str,
+    ) -> CitationContent:
+        if context.notebook_id is None:
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=404)
+        row = self._row(context, source_id, source_version_id, "citation.read", require_notebook_binding=True)
+        filename, object_key, media_type = str(row[3]), str(row[5]), str(row[8])
+        size = int(row[7])
+        is_pdf = media_type == "application/pdf"
+        if is_pdf and not (5 <= size <= 25 * 1024 * 1024):
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=409)
+        if not is_pdf and (text_source_format(filename, media_type) is None or not 1 <= size <= TEXT_SOURCE_MAX_BYTES):
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=415)
+        try:
+            ObjectKeyPolicy().validate_final(self._cloud_context(context, "object.read"), "source", object_key)
+            content = self._object_storage.get(object_key)
+        except (ObjectQueueError, ObjectStorageError):
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=503) from None
+        if len(content) != size or hashlib.sha256(content).hexdigest() != str(row[6]):
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=409)
+        if is_pdf:
+            if not content.startswith(b"%PDF-"):
+                raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=409)
+        else:
+            try:
+                content.decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=409) from None
+        return CitationContent(source_id, source_version_id, filename, content,
+                               "application/pdf" if is_pdf else "text/plain; charset=utf-8")
+
     def read_current_pdf(
         self, context: QuestionContext, source_id: str, source_version_id: str,
     ) -> CitationPdfContent:

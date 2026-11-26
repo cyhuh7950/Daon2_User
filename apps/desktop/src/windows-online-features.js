@@ -1,3 +1,4 @@
+import { createProviderSettingsApi } from "../../web/lib/provider-settings-api.js";
 import { createStudioV2Adapter } from "../../web/lib/studio-v2-adapter.js";
 import { askGroundedQuestion, authorizeGroundedQuestion, citationContentUrl } from "../../web/lib/question-answering-api.js";
 import { downloadManualAsset, getManualManifest, readManualDocument } from "../../web/lib/manual-api.js";
@@ -39,13 +40,17 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     return invokeResponse(invoke, "native_notebook_request", {
       workspaceId, notebookId,
       request: { method, path: "/api/v1/" + url.slice("/bff/api/".length), headers: [...requestHeaders], body },
-    }, signal);
+    }, signal).then((response) => {
+      if (response.status === 401) throw new Error("AUTHENTICATION_REQUIRED");
+      return response;
+    });
   }
 
   const manualFetch = createWindowsManualFetch(invoke);
   const citationUrl = (citation) => citationContentUrl(workspaceId, citation, { notebookId });
   const citationResponse = (citation, { signal } = {}) => fetchImpl(citationUrl(citation).split("#", 1)[0], { signal });
   return {
+    providerSettings: createProviderSettingsApi(fetchImpl),
     studioV2: createStudioV2Adapter(workspaceId, notebookId, { fetchImpl }),
     askQuestion: (input, options) => askGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),
     authorizeQuestion: (input, options) => authorizeGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),

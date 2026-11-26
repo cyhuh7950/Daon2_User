@@ -280,7 +280,7 @@ export function AuthoringWizard({ studio, sources = [], outputId = null, onClose
   const [targetPages, setTargetPages] = useState("");
   const [confirmMaterial, setConfirmMaterial] = useState(false);
   const timer = useRef(null);
-  const fail = useCallback((e) => { setError(e?.code ?? "STUDIO_REQUEST_FAILED"); setBusy(false); }, []);
+  const fail = useCallback((e) => { setError(e?.code ?? e?.message ?? "STUDIO_REQUEST_FAILED"); setBusy(false); }, []);
 
   useEffect(() => { if (id) return undefined; let alive = true; authoring.listTemplates().then((t) => { if (alive) setTemplates(t); }).catch(fail); return () => { alive = false; }; }, [authoring, id, fail]);
 

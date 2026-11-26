@@ -99,6 +99,7 @@ class FixtureModel:
     def __init__(self):
         self.prompts = []
         self.conflicting_terms = False
+        self.repair_terms = False
         self.review_unavailable = False
 
     def generate(self, context, prompt, cancel_check=None):
@@ -114,7 +115,7 @@ class FixtureModel:
                 assert "전자우편" in prompt.user
                 cited = ref(TERMS)
                 paragraphs = [{"text": text, "refs": [cited]} for text in ("보험금은 서류를 받은 후 심사한다.", MODIFIED, ADDED)]
-                if self.conflicting_terms:
+                if self.conflicting_terms and not (self.repair_terms and "[검수 결과와 고쳐 쓸 본문]" in prompt.user):
                     paragraphs.extend({"text": text, "refs": [cited]} for text in (RETAINED, EDITORIAL))
             else:
                 paragraphs = [{"text": PROPOSAL, "refs": [ref(PROPOSAL)]}]
@@ -311,7 +312,7 @@ def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
     completed = client.get(output).json()["data"]
     assert completed["state"] == "completed"
     assert not completed["terms_review"]
-    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 3
     exported = export_v2("docx", {"output_id": repo.output_id, "title": completed["document"]["title"],
                                   "type_id": "authored_document", "revision": {"content": completed},
                                   "evidence": repo.evidence}).content
@@ -320,6 +321,18 @@ def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
     assert MODIFIED in body
     # 기준 조항은 변경 추적에 표시될 수 있지만 편집 지시 문장은 내보내지 않는다.
     assert EDITORIAL not in body
+
+
+def test_terms_body_repair_is_checked_before_completing(writing):
+    _, _, model, _ = writing
+    model.conflicting_terms = True
+    model.repair_terms = True
+    _, completed = _generate_payment_terms(writing)
+    assert completed["state"] == "completed"
+    assert not completed["terms_review"]
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    assert all(RETAINED not in p["text"] and EDITORIAL not in p["text"]
+               for unit in completed["units"] for p in unit["paragraphs"])
 
 
 def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):

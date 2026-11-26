@@ -153,6 +153,24 @@ pub fn valid_pdf_upload_for_contract(filename: &str, mime_type: &str, bytes: &[u
         && bytes.starts_with(b"%PDF-")
 }
 
+fn valid_source_upload(filename: &str, mime_type: &str, bytes: &[u8]) -> bool {
+    if !valid_filename(filename) || !(1..=MAX_WORKSPACE_PDF_BYTES).contains(&bytes.len()) {
+        return false;
+    }
+    let Some((_, suffix)) = filename.rsplit_once('.') else { return false };
+    match (suffix.to_ascii_lowercase().as_str(), mime_type) {
+        ("pdf", "application/pdf") => valid_pdf_upload_for_contract(filename, mime_type, bytes),
+        ("txt", "text/plain") | ("md", "text/markdown") | ("csv", "text/csv") => true,
+        ("png", "image/png") => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        ("jpg" | "jpeg", "image/jpeg") => bytes.starts_with(b"\xff\xd8\xff"),
+        ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        | ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        | ("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation") => bytes.starts_with(b"PK\x03\x04"),
+        ("wav", "audio/wav") => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE"),
+        _ => false,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceListSourcesInput {
@@ -880,13 +898,13 @@ pub async fn workspace_upload_pdf(
     session: tauri::State<'_, NativeSessionRuntime>,
 ) -> Result<WorkspaceUploadResult, WorkspaceError> {
     if !valid_id(&input.workspace_id) || !valid_id(&input.notebook_id)
-        || !valid_pdf_upload_for_contract(&input.filename, &input.mime_type, &input.bytes)
+        || !valid_source_upload(&input.filename, &input.mime_type, &input.bytes)
     {
         input.bytes.zeroize();
         return Err(map_error("INVALID_REQUEST"));
     }
     let key = workspace_idempotency_key(
-        &format!("upload:{}:{}", input.workspace_id, input.filename),
+        &format!("upload:{}:{}:{}", input.workspace_id, input.notebook_id, input.filename),
         &input.bytes,
     )
     .map_err(map_error)?;
@@ -895,6 +913,7 @@ pub async fn workspace_upload_pdf(
         workspace_id: input.workspace_id.clone(),
         notebook_id: input.notebook_id,
         filename: input.filename,
+        mime_type: input.mime_type,
         bytes: Zeroizing::new(std::mem::take(&mut input.bytes)),
         idempotency_key: key,
     };

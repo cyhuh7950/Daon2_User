@@ -61,6 +61,23 @@ impl NotebookRequest {
                         .map(|(_, value)| value.into_owned()).eq([notebook.to_owned()])
                 })
             }
+            ["workspaces", ws, "notebooks", nb, "source-preview", _, _, "content"] => {
+                *ws == workspace && *nb == notebook && query.is_empty() && self.method == "GET"
+            }
+            ["session"] => self.method == "GET" && query.is_empty(),
+            ["workspaces", ws, "model-defaults"] => *ws == workspace && query.is_empty()
+                && matches!(self.method.as_str(), "GET" | "PATCH"),
+            ["provider-credentials"] => self.method == "GET" && query.is_empty(),
+            ["admin", "provider-connections", "test" | "model-preview"] if self.method == "POST" => query.is_empty(),
+            ["provider-credentials", _] | ["admin", "provider-connections", _] => query.is_empty()
+                && matches!(self.method.as_str(), "PUT" | "DELETE"),
+            ["admin", "provider-connections"] => query.is_empty() && matches!(self.method.as_str(), "GET" | "POST"),
+            ["admin", "provider-health-settings"] => query.is_empty() && matches!(self.method.as_str(), "GET" | "PATCH"),
+            ["admin", "provider-connections", _, "credential"] => query.is_empty()
+                && matches!(self.method.as_str(), "POST" | "DELETE"),
+            ["admin", "provider-catalog", _, "refresh"] | ["admin", "model-reasoning", "probe"] =>
+                query.is_empty() && self.method == "POST",
+            ["admin", "provider-models", _, _, "capabilities"] => query.is_empty() && self.method == "PATCH",
             ["knowledge-connectors"] | ["knowledge-connectors", _, "documents"] => self.method == "GET",
             ["session", "step-up"] => self.method == "POST" && query.is_empty()
                 && self.body.as_ref().and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
@@ -128,6 +145,24 @@ pub(crate) fn native_read_manual(asset: &str) -> Result<tauri::ipc::Response, &'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_defaults_and_source_previews_remain_scoped() {
+        let mut request = NotebookRequest {
+            method: "PATCH".into(), path: "/api/v1/workspaces/ws/model-defaults".into(),
+            headers: Vec::new(), body: Some("{}".into()),
+        };
+        assert!(request.valid("ws", "settings"));
+        assert!(!request.valid("other", "settings"));
+        request.method = "GET".into();
+        request.body = None;
+        request.path = "/api/v1/workspaces/ws/notebooks/nb/source-preview/source-1/version-1/content".into();
+        assert!(request.valid("ws", "nb"));
+        assert!(!request.valid("ws", "other"));
+        assert!(request.allows_response(200, "application/pdf"));
+        request.path = "/api/v1/admin/users".into();
+        assert!(!request.valid("ws", "settings"));
+    }
 
     #[test]
     fn notebook_request_checks_the_path_and_workspace_scope() {

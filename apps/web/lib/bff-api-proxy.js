@@ -274,6 +274,14 @@ function authoringTemplateRoute(method, segments) {
 }
 
 function routeFor(method, segments) {
+  if (segments.length === 8 && segments[0] === "workspaces" && segments[2] === "notebooks"
+      && segments[4] === "source-preview" && segments[7] === "content"
+      && [1, 3, 5, 6].every((index) => SAFE_SEGMENT.test(segments[index]))) {
+    return method === "GET"
+      ? { path: "/api/v1/" + segments.map(encodeURIComponent).join("/"), query: new Set(), strictQuery: true,
+          responseMediaTypes: ["application/pdf", "text/plain"], maxResponseBytes: MAX_SOURCE_UPLOAD_BYTES }
+      : { methodRejected: true };
+  }
   if (segments.length === 2 && segments[0] === "admin" && segments[1] === "export-policy") {
     return method === "GET" || method === "PUT"
       ? { path: "/api/v1/admin/export-policy", query: new Set(), strictQuery: true, csrfProvenanceRequired: method === "PUT" } : { methodRejected: true };
@@ -1095,7 +1103,7 @@ function routeFor(method, segments) {
 }
 
 const NATIVE_NOTEBOOK_FEATURES = new Set([
-  "studio", "model-selection", "question-tools", "source-groups", "source-discovery", "overview", "copies", "chat-history",
+  "studio", "model-selection", "question-tools", "source-groups", "source-discovery", "overview", "copies", "chat-history", "source-preview",
 ]);
 const NATIVE_STUDIO_MEDIA = [
   "application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1105,6 +1113,10 @@ const NATIVE_STUDIO_MEDIA = [
 ];
 
 function nativeNotebookRoute(method, segments) {
+  const scopedModel = segments.length === 3 && segments[0] === "workspaces" && segments[2] === "model-defaults";
+  const providerRoute = segments[0] === "provider-credentials" || (segments[0] === "admin"
+    && ["provider-connections", "provider-health-settings", "provider-catalog", "provider-models", "model-reasoning"].includes(segments[1]));
+  if (scopedModel || providerRoute) return routeFor(method, segments);
   if (segments[0] === "workspaces" && segments[2] === "notebooks" && NATIVE_NOTEBOOK_FEATURES.has(segments[4])) {
     return routeFor(method, segments);
   }
@@ -1120,7 +1132,7 @@ function nativeRouteFor(method, segments, requestUrl) {
     return {
       ...notebook, protected: true, requestMediaType: "application/json",
       maxResponseBytes: notebook.maxResponseBytes ?? MAX_NATIVE_RECOVERY_RESPONSE_BYTES,
-      responseMediaTypes: segments[4] === "studio" && notebook.maxResponseBytes ? NATIVE_STUDIO_MEDIA : undefined,
+      responseMediaTypes: notebook.responseMediaTypes ?? (segments[4] === "studio" && notebook.maxResponseBytes ? NATIVE_STUDIO_MEDIA : undefined),
     };
   }
   if (notebook?.methodRejected) return notebook;
@@ -1150,7 +1162,7 @@ function nativeRouteFor(method, segments, requestUrl) {
       : { methodRejected: true };
   } else if (segments.length === 3 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "sources") {
     matched = new Set(["GET", "POST"]).has(method)
-      ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, method === "POST" ? { maxRequestBytes: MAX_SOURCE_UPLOAD_BYTES, requestMediaTypes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "audio/wav"] } : {})
+      ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, method === "POST" ? { maxRequestBytes: MAX_SOURCE_UPLOAD_BYTES, requestMediaTypes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "audio/wav"] } : {})
       : { methodRejected: true };
   } else if (segments.length === 4 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "processing-runs" && SAFE_SEGMENT.test(segments[3])) {
     matched = method === "GET"

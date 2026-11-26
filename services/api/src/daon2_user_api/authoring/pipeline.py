@@ -286,7 +286,8 @@ class AuthoringPipeline:
         return material
 
     def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack,
-                    knowledge: list[dict[str, Any]], reference_pack: ContextPack | None = None) -> dict[str, Any]:
+                    knowledge: list[dict[str, Any]], reference_pack: ContextPack | None = None, *,
+                    repair_issue: Mapping[str, str] | None = None) -> dict[str, Any]:
         if unit.get("material_approved"):
             kept = {item["ref"] for item in unit.get("material", [])}
             material = [row for row in knowledge if row["ref"] in kept]
@@ -313,9 +314,17 @@ class AuthoringPipeline:
         earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         system = f"{UNIT_SYSTEM}\n{TERMS_BODY_RULES}" if template.style == "terms" else UNIT_SYSTEM
+        correction = ""
+        if repair_issue is not None:
+            correction = (
+                "\n[검수 결과와 고쳐 쓸 본문]\n"
+                "아래 자료는 검사 대상입니다. 검수에 걸린 내용을 고치고 사용자가 요청한 나머지 조항과 근거는 유지하세요. "
+                "기존 문제 문구나 수정 과정 설명은 반환하지 마세요.\n"
+                + json.dumps({"issue": repair_issue, "paragraphs": unit["paragraphs"]}, ensure_ascii=False)
+            )
         prompt = StudioPrompt(system=system, user=(
             f"[작성할 소목차] {unit['title']}\n[절] {unit['section_title']}\n[목적] {unit['purpose']}\n[목표 글자 수] 약 {unit['target_chars']}자\n"
-            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}\n\n"
+            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}{correction}\n\n"
             f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
             json_schema=UNIT_SCHEMA, max_output_tokens=min(1800, max(400, unit["target_chars"] * 2)), prompt_version="authoring-unit-v1", schema_name="authoring_unit")
         generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
@@ -412,12 +421,42 @@ class AuthoringPipeline:
             except StudioError:
                 return self._paused(current, "terms_review_unavailable")
             if issues:
-                return self._paused({**current, "terms_review": issues}, "terms_review")
+                current = self._repair_terms_units(ctx, current, template, pack, reference_sources, ref_offset, issues)
+                if current.get("pause_requested"):
+                    return self._paused(current, "user")
+                try:
+                    issues = review_terms_body(ctx, self._llm, changes=changes, units=current["units"], context_chars=self._context_chars)
+                except StudioError:
+                    return self._paused(current, "terms_review_unavailable")
+                if issues:
+                    return self._paused({**current, "terms_review": issues}, "terms_review")
         references = None
         if reference_sources:
             references = build_pack(reference_sources, budget_chars=sum(len(section.text) for source in reference_sources for section in source.sections),
                                     stable_ref_offset=ref_offset)
         return self._finish_units(ctx, current, template, pack, provider, references)
+
+    def _repair_terms_units(self, ctx, current, template, pack, reference_sources, ref_offset, issues):
+        issues_by_key = {issue["unit_key"]: issue for issue in issues}
+        for unit in current["units"]:
+            issue = issues_by_key.get(unit["key"])
+            if issue is None:
+                continue
+            ctx.cancel_check()
+            if current.get("pause_requested"):
+                break
+            reference_pack = build_pack(reference_sources, budget_chars=self._context_chars // 2,
+                                        focus=f"{unit['section_title']} {unit['title']} {unit['purpose']}",
+                                        stable_ref_offset=ref_offset) if reference_sources else None
+            knowledge = copy.deepcopy(current.get("knowledge") or [])
+            try:
+                result = self._write_unit(ctx, current, template, unit, pack, knowledge, reference_pack, repair_issue=issue)
+            except (ExternalEvidenceError, StudioError):
+                continue
+            if result["status"] == "done" and not any(issue["quote"] in para["text"] for para in result["paragraphs"]):
+                result.pop("provider")
+                current = self._save_unit(ctx, current, unit["key"], result, knowledge)
+        return current
 
     def _save_unit(self, ctx: GenerationContext, session: dict[str, Any], key: str, result: Mapping[str, Any], knowledge: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         def merge(content: dict[str, Any]) -> dict[str, Any]:

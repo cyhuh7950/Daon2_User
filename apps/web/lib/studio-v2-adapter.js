@@ -58,6 +58,15 @@ export function createStudioV2Adapter(workspaceId, notebookId, { fetchImpl } = {
     getQuestionTools: (options) => getQuestionTools(workspaceId, scope(options)),
     saveQuestionTools: (enabled, options) => saveQuestionTools(workspaceId, scope({ ...options, enabled })),
     // 노트북 개요·추천 질문(WO-N1 NB2-F2): 조회는 보기, 다시 만들기는 편집 권한. queued·working이면 3초 간격 폴링.
+    async getSourcePreview({ sourceId, sourceVersionId }, { signal } = {}) {
+      const path = [workspaceId, notebookId, sourceId, sourceVersionId];
+      if (!path.every((id) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(id))) {
+        throw new Error("CITATION_CONTENT_UNAVAILABLE");
+      }
+      const [ws, nb, source, version] = path.map(encodeURIComponent);
+      return (fetchImpl ?? fetch)(`/bff/api/workspaces/${ws}/notebooks/${nb}/source-preview/${source}/${version}/content`,
+        { credentials: "same-origin", cache: "no-store", signal });
+    },
     getNotebookOverview: (options) => getNotebookOverview(workspaceId, scope(options)),
     regenerateNotebookOverview: (options) => regenerateNotebookOverview(workspaceId, scope(options)),
     // 소스 묶음(WO-N1 NB3-F2): 조회는 보기, 변경은 편집 권한. 변경은 마지막 ETag(options.etag)를 보낸다.
