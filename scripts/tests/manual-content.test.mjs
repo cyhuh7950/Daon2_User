@@ -465,3 +465,30 @@ test("WO-N8 2-21 웹 페이지 절은 원본·공개 사본에 필수 내용과 
     assert.match(markdown, /\| 소스로 근거 확인된 웹 페이지\(HTML\) 만들기·내려받기 \| 2-21 \|/u, "부록 C 2-21");
   });
 });
+
+// WO-N9: 데이터 집계 절이 원본과 공개 사본에 필수 내용과 함께 있어야 한다.
+test("WO-N9 2-22 데이터 집계 절은 원본·공개 사본에 필수 내용과 함께 있다", async (t) => {
+  for (const file of ["docs/manual/daon-user-manual/index.md", "apps/web/public/manual/daon-user-manual.md"]) await t.test(file, async () => {
+    const markdown = await readFile(new URL(file, root), "utf8");
+    const start = markdown.indexOf("\n### 2-22 데이터 집계\n");
+    assert.ok(start >= 0, `${file}: 2-22`);
+    const rest = markdown.slice(start + 1);
+    const next = rest.slice(1).search(/\n#{2,3} /u);
+    const section = rest.slice(0, next < 0 ? undefined : next + 1);
+    for (const required of [
+      /\*\*계산값\*\*/u,
+      /\*\*원본값\*\*/u,
+      /셀 값은 모델에 보내지 않습니다/u,
+      /"표 읽는 중" → "집계 조건 만드는 중" → "계산 중"/u,
+      /\*\*머리글 행\*\*/u,
+      /"계산 불가"\(이유: 전월 값 0\)/u,
+      /"계산 불가"\(이유: 전월 자료 없음\)/u,
+      /\*\*집계표\*\*·\*\*계산 근거\*\*·\*\*적용한 조건\*\* 세 시트/u,
+      /엑셀 수식 없음/u,
+      /\*\*집계 전용\*\*/u,
+      /표 소스는 바꿀 수 없습니다/u,
+      /0101과 101은 다른 값입니다/u,
+    ]) assert.match(section, required, `2-22 ${required}`);
+    assert.match(markdown, /\| 표 파일\(XLSX·CSV\)을 집계해 집계표·차트·계산 근거 만들기 \| 2-22 \|/u, "부록 C 2-22");
+  });
+});

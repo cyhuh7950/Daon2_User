@@ -485,23 +485,50 @@ def test_growth_evidence_reuses_measure_entries_without_copying_ranges():
             assert set(entry) == {'current_evidence_id', 'previous_evidence_id', 'filter_text', 'formula', 'row_count', 'excluded'}
 
 
-def test_cancel_check_is_called_and_propagates():
-    rows = [(date(2026, 1, 1), 'A', D('1'))] * 2500
+class _FakeClock:
+    """취소 확인 주기 시험용 시계: 읽을 때마다 step초씩 간다."""
+
+    def __init__(self, step):
+        self.now = 0.0; self.step = step
+
+    def __call__(self):
+        self.now += self.step
+        return self.now
+
+
+def test_cancel_check_is_throttled_to_once_per_second():
+    """취소 확인(작업 heartbeat = DB 쓰기)은 1초에 한 번까지만. 기한 확인은 매번."""
+    rows = [(date(2026, 1, 1), 'A', D('1'))] * 100_000
+    seen = []
+    started = time.monotonic()
+    run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]), cancel_check=lambda: seen.append(1))
+    elapsed = time.monotonic() - started
+    assert 1 <= len(seen) <= elapsed + 2, (len(seen), elapsed)
+    # 기한 확인은 줄이지 않는다.
+    with pytest.raises(AggregationTimeout):
+        run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]),
+            deadline=time.monotonic() - 1, cancel_check=lambda: None)
+
+
+def test_cancel_propagates_once_interval_passes(monkeypatch):
+    from daon2_user_api import table_reader
+    clock = _FakeClock(0.1)  # 확인 자리 1번 = 0.1초
+    monkeypatch.setattr(table_reader, '_cancel_clock', clock)
+    rows = [(date(2026, 1, 1), 'A', D('1'))] * 100_000  # 확인 자리 약 100번 = 10초
     calls = []
 
     class Cancelled(RuntimeError):
         pass
 
     def cancel():
-        calls.append(1)
-        if len(calls) >= 2:
+        calls.append(clock.now)
+        if clock.now >= 3.0:  # 3초쯤 취소됨
             raise Cancelled('cancelled')
 
     with pytest.raises(Cancelled):
         run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]), cancel_check=cancel)
-    seen = []
-    run(make_table(rows), spec(measures=[{'id': 'n', 'func': 'count', 'column': None}]), cancel_check=lambda: seen.append(1))
-    assert len(seen) >= 3  # 시작·반복 중간·끝
+    assert len(calls) <= 5, calls  # 0.1, 1.1, 2.1, 3.1 근처에서만 부른다
+    assert calls[-1] < 4.2  # 간격이 지나면 곧 전파된다
 
 
 def _representative(table):

@@ -190,7 +190,7 @@ class TableReaderTests(unittest.TestCase):
 
         def cancel():
             calls.append(1)
-            if len(calls) >= 2:
+            if len(calls) >= 1:  # 첫 확인(시작)에서 바로 취소
                 raise Cancelled("x")
         content = ("a,b\n" + "\n".join(f"{i},{i}" for i in range(3000))).encode()
         with self.assertRaises(Cancelled):  # RuntimeError가 TABLE_FORMAT_UNSUPPORTED로 바뀌지 않는다
@@ -199,9 +199,32 @@ class TableReaderTests(unittest.TestCase):
         calls.clear()
         with self.assertRaises(Cancelled):
             read_table(workbook([("S", xml)]), file_name="a.xlsx", source_format="xlsx", sheet=None, header_row=1, cancel_check=cancel)
+        # 취소 확인(작업 heartbeat = DB 쓰기)은 1초에 한 번까지만: 10만 행 읽기에서도 몇 번뿐이다.
+        big = ("a,b,c\n" + "\n".join(f"{i},x{i},2026-01-01" for i in range(100_000))).encode()
         seen = []
-        read_table(content, file_name="a.csv", source_format="csv", sheet=None, header_row=1, cancel_check=lambda: seen.append(1))
-        self.assertGreaterEqual(len(seen), 3)
+        started = time.monotonic()
+        read_table(big, file_name="a.csv", source_format="csv", sheet=None, header_row=1, cancel_check=lambda: seen.append(1))
+        elapsed = time.monotonic() - started
+        self.assertTrue(1 <= len(seen) <= elapsed + 2, (len(seen), elapsed))
+        # 간격이 지나면 취소가 곧 전파된다(가짜 시계: 확인 자리 1번 = 0.1초).
+        from unittest.mock import patch
+        import daon2_user_api.table_reader as reader_module
+        clock = {"now": 0.0}
+
+        def tick():
+            clock["now"] += 0.1
+            return clock["now"]
+        stamps = []
+
+        def cancel_later():
+            stamps.append(clock["now"])
+            if clock["now"] >= 2.0:
+                raise Cancelled("x")
+        with patch.object(reader_module, "_cancel_clock", tick):
+            with self.assertRaises(Cancelled):
+                read_table(big, file_name="a.csv", source_format="csv", sheet=None, header_row=1, cancel_check=cancel_later)
+        self.assertLessEqual(len(stamps), 4, stamps)
+        self.assertLess(stamps[-1], 3.2)
 
     def test_csv_utf8_bom_and_tab(self):
         content = "﻿이름\t금액\t메모\n가\t1,000\t\"a,b\"\n나\t2000\tc\n".encode("utf-8")

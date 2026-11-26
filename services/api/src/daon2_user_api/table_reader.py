@@ -98,13 +98,34 @@ def _fail(code: str):
     raise TableReadError(code)
 
 
+CANCEL_CHECK_SECONDS = 1.0
+_cancel_clock = time.monotonic  # replaced in tests
+
+
+def throttled_cancel_check(cancel_check, seconds: float = CANCEL_CHECK_SECONDS):
+    """Call ``cancel_check`` at most once per ``seconds`` (the first call always).
+
+    The studio job's cancel check is the queue heartbeat, a database write, so it
+    must not run at every deadline check (every XML chunk / 1,000 rows)."""
+    last = None
+
+    def check():
+        nonlocal last
+        now = _cancel_clock()
+        if last is None or now - last >= seconds:
+            last = now
+            cancel_check()
+    return check
+
+
 class _Guard:
     """Deadline plus the job's cancel check, passed where a deadline goes.
+    The deadline is checked every time; the cancel check is throttled.
     Remembers the cancellation so read_table does not mask it as a parse error."""
     __slots__ = ('deadline', 'cancel_check', 'cancelled')
 
     def __init__(self, deadline, cancel_check):
-        self.deadline = deadline; self.cancel_check = cancel_check; self.cancelled = None
+        self.deadline = deadline; self.cancel_check = throttled_cancel_check(cancel_check); self.cancelled = None
 
     def check(self):
         if self.deadline is not None and time.monotonic() > self.deadline:

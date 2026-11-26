@@ -21,7 +21,7 @@ from fractions import Fraction
 from decimal import (ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal, DivisionByZero, Inexact,
                      InvalidOperation, Overflow)
 
-from .table_reader import Column, NotDate, NotNumber, Table, parse_number
+from .table_reader import Column, NotDate, NotNumber, Table, parse_number, throttled_cancel_check
 
 _SPEC_INVALID = 'AGGREGATION_SPEC_INVALID'
 _TOO_MANY_GROUPS = 'AGGREGATION_TOO_MANY_GROUPS'
@@ -399,7 +399,10 @@ def run(table: Table, spec: Mapping, *, deadline: float | None = None, max_group
     compares (``current_evidence_id``, ``previous_evidence_id`` or None when
     the previous month has no rows) instead of repeating their ranges. A
     referenced previous-month entry exists even when that row is cut by
-    ``limit``."""
+    ``limit``. ``cancel_check`` runs at most once per second (it is the job
+    heartbeat); the deadline is checked at every point."""
+    if cancel_check is not None:
+        cancel_check = throttled_cancel_check(cancel_check)
     _check_deadline(deadline, cancel_check)
     filters, groups, measures, growth, month_index, keys, sort_index, sort_desc, limit = _parse_spec(table, spec)
 
