@@ -28,6 +28,10 @@ button, input, select, textarea { font: inherit; }
 .desktop-shell[data-visual-system="notebook-violet"] input:focus-visible,
 .desktop-shell[data-visual-system="notebook-violet"] select:focus-visible { outline: 2px solid var(--workspace-accent); outline-offset: 2px; }
 .desktop-app-actions { display: flex; gap: 6px; }
+.desktop-manual-page { padding: clamp(12px, 3vw, 36px); }
+.desktop-manual-page .manual-settings-page { max-width: 1180px; margin: auto; }
+.desktop-manual-page .common-settings-header { display: flex; align-items: center; gap: 16px; }
+.desktop-manual-page .common-settings-header button { color: inherit; background: var(--workspace-surface); border: 1px solid var(--workspace-border); border-radius: 8px; padding: 6px 10px; }
 .workspace-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgb(23 21 29 / 48%); }
 .workspace-modal { width: min(560px, 100%); max-height: min(760px, calc(100vh - 48px)); overflow: auto; padding: 18px; border: 1px solid var(--workspace-border); border-radius: var(--workspace-radius); background: var(--workspace-surface); color: var(--workspace-text); box-shadow: var(--workspace-shadow); }
 .workspace-modal > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

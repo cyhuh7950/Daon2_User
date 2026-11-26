@@ -13,7 +13,8 @@ import { createNativeNotebookBridge } from "./native-notebook-bridge.js";
 import { concealProtectedDesktop, revealProtectedDesktop } from "./desktop-protected-route.js";
 import { NativeAuthPanel } from "./native-auth-panel.jsx";
 import { createWindowsWorkspaceAdapter } from "./windows-workspace-adapter.js";
-import { createWindowsOnlineFeatures } from "./windows-online-features.js";
+import { createWindowsManualFetch, createWindowsOnlineFeatures } from "./windows-online-features.js";
+import { ManualSettingsPane } from "../../web/components/manual-settings-pane.jsx";
 import { createOfflineStudioState, reduceOfflineStudioState } from "./offline-studio-model.js";
 import { WorkspaceOperationsModal } from "./workspace-operations-modal.jsx";
 import { WorkspaceSettingsModal } from "./workspace-settings-modal.jsx";
@@ -165,6 +166,7 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
   const notebookBridge = useMemo(() => {
     try { return createNativeNotebookBridge({ invoke: nativeInvoke }); } catch { return null; }
   }, [nativeInvoke]);
+  const manualFetch = useMemo(() => createWindowsManualFetch(nativeInvoke), [nativeInvoke]);
   const workspaceAdapter = useMemo(() => {
     if (!nativeSession.authenticated || !selectedNotebook) return null;
     const base = createWindowsWorkspaceAdapter(nativeSession.workspaceId, {
@@ -339,6 +341,11 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
     return <main className="desktop-login-shell" data-theme={effectiveScreenTheme} data-client-type="windows" aria-busy="true" />;
   }
   if (!selectedNotebook) {
+    if (activeModal === "manual") {
+      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <ManualSettingsPane fetchImpl={manualFetch} onBack={() => setActiveModal(null)} />
+      </div>;
+    }
     return <div className="desktop-notebook-home" data-theme={effectiveScreenTheme} data-client-type="windows" data-session-tree-key={sessionTreeKey}>
       <NotebookHome
         state={notebookHome.state}
@@ -347,7 +354,7 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
         onReload={loadHome}
         onCreate={createNotebook}
         onOpenNotebook={({ notebookId }) => { void openNotebook({ notebookId }); }}
-        onOpenSetting={() => setActiveModal("settings")}
+        onOpenSetting={(id) => setActiveModal(id === "manual" ? "manual" : "settings")}
         onLogout={logout}
       />
       <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />

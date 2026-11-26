@@ -350,6 +350,11 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
         job_state: "completed"
       }];
       if (command === "workspace_list_studio_outputs") return [];
+      if (command === "native_read_manual") {
+        const bytes = await readFile(new URL(`../../apps/web/public/manual/${args.asset}`, import.meta.url));
+        const mime = args.asset === "manifest.json" ? "application/json" : "text/markdown; charset=utf-8";
+        return packNativeResponse(bytes, { headers: [["content-type", mime]] });
+      }
       if (command === "native_notebook_request" && args.request.path.endsWith("/questions")) return packNativeResponse(JSON.stringify({ data: {
         run_id: "run-1", run_result_id: "result-1", answer: "StrictMode 질문 성공", insufficient: false,
         citations: [{ citation_id: "citation-1", source_id: "source-workspace-1", source_version_id: "version-workspace-1", evidence_span_id: "span-1", page: 1, origin: "raw_source", context_item_id: "source-workspace-1", locator: { kind: "page", value: "1" } }]
@@ -381,6 +386,12 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     assert.ok(calls.includes("native_login"), `native_login 호출 필요: ${calls.join(",")}`);
     assert.match(container.textContent, /지식에서 결과까지/u, "로그인 성공은 Notebook Home이어야 한다");
     assert.equal(calls.includes("workspace_list_sources"), false, "사용자가 Notebook을 고르기 전에는 3열 조회가 없어야 한다");
+    await act(async () => { buttonByText(container, "설정").dispatchEvent(new MinimalEvent("click")); });
+    const manualMenu = findElements(container, (node) => node.getAttribute("role") === "menuitem" && node.textContent === "사용자 설명서")[0];
+    await act(async () => { manualMenu.dispatchEvent(new MinimalEvent("click")); });
+    assert.match(container.textContent, /Daon 문서 Hub/u);
+    assert.ok(calls.includes("native_read_manual"));
+    await act(async () => { buttonByText(container, "Notebook으로").dispatchEvent(new MinimalEvent("click")); });
     const createOpener = findElements(container, (node) => node.tagName === "BUTTON" && node.textContent.includes("새 Notebook"))[0];
     await act(async () => { createOpener.dispatchEvent(new MinimalEvent("click")); });
     const createDialog = findElements(container, (node) => node.getAttribute("role") === "dialog")[0];

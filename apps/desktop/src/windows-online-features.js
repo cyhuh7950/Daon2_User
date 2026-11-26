@@ -35,11 +35,7 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     }, signal);
   }
 
-  function manualFetch(url, { signal } = {}) {
-    if (typeof url !== "string" || !url.startsWith("/manual/")) throw new Error("MANUAL_DOCUMENT_NOT_FOUND");
-    return invokeResponse(invoke, "native_read_manual", { asset: url.slice("/manual/".length) }, signal);
-  }
-
+  const manualFetch = createWindowsManualFetch(invoke);
   const citationUrl = (citation) => citationContentUrl(workspaceId, citation, { notebookId });
   const citationResponse = (citation, { signal } = {}) => fetchImpl(citationUrl(citation).split("#", 1)[0], { signal });
   return {
@@ -61,5 +57,12 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     getManualManifest: (options) => getManualManifest({ ...options, fetchImpl: manualFetch }),
     readManual: (id, manifest, options) => readManualDocument(id, { ...options, manifest, fetchImpl: manualFetch }),
     downloadManual: (id, format, manifest, options) => downloadManualAsset(id, format, { ...options, manifest, fetchImpl: manualFetch }),
+  };
+}
+
+export function createWindowsManualFetch(invoke) {
+  return function manualFetch(url, { signal } = {}) {
+    if (typeof url !== "string" || !url.startsWith("/manual/")) throw new Error("MANUAL_DOCUMENT_NOT_FOUND");
+    return invokeResponse(invoke, "native_read_manual", { asset: url.slice("/manual/".length) }, signal);
   };
 }
