@@ -20,10 +20,35 @@ test('S42 context BFF는 단일 정확 선택만 전달하고 중복·동시·�
   assert.equal(captured.length, 2);
 });
 
-import { createBffProxy } from "../../apps/web/lib/bff-api-proxy.js";
+import { createBffProxy, createNativeBffProxy } from "../../apps/web/lib/bff-api-proxy.js";
 
 const COOKIE = "__Host-daon_session=opaque-session";
 const ORIGIN = "https://app.example.com";
+
+test("Windows Notebook BFF는 Bearer로 정확한 조회 세 경로만 전달한다", async () => {
+  const calls = [];
+  const token = "Bearer native-notebook-fixture-credential";
+  const proxy = createNativeBffProxy({
+    baseUrl: new URL("https://api.example.com"),
+    publicOrigin: new URL(ORIGIN),
+    fetchImpl: async (url, init) => {
+      calls.push([url.pathname, init.method, init.headers.get("authorization"), init.headers.get("cookie")]);
+      return Response.json({ data: {}, meta: {} });
+    },
+  });
+  const get = (parts, { headers = { Authorization: token }, method = "GET", query = "" } = {}) =>
+    proxy(new Request(`${ORIGIN}/api/v1/${parts.join("/")}${query}`, { headers, method }), parts);
+  const collection = ["workspaces", "workspace-1", "notebooks"];
+  const paths = [collection, [...collection, "notebook-1"], [...collection, "notebook-1", "context"]];
+  for (const path of paths) assert.equal((await get(path)).status, 200);
+  assert.deepEqual(calls, paths.map((parts) => [`/api/v1/${parts.join("/")}`, "GET", token, null]));
+  assert.equal((await get(collection, { headers: {} })).status, 401);
+  assert.equal((await get(collection, { headers: { Cookie: COOKIE } })).status, 400);
+  assert.equal((await get(collection, { method: "POST" })).status, 405);
+  assert.equal((await get(paths[2], { query: "?notebook_id=other" })).status, 404);
+  assert.equal((await get([...paths[2], "extra"])).status, 404);
+  assert.equal(calls.length, 3);
+});
 
 function makeProxy(captured) {
   return createBffProxy({
