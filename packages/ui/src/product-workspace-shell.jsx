@@ -1024,6 +1024,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
   const [syncPending, setSyncPending] = useState(false);
   const [syncSafeError, setSyncSafeError] = useState(null);
   const [syncSelections, setSyncSelections] = useState({});
+  const [syncSource, setSyncSource] = useState(null);
   const syncSessionRef = useRef(null);
   const syncRequestRef = useRef(null);
   const syncScopeRef = useRef(null);
@@ -1948,6 +1949,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     if (syncPasswordRef.current) syncPasswordRef.current.value = "";
     syncRequestRef.current = null;
     syncSessionRef.current = null;
+    setSyncSource(null);
   };
   const ownsSyncSession = (session) => session && syncSessionRef.current === session
     && workspaceMountedRef.current && syncScopeRef.current.adapter === session.adapter
@@ -1956,7 +1958,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     && !request.controller.signal.aborted && ownsSyncSession(request.session);
   const loadSyncOperations = async () => {
     const session = syncSessionRef.current;
-    if (!ownsSyncSession(session) || syncRequestRef.current?.kind === "approve") return;
+    if (!ownsSyncSession(session) || (syncRequestRef.current && syncRequestRef.current.kind !== "load")) return;
     syncRequestRef.current?.controller.abort();
     const request = { session, kind: "load", controller: new AbortController() };
     syncRequestRef.current = request;
@@ -1983,6 +1985,45 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
       }
     }
   };
+  const updateSyncSource = async (kind, run) => {
+    const session = syncSessionRef.current;
+    if (!ownsSyncSession(session) || syncRequestRef.current) return;
+    const request = { session, kind, controller: new AbortController() };
+    syncRequestRef.current = request;
+    setSyncPending(true);
+    setSyncSafeError(null);
+    setSyncFailurePhase(null);
+    try {
+      const result = await run(session.adapter, { signal: request.controller.signal });
+      if (!ownsSyncRequest(request)) return;
+      if (kind === "file") {
+        setSyncSource(result);
+      } else {
+        setSyncOperations((current) => [result, ...current.filter((item) => item.operation_id !== result.operation_id)]);
+      }
+    } catch (error) {
+      if (!ownsSyncRequest(request)) return;
+      setSyncSafeError(safeErrorCode(error, "SYNC_SETTINGS_UNAVAILABLE"));
+      setSyncFailurePhase(kind);
+    } finally {
+      if (ownsSyncRequest(request)) {
+        syncRequestRef.current = null;
+        setSyncPending(false);
+      }
+    }
+  };
+  const selectSyncSource = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    setSyncSource(null);
+    if (!file) return;
+    void updateSyncSource("file", async (sourceAdapter) => ({
+      file, manifest: await sourceAdapter.inspectSyncSource(file), key: crypto.randomUUID(),
+    }));
+  };
+  const currentSyncSourceOperation = syncSource && syncOperations.find((item) =>
+    item.item_ids.length === 1 && item.item_ids[0] === syncSource.manifest.item_id
+    && ["awaiting_approval", "approved", "transferring", "conflict", "reindex_requested"].includes(item.state));
   const approveSyncOperation = async (operation) => {
     const session = syncSessionRef.current;
     const approvedItemIds = [...(syncSelections[operation.operation_id] ?? [])];
@@ -2694,14 +2735,28 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {outputCloseGuard ? <div className="unsaved-settings-guard" role="alertdialog" aria-label="저장하지 않은 변경"><strong>저장하지 않은 변경이 있습니다.</strong><p>저장하거나 변경을 버린 뒤 닫아 주세요.</p><div><button type="button" disabled={outputSettingsPending} onClick={() => void saveOutputVersionSettings({ closeAfter: true })}>저장</button><button type="button" disabled={outputSettingsPending} onClick={() => { if (outputRequestRef.current?.kind === "save") return; setOutputSettingsDirty(false); closeModal(true); }}>버리기</button><button type="button" disabled={outputSettingsPending} onClick={() => { if (outputRequestRef.current?.kind !== "save") setOutputCloseGuard(false); }}>계속 편집</button></div></div> : null}
           </div> : modalView === "sync" ? <div className="workspace-modal-content sync-approval-settings" aria-live="polite">
             <div className="sync-settings-toolbar"><div><strong>동기화 Preview</strong><small>자동 전송하지 않습니다. 승인할 항목을 확인해 명시적으로 선택하세요.</small></div><button type="button" disabled={syncPending} onClick={() => void loadSyncOperations()}>새로고침</button></div>
+            {adapter?.createSyncPreview && <fieldset disabled={syncPending}>
+              <legend>Windows 로컬 파일</legend>
+              <label>동기화할 파일 선택 <input type="file" accept=".txt,.md,.pdf" onChange={selectSyncSource} /></label>
+              <small>TXT, MD, PDF 한 건 · 최대 512KB · 승인 후 현재 노트북 원문 색인</small>
+              {syncSource && <p>{syncSource.file.name} · {syncSource.manifest.byte_size}바이트</p>}
+              {syncSource && !currentSyncSourceOperation && <button type="button" onClick={() => void updateSyncSource("preview",
+                (sourceAdapter, options) => sourceAdapter.createSyncPreview(syncSource.manifest, { ...options, idempotencyKey: syncSource.key }))}>Preview 만들기</button>}
+            </fieldset>}
             {syncPending && !syncOperations.length ? <div className="modal-unavailable" role="status">동기화 상태를 불러오고 있습니다.</div> : null}
-            {syncSafeError ? <div className="modal-unavailable" role="alert"><strong>동기화 설정을 처리하지 못했습니다.</strong><p>{syncFailurePhase === "approval" ? "승인 결과를 확인할 수 없습니다. 목록을 다시 불러와 확인해 주세요." : syncFailurePhase === "authorization" ? "추가 인증을 완료하지 못했습니다. 인증 정보를 확인해 주세요." : "동기화 상태를 불러오지 못했습니다. 다시 확인해 주세요."}</p><p>실제 전송 상태는 승인 상태와 별도로 확인해 주세요.</p><button type="button" disabled={syncPending} onClick={() => void loadSyncOperations()}>다시 불러오기</button></div> : null}
+            {syncSafeError ? <div className="modal-unavailable" role="alert"><strong>동기화 설정을 처리하지 못했습니다.</strong><p>{syncFailurePhase === "approval" ? "승인 결과를 확인할 수 없습니다. 목록을 다시 불러와 확인해 주세요." : syncFailurePhase === "authorization" ? "추가 인증을 완료하지 못했습니다. 인증 정보를 확인해 주세요." : syncFailurePhase === "file" ? "지원하는 형식과 크기의 파일을 선택해 주세요." : syncFailurePhase === "preview" || syncFailurePhase === "transfer" ? "처리 결과를 확인할 수 없습니다. 목록을 다시 불러와 확인해 주세요." : "동기화 상태를 불러오지 못했습니다. 다시 확인해 주세요."}</p><p>실제 전송 상태는 승인 상태와 별도로 확인해 주세요.</p><button type="button" disabled={syncPending} onClick={() => void loadSyncOperations()}>다시 불러오기</button></div> : null}
             {!syncPending && !syncSafeError && !syncOperations.length ? <div className="sync-empty-state"><strong>승인을 기다리는 동기화가 없습니다.</strong><small>Windows 앱에서 Preview를 만들면 이 화면에서 확인할 수 있습니다.</small></div> : null}
             <div className="sync-operation-list">
               {syncOperations.map((operation) => <article key={operation.operation_id} data-sync-state={operation.state}>
                 <header><div><strong>{operation.state === "awaiting_approval" ? "승인 대기" : operation.state === "approved" ? "승인됨" : operation.state === "conflict" ? "충돌 확인 필요" : "처리 상태"}</strong><small>항목 {operation.item_ids.length}개 · Version {operation.version}</small></div><span>{operation.state}</span></header>
                 <fieldset disabled={operation.state !== "awaiting_approval" || syncPending}><legend>승인 항목</legend>{operation.item_ids.map((itemId) => <label key={itemId}><input type="checkbox" checked={(syncSelections[operation.operation_id] ?? []).includes(itemId)} onChange={(event) => { if (syncRequestRef.current) return; const checked = event.target.checked; setSyncSelections((current) => ({ ...current, [operation.operation_id]: checked ? [...new Set([...(current[operation.operation_id] ?? []), itemId])] : (current[operation.operation_id] ?? []).filter((id) => id !== itemId) })); }} /><span>{itemId}</span></label>)}</fieldset>
                 {operation.state === "awaiting_approval" ? <button type="button" disabled={syncPending || !(syncSelections[operation.operation_id] ?? []).length} onClick={() => void approveSyncOperation(operation)}>선택 항목 승인</button> : null}
+                {operation === currentSyncSourceOperation && operation.state === "approved"
+                  && operation.approved_item_ids.includes(syncSource.manifest.item_id) ? <button type="button" disabled={syncPending}
+                  onClick={() => void updateSyncSource("transfer", (sourceAdapter, options) =>
+                    sourceAdapter.transferSyncSource(operation, syncSource.file, options))}>승인된 파일 전송</button> : null}
+                {operation.state === "reindex_requested" && <p>{operation.reindex_state === "indexed"
+                  ? "전송 완료 · 원문 색인 완료" : "전송 완료 · 인덱싱 요청됨"}</p>}
               </article>)}
             </div>
             {syncOperations.some((operation) => operation.state === "awaiting_approval") ? <label className="sync-step-up-password"><span>현재 비밀번호</span><input ref={syncPasswordRef} type="password" autoComplete="current-password" disabled={syncPending} /><small>승인 시 Step-up 인증에만 사용하며 저장하지 않습니다.</small></label> : null}

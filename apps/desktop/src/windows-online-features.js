@@ -1,7 +1,10 @@
 import { createProviderSettingsApi } from "../../web/lib/provider-settings-api.js";
 import { getWorkspaceOperationsStatus, getWorkspaceOutputVersionSettings, issueStudioStepUp, saveWorkspaceOutputVersionSettings } from "../../web/lib/product-workspace-api.js";
 import { getEffectiveEgressPolicy } from "../../web/lib/egress-policy-api.js";
-import { approveWorkspaceSyncOperation, listWorkspaceSyncOperations } from "../../web/lib/sync-approval-settings-api.js";
+import {
+  approveWorkspaceSyncOperation, createWorkspaceSyncPreview, listWorkspaceSyncOperations,
+  transferWorkspaceSyncSource, workspaceSyncSourceManifest,
+} from "../../web/lib/sync-approval-settings-api.js";
 import { createStudioV2Adapter } from "../../web/lib/studio-v2-adapter.js";
 import { askGroundedQuestion, authorizeGroundedQuestion, citationContentUrl } from "../../web/lib/question-answering-api.js";
 import { downloadManualAsset, getManualManifest, readManualDocument } from "../../web/lib/manual-api.js";
@@ -60,6 +63,9 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     saveOutputVersionSettings: (settings, options) => saveWorkspaceOutputVersionSettings(workspaceId, settings, { ...options, fetchImpl }),
     getEgressPolicy: (options) => getEffectiveEgressPolicy({ ...options, workspaceId, fetchImpl }).then(result => result.data),
     listSyncOperations: (options) => listWorkspaceSyncOperations(workspaceId, { ...options, fetchImpl }),
+    inspectSyncSource: workspaceSyncSourceManifest,
+    createSyncPreview: (manifest, options) => createWorkspaceSyncPreview(workspaceId, manifest, { ...options, notebookId, fetchImpl }),
+    transferSyncSource: (operation, file, options) => transferWorkspaceSyncSource(workspaceId, operation, file, { ...options, fetchImpl }),
     approveSyncOperation: (operation, input, options) => approveWorkspaceSyncOperation(workspaceId, operation, input, { ...options, fetchImpl }),
     issueStudioStepUp: (group, target, password, options) => issueStudioStepUp(group, target, password, { ...options, fetchImpl }),
     listDaonKnowledgeScopes: (options) => listDaonKnowledgeScopes(workspaceId, { ...options, fetchImpl }),

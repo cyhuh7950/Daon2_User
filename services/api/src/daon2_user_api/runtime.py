@@ -555,7 +555,7 @@ def _build_run_cost_sessions(store,settings):
     if not policies:return None
     if store is None:raise ValueError('RUN_COST_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089','0090'}:
         raise ValueError('RUN_COST_PROTECTED_STORAGE_REQUIRED')
     return RunCostSessionFactory(OperationsRunCostRepository(store),policies=policies,evidence=evidence,
         clock=lambda:datetime.now(timezone.utc))
@@ -565,7 +565,7 @@ def _build_host_capacity_collector(store,settings):
     if settings.operations_host_capacity_enabled is not True:return None
     if store is None:raise ValueError('HOST_CAPACITY_STORAGE_REQUIRED')
     ready=store.readiness()
-    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089'}:
+    if ready.ready is not True or ready.schema_revision not in {'0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089','0090'}:
         raise ValueError('HOST_CAPACITY_PROTECTED_STORAGE_REQUIRED')
     from .operations_host_capacity import HostCapacityCollector
     from .operations_telemetry_postgres import PostgresHostCapacityRepository
@@ -905,7 +905,7 @@ def _build_document_readiness_runtime(cloud_store, settings):
     if cloud_store is None or not configured.scopes:
         return None
     status = cloud_store.readiness()
-    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083","0084","0085","0086","0087","0088","0089"}:
+    if status.ready is not True or status.schema_revision not in {"0072","0073","0074","0075","0076","0077","0078","0079","0080","0081","0082","0083","0084","0085","0086","0087","0088","0089","0090"}:
         raise ValueError("DOCUMENT_READINESS_SCHEMA_REQUIRED")
     from .document_readiness_postgres import PostgresDocumentReadinessRepository
     from .workspace_model_defaults import read_document_readiness_policy
@@ -1384,6 +1384,7 @@ class SyncCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_area: str
     items: list[SyncItemBody]
+    notebook_id: str | None = None
 
 
 class SyncApproveBody(BaseModel):
@@ -1740,7 +1741,7 @@ def _notification_dispatch_tick(
     if cloud is None or getattr(cloud, '_notification_inbox_enabled', False) is not True:
         return after
     ready = cloud.readiness()  # 정확히 지원하는 revision과 모든 기존 보호를 함께 검사한다.
-    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089'}:
+    if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089','0090'}:
         raise NotificationError('DATABASE_UNAVAILABLE', 503)
     if stop.is_set():
         return after
@@ -2465,7 +2466,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         if cloud is None or not getattr(cloud, '_notification_inbox_enabled', False):
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         ready = cloud.readiness()
-        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089'}:
+        if ready.ready is not True or ready.schema_revision not in {'0072','0073','0074','0075','0076','0077','0078','0079','0080','0081','0082','0083','0084','0085','0086','0087','0088','0089','0090'}:
             raise NotificationError('DATABASE_UNAVAILABLE', 503)
         try:
             workspaces = dependencies.identity_service.notification_workspace_ids(
@@ -6785,6 +6786,8 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             trace_id=request.state.trace_id,
             policy_version=dependencies.settings.policy_version,
         )
+        if body.notebook_id is not None:
+            await asyncio.to_thread(notebook_service.get, notebook_context(principal, id, request), body.notebook_id)
         view = sync_service.create_operation(
             _sync_context(principal, id, request, dependencies),
             target_area=body.target_area,
@@ -6795,6 +6798,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             ) for item in body.items),
             idempotency_key=idempotency_key,
             if_match=cast(str, _sync_expected_version(if_match)),
+            notebook_id=body.notebook_id,
         )
         response = JSONResponse(content={
             "data": _sync_view_json(view), "meta": {"trace_id": request.state.trace_id}
@@ -8578,9 +8582,17 @@ def build_dependencies(settings: RuntimeSettings) -> RuntimeDependencies:
             object_queue_store = PostgresObjectQueueStore(
                 settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
             )
+            canon_store = PostgresDataCanonStore(
+                settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
+            )
+            source_upload_service = PostgresSourceUploadService(
+                queue_store=object_queue_store, object_storage=object_storage, canon_store=canon_store,
+            )
+            from .sync_source_index import SyncSourceIndexer
+
             transfer_port = ObjectQueueSyncTransferPort(ObjectQueueCoordinator(
                 object_queue_store, object_storage, id_factory=lambda: secrets.token_hex(16)
-            ))
+            ), source_indexer=SyncSourceIndexer(cloud_store, canon_store, object_storage))
         sync_service = PostgresSyncService(
             cloud_store, transfer_port, clock=lambda: datetime.now(timezone.utc)
         )
@@ -8590,13 +8602,6 @@ def build_dependencies(settings: RuntimeSettings) -> RuntimeDependencies:
         and object_storage is not None
         and object_queue_store is not None
     ):
-        source_upload_service = PostgresSourceUploadService(
-            queue_store=object_queue_store,
-            object_storage=object_storage,
-            canon_store=PostgresDataCanonStore(
-                settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
-            ),
-        )
         document_processing_service = DocumentProcessingSubmissionService(
             PostgresDocumentProcessingRepository(cloud_store, object_storage,
                 readiness_port=document_readiness_repository, readiness_settings=settings.document_readiness_settings)

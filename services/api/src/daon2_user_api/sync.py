@@ -35,6 +35,7 @@ class ConflictResolutionChoice(str, Enum):
 class SyncItemKind(str, Enum):
     SOURCE_VERSION = "source_version"
     OUTPUT_VERSION = "output_version"
+    LOCAL_FILE = "local_file"
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,13 @@ class SyncItemInput:
             kind is SyncItemKind.OUTPUT_VERSION
             and output_valid and not source_valid and bool(self.dependency_item_ids)
             and self.content_type == "application/vnd.daon.offline-studio-output+json"
+        ) or (
+            kind is SyncItemKind.LOCAL_FILE
+            and self.source_version_id is None and self.output_version_id is None
+            and not self.dependency_item_ids
+            and self.base_cloud_version_id is None and self.base_cloud_digest is None
+            and isinstance(self.byte_size, int) and 1 <= self.byte_size <= 512 * 1024
+            and self.content_type in ("text/plain", "text/markdown", "application/pdf")
         )
         if (
             any(not isinstance(value, str) or not _SAFE_ID.fullmatch(value)
@@ -122,6 +130,8 @@ class SyncItemInput:
 
     @property
     def version_id(self) -> str:
+        if self.item_kind is SyncItemKind.LOCAL_FILE:
+            return self.local_object_id
         value = (
             self.source_version_id
             if self.item_kind is SyncItemKind.SOURCE_VERSION
@@ -237,6 +247,7 @@ class _Operation:
     target_versions: list[TargetVersion] = field(default_factory=list)
     completed_item_ids: set[str] = field(default_factory=set)
     reindex_state: str | None = None
+    notebook_id: str | None = None
 
 
 class ReferenceSyncRepository:
@@ -264,8 +275,9 @@ class ReferenceTransferPort:
         idempotency_key: str,
         *,
         relation: str,
+        notebook_id: str | None = None,
     ) -> TargetVersion:
-        del context
+        del context, notebook_id
         replay = self._replays.get((item.item_id, idempotency_key))
         if replay is not None:
             return replay
@@ -287,6 +299,10 @@ class ReferenceTransferPort:
 def _fingerprint(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _preview_fingerprint(target_area: str, items: tuple[SyncItemInput, ...], notebook_id: str | None) -> str:
+    return _fingerprint((target_area, items) if notebook_id is None else (target_area, items, notebook_id))
 
 
 class SyncService:
@@ -353,14 +369,20 @@ class SyncService:
         items: tuple[SyncItemInput, ...],
         idempotency_key: str,
         if_match: str,
+        notebook_id: str | None = None,
     ) -> SyncOperationView:
         self._validate_write(idempotency_key, if_match)
         if if_match != "*" or target_area != "cloud_sync" or not items:
             raise SyncError("SYNC_PREVIEW_INVALID", 400)
+        if notebook_id is not None and (
+            not isinstance(notebook_id, str) or not _SAFE_ID.fullmatch(notebook_id)
+            or any(item.item_kind is not SyncItemKind.LOCAL_FILE for item in items)
+        ):
+            raise SyncError("SYNC_PREVIEW_INVALID", 400)
         by_id = {item.item_id: item for item in items}
         if len(by_id) != len(items):
             raise SyncError("SYNC_PREVIEW_INVALID", 400)
-        fingerprint = _fingerprint((target_area, items))
+        fingerprint = _preview_fingerprint(target_area, items, notebook_id)
         replay_key = (context.tenant_id, context.workspace_id, context.actor_id, idempotency_key)
         with self._repository.lock:
             replay = self._repository.idempotency.get(replay_key)
@@ -373,7 +395,9 @@ class SyncService:
                 f"{','.join(item.dependency_item_ids)}:{item.digest_sha256}"
                 for item in sorted(items, key=lambda value: value.item_id)
             ).encode()).hexdigest()
-            operation = _Operation(self._id("sync"), context, target_area, by_id, manifest)
+            if notebook_id is not None:
+                manifest = _fingerprint((manifest, notebook_id))
+            operation = _Operation(self._id("sync"), context, target_area, by_id, manifest, notebook_id=notebook_id)
             self._repository.operations[operation.operation_id] = operation
             self._repository.idempotency[replay_key] = (fingerprint, operation.operation_id)
             self._audit(operation, "sync.preview.created", context.trace_id)
@@ -483,6 +507,12 @@ class SyncService:
             approved = set(operation.approved_item_ids)
             if any(payload.item_id not in approved for payload in payloads):
                 raise SyncError("SYNC_SCOPE_EXPANSION_DENIED", 403)
+            if any(
+                operation.items[payload.item_id].item_kind is SyncItemKind.LOCAL_FILE
+                and (payload.current_cloud_version_id is not None or payload.current_cloud_digest is not None)
+                for payload in payloads
+            ):
+                raise SyncError("SYNC_ITEM_INVALID", 400)
             transferred: list[str] = []
             conflict_ids: list[str] = []
             batch_id = self._id("sync-batch")
@@ -507,9 +537,10 @@ class SyncService:
                     operation.conflicts.append(conflict)
                     conflict_ids.append(conflict.conflict_id)
                     continue
+                object_key = "sync-object-" + _fingerprint((operation_id, "transfer", idempotency_key, item.item_id))
                 target = self._transfer.transmit(
-                    context, item, payload.content, f"{idempotency_key}:{item.item_id}",
-                    relation="copy",
+                    context, item, payload.content, object_key,
+                    relation="copy", notebook_id=operation.notebook_id,
                 )
                 operation.target_versions.append(target)
                 operation.completed_item_ids.add(item.item_id)
@@ -526,7 +557,7 @@ class SyncService:
                 operation.state = "conflict"
             elif set(operation.approved_item_ids) <= operation.completed_item_ids:
                 operation.state = "reindex_requested"
-                operation.reindex_state = "reindex_requested"
+                operation.reindex_state = "indexed" if operation.notebook_id is not None else "reindex_requested"
             else:
                 operation.state = "transferring"
             self._repository.idempotency[key] = (fingerprint, batch_id)
@@ -577,8 +608,9 @@ class SyncService:
             }:
                 if content is None:
                     raise SyncError("SYNC_CONTENT_REQUIRED", 400)
+                object_key = "sync-object-" + _fingerprint((operation_id, "resolution", idempotency_key, item.item_id))
                 target = self._transfer.transmit(
-                    context, item, content, f"{idempotency_key}:{item.item_id}",
+                    context, item, content, object_key,
                     relation=choice.value,
                 )
                 operation.target_versions.append(target)

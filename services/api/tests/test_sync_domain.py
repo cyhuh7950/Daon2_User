@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 from daon2_user_api.sync import (
     ConflictResolutionChoice,
@@ -121,6 +122,34 @@ class SyncDomainTests(unittest.TestCase):
         current = self.service.get_operation(self.context, operation.operation_id)
         self.assertEqual(current.source_mutations, 0)
         self.assertEqual(current.reindex_state, "reindex_requested")
+
+    def test_windows_transfer_key_is_bounded_and_scoped_to_each_approval(self) -> None:
+        item_id = f"source-txt-{DIGEST_A}"
+        batch_key = f"sync-transfer-2-{item_id}"
+        item = SyncItemInput(
+            item_id, None, "local-object-a", DIGEST_A, 7, "text/plain", None, None,
+            item_kind=SyncItemKind.LOCAL_FILE,
+        )
+        with patch.object(self.transfer, "transmit", wraps=self.transfer.transmit) as transmit:
+            for attempt in (1, 2):
+                view = self.service.create_operation(
+                    self.context, target_area="cloud_sync", items=(item,),
+                    idempotency_key=f"create-key-{attempt}", if_match="*",
+                )
+                approval = self.service.approve(
+                    self.context, operation_id=view.operation_id, approved_item_ids=(item_id,),
+                    step_up_authorization_id=f"step-up-{attempt}", expected_version=view.version,
+                    idempotency_key=f"approval-key-{attempt}", approval_verified=True,
+                )
+                for _ in range(2):
+                    self.service.transfer_batch(
+                        self.context, operation_id=view.operation_id, expected_version=approval.version,
+                        idempotency_key=batch_key, cursor=None,
+                        payloads=(TransferPayload(item_id, b"local-a", None, None),),
+                    )
+            keys = [call.args[3] for call in transmit.call_args_list]
+        self.assertEqual(len(set(keys)), 2)
+        self.assertTrue(all(len(key) <= 128 for key in keys))
 
     def test_conflict_requires_explicit_resolution_and_never_overwrites(self) -> None:
         operation = self._create()

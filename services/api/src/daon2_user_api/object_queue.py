@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import secrets
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -31,6 +32,10 @@ _BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 _ALLOWED_AREAS = frozenset(("source", "output"))
 _ALLOWED_JOB_KINDS = frozenset(("object.promote",))
 _ALLOWED_PAYLOAD_KEYS = frozenset(("schema_version", "object_id"))
+
+
+def _object_request_fingerprint(area: str, digest: str, byte_size: int, content_type: str) -> str:
+    return hashlib.sha256(f"{area}|{digest}|{byte_size}|{content_type}".encode()).hexdigest()
 
 
 class ObjectQueueError(RuntimeError):
@@ -499,9 +504,7 @@ class PostgresObjectQueueStore:
         if staged.byte_size < 0 or not 1 <= max_attempts <= 100:
             raise ObjectQueueError("OBJECT_METADATA_INVALID")
         created_at = now or datetime.now(UTC)
-        fingerprint = hashlib.sha256(
-            f"{area}|{staged.digest_sha256}|{staged.byte_size}|{staged.content_type}".encode()
-        ).hexdigest()
+        fingerprint = _object_request_fingerprint(area, staged.digest_sha256, staged.byte_size, staged.content_type)
         event_id = f"outbox-{object_id}"
         job_id = f"job-{object_id}"
         payload = {"schema_version": 1, "object_id": object_id}
@@ -569,8 +572,11 @@ class PostgresObjectQueueStore:
         *,
         now: datetime,
         lease_seconds: float,
+        job_id: str | None = None,
     ) -> ObjectJob | None:
         self._safe_id(worker_id, "WORKER_ID_INVALID")
+        if job_id is not None:
+            self._safe_id(job_id, "JOB_ID_INVALID")
         if lease_seconds <= 0 or lease_seconds > 3600:
             raise ObjectQueueError("LEASE_INVALID")
         lease_until = now + timedelta(seconds=lease_seconds)
@@ -580,6 +586,7 @@ class PostgresObjectQueueStore:
                 " SELECT tenant_id, workspace_id, job_id FROM durable_jobs"
                 " WHERE ((state IN ('pending','retry_wait') AND next_attempt_at <= %s)"
                 "    OR (state = 'leased' AND lease_until <= %s))"
+                " AND (%s::text IS NULL OR job_id=%s)"
                 " ORDER BY next_attempt_at, created_at, job_id"
                 " FOR UPDATE SKIP LOCKED LIMIT 1"
                 ") UPDATE durable_jobs AS job SET state='leased', attempt=job.attempt+1, lease_owner=%s,"
@@ -589,7 +596,7 @@ class PostgresObjectQueueStore:
                 " RETURNING job.job_id, job.event_id, job.payload_reference, job.state, job.attempt,"
                 " job.max_attempts, job.next_attempt_at, job.lease_owner, job.lease_until,"
                 " job.last_safe_error_code, job.retry_of_job_id, job.trace_id, job.version, job.created_at",
-                (now, now, worker_id, lease_until),
+                (now, now, job_id, job_id, worker_id, lease_until),
             ).fetchone()
             if row is None:
                 return None
@@ -611,6 +618,22 @@ class PostgresObjectQueueStore:
         if row is None:
             raise ObjectQueueError("OBJECT_NOT_FOUND")
         return self._object_from_row(row)
+
+    def find_submission(
+        self, context: CloudAccessContext, idempotency_key: str, fingerprint: str,
+    ) -> ObjectSubmission | None:
+        with self._transaction(context) as connection:
+            row = connection.execute(
+                "SELECT object_id, request_fingerprint FROM object_records "
+                "WHERE created_by=%s AND idempotency_key=%s",
+                (context.actor_id, idempotency_key),
+            ).fetchone()
+        if row is None:
+            return None
+        if str(row[1]) != fingerprint:
+            raise ObjectQueueError("IDEMPOTENCY_KEY_REUSED")
+        object_id = str(row[0])
+        return ObjectSubmission(object_id, f"job-{object_id}", f"outbox-{object_id}", True)
 
     def get_job(self, context: CloudAccessContext, job_id: str) -> ObjectJob:
         with self._transaction(context) as connection:
@@ -886,7 +909,12 @@ class ObjectQueueCoordinator:
         idempotency_key: str,
         trace_id: str,
         object_id: str | None = None,
+        reuse_submission: bool = False,
     ) -> ObjectSubmission:
+        if context.capability != "object.write":
+            raise ObjectQueueError("OBJECT_ACCESS_DENIED")
+        PostgresObjectQueueStore._safe_id(idempotency_key, "IDEMPOTENCY_KEY_INVALID")
+        PostgresObjectQueueStore._safe_id(trace_id, "TRACE_ID_INVALID")
         if not isinstance(content, bytes) or not _CONTENT_TYPE.fullmatch(content_type):
             raise ObjectQueueError("OBJECT_METADATA_INVALID")
         object_id = self._id_factory() if object_id is None else object_id
@@ -895,6 +923,11 @@ class ObjectQueueCoordinator:
         digest = hashlib.sha256(content).hexdigest()
         staging_key = self._key_policy.staging_key(context, area, object_id)
         final_key = self._key_policy.final_key(context, area, object_id)
+        if reuse_submission:
+            fingerprint = _object_request_fingerprint(area, digest, len(content), content_type)
+            existing = self._store.find_submission(context, idempotency_key, fingerprint)
+            if existing is not None:
+                return existing
         staged = self._storage.put_staged(staging_key, content, content_type, digest)
         return self._store.register_object_job(
             context,
@@ -909,6 +942,27 @@ class ObjectQueueCoordinator:
 
     def health(self, context: CloudAccessContext, *, now: datetime) -> ObjectQueueHealth:
         return ObjectQueueHealth(self._storage.health(), self._store.metrics(context, now=now))
+
+    def finalize(self, context: CloudAccessContext, submission: ObjectSubmission) -> ObjectRecord:
+        if context.capability != "object.write":
+            raise ObjectQueueError("OBJECT_ACCESS_DENIED")
+        record = self._store.get_object(context, submission.object_id)
+        if record.status == "completed":
+            return record
+        job = self._store.get_job(context, submission.job_id)
+        if job.object_id != submission.object_id:
+            raise ObjectQueueError("OBJECT_JOB_MISMATCH")
+        now = datetime.now(UTC)
+        worker_id = "object-finalize-" + secrets.token_hex(12)
+        claimed = self._store.claim(context, worker_id, now=now, lease_seconds=60, job_id=job.job_id)
+        if claimed is not None:
+            DurableObjectWorker(self._store, self._storage, worker_id).process_claimed(context, claimed, now=now)
+        record = self._store.get_object(context, submission.object_id)
+        if record.status == "completed":
+            return record
+        if record.status == "failed":
+            raise ObjectQueueError("OBJECT_STORAGE_FAILED")
+        raise ObjectQueueError("OBJECT_STORAGE_PENDING", retryable=True)
 
 
 class DurableObjectWorker:

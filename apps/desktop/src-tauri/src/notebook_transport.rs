@@ -74,11 +74,18 @@ impl NotebookRequest {
             ["session"] => self.method == "GET" && query.is_empty(),
             ["workspaces", ws, "model-defaults" | "output-version-settings"] => *ws == workspace && query.is_empty()
                 && matches!(self.method.as_str(), "GET" | "PATCH"),
-            ["workspaces", ws, "egress-policy" | "sync-operations" | "daon-knowledge-scopes"] => {
+            ["workspaces", ws, "egress-policy" | "daon-knowledge-scopes"] => {
                 *ws == workspace && query.is_empty() && self.method == "GET"
             }
+            ["workspaces", ws, "sync-operations"] => {
+                *ws == workspace && query.is_empty() && (self.method == "GET" ||
+                    (self.method == "POST" && self.body.as_ref()
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                        .is_some_and(|value| value.get("notebook_id")
+                            .is_none_or(|target| target.as_str() == Some(notebook)))))
+            }
             ["workspaces", ws, "operations", "status"] => *ws == workspace && self.method == "GET",
-            ["sync-operations", _, "approve"] => self.method == "POST" && query.is_empty(),
+            ["sync-operations", _, "approve" | "transfer-batches"] => self.method == "POST" && query.is_empty(),
             ["provider-credentials"] => self.method == "GET" && query.is_empty(),
             ["admin", "provider-connections", "test" | "model-preview"] if self.method == "POST" => query.is_empty(),
             ["provider-credentials", _] | ["admin", "provider-connections", _] => query.is_empty()
