@@ -434,7 +434,8 @@ class PostgresSyncService:
                         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (context.tenant_id, context.workspace_id, batch.batch_id, operation_id,
                          operation.approval_snapshot_id, context.actor_id, batch.sequence,
-                         batch.cursor, batch.next_cursor, batch.state, key[3], value[0],
+                         batch.cursor, batch.next_cursor, batch.state,
+                         "sync-batch-" + _fingerprint((operation_id, key[3])), value[0],
                          context.trace_id, now),
                     )
                     conflict_items = {item.conflict_id: item.item_id for item in new_conflicts}

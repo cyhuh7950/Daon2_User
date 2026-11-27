@@ -887,6 +887,10 @@ class ObjectQueueCoordinator:
         trace_id: str,
         object_id: str | None = None,
     ) -> ObjectSubmission:
+        if context.capability != "object.write":
+            raise ObjectQueueError("OBJECT_ACCESS_DENIED")
+        PostgresObjectQueueStore._safe_id(idempotency_key, "IDEMPOTENCY_KEY_INVALID")
+        PostgresObjectQueueStore._safe_id(trace_id, "TRACE_ID_INVALID")
         if not isinstance(content, bytes) or not _CONTENT_TYPE.fullmatch(content_type):
             raise ObjectQueueError("OBJECT_METADATA_INVALID")
         object_id = self._id_factory() if object_id is None else object_id

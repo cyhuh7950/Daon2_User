@@ -523,8 +523,9 @@ class SyncService:
                     operation.conflicts.append(conflict)
                     conflict_ids.append(conflict.conflict_id)
                     continue
+                object_key = "sync-object-" + _fingerprint((operation_id, "transfer", idempotency_key, item.item_id))
                 target = self._transfer.transmit(
-                    context, item, payload.content, f"{idempotency_key}:{item.item_id}",
+                    context, item, payload.content, object_key,
                     relation="copy",
                 )
                 operation.target_versions.append(target)
@@ -593,8 +594,9 @@ class SyncService:
             }:
                 if content is None:
                     raise SyncError("SYNC_CONTENT_REQUIRED", 400)
+                object_key = "sync-object-" + _fingerprint((operation_id, "resolution", idempotency_key, item.item_id))
                 target = self._transfer.transmit(
-                    context, item, content, f"{idempotency_key}:{item.item_id}",
+                    context, item, content, object_key,
                     relation=choice.value,
                 )
                 operation.target_versions.append(target)

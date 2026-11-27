@@ -111,10 +111,11 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
         content = b"postgres-sync"
         digest = hashlib.sha256(content).hexdigest()
         item = SyncItemInput(
-            "item-postgres", None, "local-object-postgres",
+            f"source-txt-{digest}", None, "local-object-postgres",
             digest, len(content), "text/plain", None, None,
             item_kind=SyncItemKind.LOCAL_FILE,
         )
+        batch_key = f"sync-transfer-2-{item.item_id}"
         operation = self.service.create_operation(
             self.context, target_area="cloud_sync", items=(item,),
             idempotency_key="create-postgres-sync", if_match="*",
@@ -136,12 +137,12 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
         self.assertEqual(self.storage.objects, {})
         batch = self.service.transfer_batch(
             self.context, operation_id=operation.operation_id,
-            expected_version=approved.version, idempotency_key="batch-postgres-sync",
+            expected_version=approved.version, idempotency_key=batch_key,
             cursor=None, payloads=(TransferPayload(item.item_id, content, None, None),),
         )
         replay = self.service.transfer_batch(
             self.context, operation_id=operation.operation_id,
-            expected_version=approved.version, idempotency_key="batch-postgres-sync",
+            expected_version=approved.version, idempotency_key=batch_key,
             cursor=None, payloads=(TransferPayload(item.item_id, content, None, None),),
         )
         self.assertEqual((batch.batch_id, replay.batch_id), (batch.batch_id, batch.batch_id))
@@ -168,6 +169,26 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
                 (operation.operation_id,) * 5,
             ).fetchone()
         self.assertEqual(tuple(counts or ()), (1, 1, 1, 1, 1))
+
+        separate = self.service.create_operation(
+            self.context, target_area="cloud_sync", items=(item,),
+            idempotency_key="create-separate-sync", if_match="*",
+        )
+        approved_separate = self.service.approve(
+            self.context, operation_id=separate.operation_id,
+            approved_item_ids=(item.item_id,), step_up_authorization_id="step-separate-sync",
+            expected_version=separate.version, idempotency_key="approve-separate-sync",
+            approval_verified=True,
+        )
+        other = self.service.transfer_batch(
+            self.context, operation_id=separate.operation_id,
+            expected_version=approved_separate.version, idempotency_key=batch_key,
+            cursor=None, payloads=(TransferPayload(item.item_id, content, None, None),),
+        )
+        self.assertEqual(other.state, "transferred")
+        self.assertNotEqual(batch.batch_id, other.batch_id)
+        other_view = self.service.get_operation(self.context, separate.operation_id)
+        self.assertNotEqual(view.target_versions[0].target_object_id, other_view.target_versions[0].target_object_id)
 
     def test_cloud_source_preview_still_requires_a_registered_version(self) -> None:
         content = b"registered"

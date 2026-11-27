@@ -84,6 +84,22 @@ class SimulatedWorkerCrash(RuntimeError):
 
 
 class ObjectQueueContractTests(unittest.TestCase):
+    def test_invalid_request_keys_are_rejected_before_staging(self) -> None:
+        scope = CloudAccessContext("tenant-a", "workspace-a", "actor-a", "object.write")
+        storage = FakeObjectStorage()
+        queue = Mock(spec=PostgresObjectQueueStore)
+        coordinator = ObjectQueueCoordinator(queue, storage, id_factory=lambda: "0" * 32)
+        for key, trace, error in (("x" * 167, "trace-a", "IDEMPOTENCY_KEY_INVALID"),
+                                  ("valid-key", "bad trace", "TRACE_ID_INVALID")):
+            with self.subTest(error=error):
+                with self.assertRaisesRegex(ObjectQueueError, error):
+                    coordinator.submit(
+                        scope, area="source", content=b"fixture", content_type="text/plain",
+                        idempotency_key=key, trace_id=trace,
+                    )
+                self.assertEqual(storage.objects, {})
+                queue.register_object_job.assert_not_called()
+
     def test_minio_bucket_provisioning_is_explicit_and_idempotent(self) -> None:
         adapter = object.__new__(MinioObjectStorageAdapter)
         adapter._bucket = "daon2-user-objects"  # type: ignore[attr-defined]
