@@ -48,7 +48,7 @@ async function readSyncSource(file) {
   const hash = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
   return { bytes, manifest: {
     item_id: `source-${extension}-${hash}`,
-    source_version_id: `local-version-${extension}-${hash}`,
+    item_kind: "local_file",
     local_object_id: `local-object-${hash}`,
     digest_sha256: hash,
     byte_size: bytes.length,
@@ -68,7 +68,7 @@ export async function createWorkspaceSyncPreview(
     method: "POST", credentials: "same-origin", cache: "no-store", signal,
     headers: { "Content-Type": "application/json", "If-Match": "*", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ target_area: "cloud_sync", items: [{
-      item_id: manifest.item_id, source_version_id: manifest.source_version_id, local_object_id: manifest.local_object_id,
+      item_id: manifest.item_id, item_kind: "local_file", local_object_id: manifest.local_object_id,
       digest_sha256: manifest.digest_sha256, byte_size: manifest.byte_size, content_type: manifest.content_type,
     }] }),
   });

@@ -67,19 +67,45 @@ class SyncRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
         self.directory.cleanup()
 
     async def test_preview_requires_step_up_approval_then_transfers_exact_manifest(self) -> None:
+        await self._verify_sync_flow("source_version")
+
+    async def test_local_file_preview_requires_step_up_and_verifies_file_before_transfer(self) -> None:
+        await self._verify_sync_flow("local_file")
+
+    async def _verify_sync_flow(self, kind: str) -> None:
         content = b"runtime-sync"
         digest = hashlib.sha256(content).hexdigest()
+        item = {
+            "item_id": "runtime-item", "item_kind": kind,
+            "local_object_id": "runtime-local-object", "digest_sha256": digest,
+            "byte_size": len(content), "content_type": "text/plain",
+        }
+        preview_url = "/api/v1/workspaces/workspace-sync-runtime/sync-operations"
+        create_headers = {"Idempotency-Key": "sync-create-runtime", "If-Match": "*"}
+        if kind == "source_version":
+            item["source_version_id"] = "runtime-source-version"
+        else:
+            for extra in (
+                {"source_version_id": "fake-cloud-version"},
+                {"content_base64": base64.b64encode(content).decode()},
+                {"base_cloud_version_id": "fake-cloud-version", "base_cloud_digest": digest},
+            ):
+                invalid = await self.client.post(preview_url, headers=create_headers, json={
+                    "target_area": "cloud_sync", "items": [item | extra],
+                })
+                self.assertIn(invalid.status_code, (400, 422), invalid.text)
         created = await self.client.post(
-            "/api/v1/workspaces/workspace-sync-runtime/sync-operations",
-            headers={"Idempotency-Key": "sync-create-runtime", "If-Match": "*"},
-            json={"target_area": "cloud_sync", "items": [{
-                "item_id": "runtime-item", "source_version_id": "runtime-source-version",
-                "local_object_id": "runtime-local-object", "digest_sha256": digest,
-                "byte_size": len(content), "content_type": "text/plain",
-            }]},
+            preview_url, headers=create_headers, json={"target_area": "cloud_sync", "items": [item]},
         )
         self.assertEqual(created.status_code, 201, created.text)
         operation_id = created.json()["data"]["operation_id"]
+        self.assertEqual(created.json()["data"]["target_versions"], [])
+        transfer_url = f"/api/v1/sync-operations/{operation_id}/transfer-batches"
+        payload = {"items": [{"item_id": "runtime-item", "content_base64": base64.b64encode(content).decode()}]}
+        premature = await self.client.post(
+            transfer_url, headers={"Idempotency-Key": "sync-unapproved", "If-Match": created.headers["etag"]}, json=payload,
+        )
+        self.assertEqual(premature.status_code, 403, premature.text)
         listed = await self.client.get(
             "/api/v1/workspaces/workspace-sync-runtime/sync-operations"
         )
@@ -103,17 +129,22 @@ class SyncRuntimeHttpTests(unittest.IsolatedAsyncioTestCase):
                   "step_up_authorization_id": step_up.authorization},
         )
         self.assertEqual(approved.status_code, 200, approved.text)
+        self.assertEqual(approved.json()["data"]["target_versions"], [])
+        if kind == "local_file":
+            bad = await self.client.post(
+                transfer_url, headers={"Idempotency-Key": "sync-batch-bad-file", "If-Match": approved.headers["etag"]},
+                json={"items": [{"item_id": "runtime-item", "content_base64": base64.b64encode(b"x" * len(content)).decode()}]},
+            )
+            self.assertEqual(bad.status_code, 400, bad.text)
         transferred = await self.client.post(
-            f"/api/v1/sync-operations/{operation_id}/transfer-batches",
+            transfer_url,
             headers={"Idempotency-Key": "sync-batch-runtime", "If-Match": approved.headers["etag"]},
-            json={"items": [{
-                "item_id": "runtime-item",
-                "content_base64": base64.b64encode(content).decode(),
-            }]},
+            json=payload,
         )
         self.assertEqual(transferred.status_code, 200, transferred.text)
         self.assertEqual(transferred.json()["operation"]["state"], "reindex_requested")
         self.assertEqual(transferred.json()["operation"]["source_mutations"], 0)
+        self.assertEqual(transferred.json()["operation"]["target_versions"][0]["digest_sha256"], digest)
 
 
 if __name__ == "__main__":

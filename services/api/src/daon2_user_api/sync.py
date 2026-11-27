@@ -35,6 +35,7 @@ class ConflictResolutionChoice(str, Enum):
 class SyncItemKind(str, Enum):
     SOURCE_VERSION = "source_version"
     OUTPUT_VERSION = "output_version"
+    LOCAL_FILE = "local_file"
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +96,13 @@ class SyncItemInput:
             kind is SyncItemKind.OUTPUT_VERSION
             and output_valid and not source_valid and bool(self.dependency_item_ids)
             and self.content_type == "application/vnd.daon.offline-studio-output+json"
+        ) or (
+            kind is SyncItemKind.LOCAL_FILE
+            and self.source_version_id is None and self.output_version_id is None
+            and not self.dependency_item_ids
+            and self.base_cloud_version_id is None and self.base_cloud_digest is None
+            and isinstance(self.byte_size, int) and 1 <= self.byte_size <= 512 * 1024
+            and self.content_type in ("text/plain", "text/markdown", "application/pdf")
         )
         if (
             any(not isinstance(value, str) or not _SAFE_ID.fullmatch(value)
@@ -122,6 +130,8 @@ class SyncItemInput:
 
     @property
     def version_id(self) -> str:
+        if self.item_kind is SyncItemKind.LOCAL_FILE:
+            return self.local_object_id
         value = (
             self.source_version_id
             if self.item_kind is SyncItemKind.SOURCE_VERSION
@@ -483,6 +493,12 @@ class SyncService:
             approved = set(operation.approved_item_ids)
             if any(payload.item_id not in approved for payload in payloads):
                 raise SyncError("SYNC_SCOPE_EXPANSION_DENIED", 403)
+            if any(
+                operation.items[payload.item_id].item_kind is SyncItemKind.LOCAL_FILE
+                and (payload.current_cloud_version_id is not None or payload.current_cloud_digest is not None)
+                for payload in payloads
+            ):
+                raise SyncError("SYNC_ITEM_INVALID", 400)
             transferred: list[str] = []
             conflict_ids: list[str] = []
             batch_id = self._id("sync-batch")

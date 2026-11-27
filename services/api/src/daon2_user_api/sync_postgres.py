@@ -417,7 +417,8 @@ class PostgresSyncService:
                          operation_id, operation.approval_snapshot_id, target.item_id,
                          target.target_object_id, target.digest_sha256,
                          target.previous_cloud_version_id, target.relation,
-                         target_item.item_kind.value,
+                         (SyncItemKind.OUTPUT_VERSION.value if target_item.output_version_id
+                          else SyncItemKind.SOURCE_VERSION.value),
                          (target.target_version_id if target_item.output_version_id else None),
                          context.trace_id, now),
                     )

@@ -497,7 +497,7 @@ test("Knowledge Package 세 경계와 versioned Sync item은 exact 계약이다"
   assert.equal(document.components.schemas.KnowledgePackage.properties.registration_state.const, "registered");
   assert.equal(document.components.schemas.KnowledgePackage.properties.review_state.const, "approved");
   assert.deepEqual(Object.keys(document.paths["/api/v1/offline-knowledge-copies/{copy_id}/content"]), ["get"]);
-  assert.deepEqual(document.components.schemas.SyncItemInput.properties.item_kind.enum, ["source_version", "output_version"]);
+  assert.deepEqual(document.components.schemas.SyncItemInput.properties.item_kind.enum, ["source_version", "output_version", "local_file"]);
   const invalid = clone(document);
   invalid.components.schemas.SyncItemInput.properties.item_kind.default = "output_version";
   assert.throws(() => validateOpenApiDocument(invalid), /versioned Sync item schema mismatch/);

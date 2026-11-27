@@ -7,11 +7,12 @@ import unittest
 from datetime import UTC, datetime
 
 from daon2_user_api.cloud_storage import CloudAccessContext, PostgresCloudStore
+from daon2_user_api.data_canon import CanonicalContext, PostgresDataCanonStore, canonical_json_bytes
 from daon2_user_api.object_queue import (
     ObjectQueueCoordinator, ObjectStorageError, PostgresObjectQueueStore,
     StagedObject, StoredObject,
 )
-from daon2_user_api.sync import SyncContext, SyncItemInput, SyncItemKind, TargetVersion, TransferPayload
+from daon2_user_api.sync import SyncContext, SyncError, SyncItemInput, SyncItemKind, TargetVersion, TransferPayload
 from daon2_user_api.sync_postgres import ObjectQueueSyncTransferPort, PostgresSyncService
 
 
@@ -92,8 +93,9 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
             self.context.tenant_id, self.context.workspace_id,
             self.context.actor_id, "sync.write",
         ))
+        self.storage = _Storage()
         coordinator = ObjectQueueCoordinator(
-            self.queue, _Storage(), id_factory=lambda: secrets.token_hex(16)
+            self.queue, self.storage, id_factory=lambda: secrets.token_hex(16)
         )
         self.transfer = ObjectQueueSyncTransferPort(coordinator)
         self.service = PostgresSyncService(
@@ -109,19 +111,29 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
         content = b"postgres-sync"
         digest = hashlib.sha256(content).hexdigest()
         item = SyncItemInput(
-            "item-postgres", "source-version-postgres", "local-object-postgres",
+            "item-postgres", None, "local-object-postgres",
             digest, len(content), "text/plain", None, None,
+            item_kind=SyncItemKind.LOCAL_FILE,
         )
         operation = self.service.create_operation(
             self.context, target_area="cloud_sync", items=(item,),
             idempotency_key="create-postgres-sync", if_match="*",
         )
+        self.assertEqual(self.storage.objects, {})
+        with self.assertRaisesRegex(SyncError, "SYNC_APPROVAL_REQUIRED"):
+            self.service.transfer_batch(
+                self.context, operation_id=operation.operation_id,
+                expected_version=operation.version, idempotency_key="batch-before-approval",
+                cursor=None, payloads=(TransferPayload(item.item_id, content, None, None),),
+            )
+        self.assertEqual(self.storage.objects, {})
         approved = self.service.approve(
             self.context, operation_id=operation.operation_id,
             approved_item_ids=(item.item_id,), step_up_authorization_id="step-postgres-sync",
             expected_version=operation.version, idempotency_key="approve-postgres-sync",
             approval_verified=True,
         )
+        self.assertEqual(self.storage.objects, {})
         batch = self.service.transfer_batch(
             self.context, operation_id=operation.operation_id,
             expected_version=approved.version, idempotency_key="batch-postgres-sync",
@@ -156,6 +168,40 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
                 (operation.operation_id,) * 5,
             ).fetchone()
         self.assertEqual(tuple(counts or ()), (1, 1, 1, 1, 1))
+
+    def test_cloud_source_preview_still_requires_a_registered_version(self) -> None:
+        content = b"registered"
+        item = SyncItemInput(
+            "cloud-item", "cloud-version", "local-object-cloud",
+            hashlib.sha256(content).hexdigest(), len(content), "text/plain", None, None,
+        )
+        def preview():
+            return self.service.create_operation(
+                self.context, target_area="cloud_sync", items=(item,),
+                idempotency_key="cloud-source-preview", if_match="*",
+            )
+
+        with self.assertRaisesRegex(SyncError, "DATABASE_CONSTRAINT_VIOLATION"):
+            preview()
+        self.assertEqual(self.service.list_operations(self.context), ())
+        canon = PostgresDataCanonStore(os.environ["DAON_TEST_POSTGRES_DSN"])
+        try:
+            context = CanonicalContext(
+                self.context.tenant_id, self.context.workspace_id, self.context.actor_id,
+                "canon.write", self.context.trace_id,
+            )
+            canon.create_source(context, "registered-source")
+            payload = {"object_id": None, "title": "Registered source"}
+            canon.append_source_version(
+                context, source_version_id="cloud-version", source_id="registered-source",
+                version_number=1, previous_version_id=None, canonical_payload=payload,
+                digest_sha256=hashlib.sha256(canonical_json_bytes(payload)).hexdigest(),
+                created_at=datetime.now(UTC),
+            )
+        finally:
+            canon.close()
+        self.assertEqual(preview().state, "awaiting_approval")
+        self.assertEqual(self.storage.objects, {})
 
 
 if __name__ == "__main__":

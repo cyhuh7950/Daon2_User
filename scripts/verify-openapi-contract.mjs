@@ -1147,11 +1147,18 @@ export function validateOpenApiDocument(document) {
   }
   const syncItem = document.components?.schemas?.SyncItemInput;
   if (
-    JSON.stringify(syncItem?.properties?.item_kind?.enum) !== JSON.stringify(["source_version", "output_version"])
+    JSON.stringify(syncItem?.properties?.item_kind?.enum) !== JSON.stringify(["source_version", "output_version", "local_file"])
     || syncItem?.properties?.item_kind?.default !== "source_version"
     || syncItem?.properties?.source_version_id?.type?.[1] !== "null"
     || syncItem?.properties?.output_version_id?.type?.[1] !== "null"
     || syncItem?.properties?.dependency_item_ids?.default?.length !== 0
+    || syncItem?.if?.required?.[0] !== "item_kind"
+    || syncItem?.if?.properties?.item_kind?.const !== "local_file"
+    || !["source_version_id", "output_version_id", "base_cloud_version_id", "base_cloud_digest"]
+      .every((key) => syncItem?.then?.properties?.[key]?.type === "null")
+    || syncItem?.then?.properties?.byte_size?.minimum !== 1
+    || syncItem?.then?.properties?.byte_size?.maximum !== 524288
+    || syncItem?.then?.properties?.dependency_item_ids?.maxItems !== 0
   ) fail("versioned Sync item schema mismatch");
   if (document.components?.schemas?.OfflineKnowledgeCopyRequest?.additionalProperties !== false) {
     fail("Offline Knowledge copy request must be exact");
