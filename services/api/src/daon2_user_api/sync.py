@@ -247,6 +247,7 @@ class _Operation:
     target_versions: list[TargetVersion] = field(default_factory=list)
     completed_item_ids: set[str] = field(default_factory=set)
     reindex_state: str | None = None
+    notebook_id: str | None = None
 
 
 class ReferenceSyncRepository:
@@ -274,8 +275,9 @@ class ReferenceTransferPort:
         idempotency_key: str,
         *,
         relation: str,
+        notebook_id: str | None = None,
     ) -> TargetVersion:
-        del context
+        del context, notebook_id
         replay = self._replays.get((item.item_id, idempotency_key))
         if replay is not None:
             return replay
@@ -297,6 +299,10 @@ class ReferenceTransferPort:
 def _fingerprint(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _preview_fingerprint(target_area: str, items: tuple[SyncItemInput, ...], notebook_id: str | None) -> str:
+    return _fingerprint((target_area, items) if notebook_id is None else (target_area, items, notebook_id))
 
 
 class SyncService:
@@ -363,14 +369,20 @@ class SyncService:
         items: tuple[SyncItemInput, ...],
         idempotency_key: str,
         if_match: str,
+        notebook_id: str | None = None,
     ) -> SyncOperationView:
         self._validate_write(idempotency_key, if_match)
         if if_match != "*" or target_area != "cloud_sync" or not items:
             raise SyncError("SYNC_PREVIEW_INVALID", 400)
+        if notebook_id is not None and (
+            not isinstance(notebook_id, str) or not _SAFE_ID.fullmatch(notebook_id)
+            or any(item.item_kind is not SyncItemKind.LOCAL_FILE for item in items)
+        ):
+            raise SyncError("SYNC_PREVIEW_INVALID", 400)
         by_id = {item.item_id: item for item in items}
         if len(by_id) != len(items):
             raise SyncError("SYNC_PREVIEW_INVALID", 400)
-        fingerprint = _fingerprint((target_area, items))
+        fingerprint = _preview_fingerprint(target_area, items, notebook_id)
         replay_key = (context.tenant_id, context.workspace_id, context.actor_id, idempotency_key)
         with self._repository.lock:
             replay = self._repository.idempotency.get(replay_key)
@@ -383,7 +395,9 @@ class SyncService:
                 f"{','.join(item.dependency_item_ids)}:{item.digest_sha256}"
                 for item in sorted(items, key=lambda value: value.item_id)
             ).encode()).hexdigest()
-            operation = _Operation(self._id("sync"), context, target_area, by_id, manifest)
+            if notebook_id is not None:
+                manifest = _fingerprint((manifest, notebook_id))
+            operation = _Operation(self._id("sync"), context, target_area, by_id, manifest, notebook_id=notebook_id)
             self._repository.operations[operation.operation_id] = operation
             self._repository.idempotency[replay_key] = (fingerprint, operation.operation_id)
             self._audit(operation, "sync.preview.created", context.trace_id)
@@ -526,7 +540,7 @@ class SyncService:
                 object_key = "sync-object-" + _fingerprint((operation_id, "transfer", idempotency_key, item.item_id))
                 target = self._transfer.transmit(
                     context, item, payload.content, object_key,
-                    relation="copy",
+                    relation="copy", notebook_id=operation.notebook_id,
                 )
                 operation.target_versions.append(target)
                 operation.completed_item_ids.add(item.item_id)
@@ -543,7 +557,7 @@ class SyncService:
                 operation.state = "conflict"
             elif set(operation.approved_item_ids) <= operation.completed_item_ids:
                 operation.state = "reindex_requested"
-                operation.reindex_state = "reindex_requested"
+                operation.reindex_state = "indexed" if operation.notebook_id is not None else "reindex_requested"
             else:
                 operation.state = "transferring"
             self._repository.idempotency[key] = (fingerprint, batch_id)

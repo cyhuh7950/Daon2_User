@@ -64,7 +64,7 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     getEgressPolicy: (options) => getEffectiveEgressPolicy({ ...options, workspaceId, fetchImpl }).then(result => result.data),
     listSyncOperations: (options) => listWorkspaceSyncOperations(workspaceId, { ...options, fetchImpl }),
     inspectSyncSource: workspaceSyncSourceManifest,
-    createSyncPreview: (manifest, options) => createWorkspaceSyncPreview(workspaceId, manifest, { ...options, fetchImpl }),
+    createSyncPreview: (manifest, options) => createWorkspaceSyncPreview(workspaceId, manifest, { ...options, notebookId, fetchImpl }),
     transferSyncSource: (operation, file, options) => transferWorkspaceSyncSource(workspaceId, operation, file, { ...options, fetchImpl }),
     approveSyncOperation: (operation, input, options) => approveWorkspaceSyncOperation(workspaceId, operation, input, { ...options, fetchImpl }),
     issueStudioStepUp: (group, target, password, options) => issueStudioStepUp(group, target, password, { ...options, fetchImpl }),

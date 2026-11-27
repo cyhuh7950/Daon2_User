@@ -8868,6 +8868,7 @@
         "required": ["target_area", "items"],
         "properties": {
           "target_area": { "type": "string", "const": "cloud_sync" },
+          "notebook_id": { "$ref": "#/components/schemas/OpaqueId", "description": "Destination notebook for automatic internal indexing of local files." },
           "items": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/components/schemas/SyncItemInput" } }
         }
       },
@@ -8916,7 +8917,7 @@
           "batches": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
           "conflicts": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
           "target_versions": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
-          "reindex_state": { "type": ["string", "null"] }, "source_mutations": { "type": "integer", "const": 0 }, "overwrite_count": { "type": "integer", "const": 0 }
+          "reindex_state": { "enum": [null, "reindex_requested", "indexed"] }, "source_mutations": { "type": "integer", "const": 0 }, "overwrite_count": { "type": "integer", "const": 0 }
         }
       },
       "SyncOperationEnvelope": {

@@ -1384,6 +1384,7 @@ class SyncCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_area: str
     items: list[SyncItemBody]
+    notebook_id: str | None = None
 
 
 class SyncApproveBody(BaseModel):
@@ -6785,6 +6786,8 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             trace_id=request.state.trace_id,
             policy_version=dependencies.settings.policy_version,
         )
+        if body.notebook_id is not None:
+            await asyncio.to_thread(notebook_service.get, notebook_context(principal, id, request), body.notebook_id)
         view = sync_service.create_operation(
             _sync_context(principal, id, request, dependencies),
             target_area=body.target_area,
@@ -6795,6 +6798,7 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
             ) for item in body.items),
             idempotency_key=idempotency_key,
             if_match=cast(str, _sync_expected_version(if_match)),
+            notebook_id=body.notebook_id,
         )
         response = JSONResponse(content={
             "data": _sync_view_json(view), "meta": {"trace_id": request.state.trace_id}
@@ -8578,9 +8582,17 @@ def build_dependencies(settings: RuntimeSettings) -> RuntimeDependencies:
             object_queue_store = PostgresObjectQueueStore(
                 settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
             )
+            canon_store = PostgresDataCanonStore(
+                settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
+            )
+            source_upload_service = PostgresSourceUploadService(
+                queue_store=object_queue_store, object_storage=object_storage, canon_store=canon_store,
+            )
+            from .sync_source_index import SyncSourceIndexer
+
             transfer_port = ObjectQueueSyncTransferPort(ObjectQueueCoordinator(
                 object_queue_store, object_storage, id_factory=lambda: secrets.token_hex(16)
-            ))
+            ), source_indexer=SyncSourceIndexer(cloud_store, canon_store, object_storage))
         sync_service = PostgresSyncService(
             cloud_store, transfer_port, clock=lambda: datetime.now(timezone.utc)
         )
@@ -8590,13 +8602,6 @@ def build_dependencies(settings: RuntimeSettings) -> RuntimeDependencies:
         and object_storage is not None
         and object_queue_store is not None
     ):
-        source_upload_service = PostgresSourceUploadService(
-            queue_store=object_queue_store,
-            object_storage=object_storage,
-            canon_store=PostgresDataCanonStore(
-                settings.cloud_database_dsn, creation_enforcer=license_creation_enforcer,
-            ),
-        )
         document_processing_service = DocumentProcessingSubmissionService(
             PostgresDocumentProcessingRepository(cloud_store, object_storage,
                 readiness_port=document_readiness_repository, readiness_settings=settings.document_readiness_settings)

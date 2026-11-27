@@ -78,7 +78,11 @@ impl NotebookRequest {
                 *ws == workspace && query.is_empty() && self.method == "GET"
             }
             ["workspaces", ws, "sync-operations"] => {
-                *ws == workspace && query.is_empty() && matches!(self.method.as_str(), "GET" | "POST")
+                *ws == workspace && query.is_empty() && (self.method == "GET" ||
+                    (self.method == "POST" && self.body.as_ref()
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                        .is_some_and(|value| value.get("notebook_id")
+                            .is_none_or(|target| target.as_str() == Some(notebook)))))
             }
             ["workspaces", ws, "operations", "status"] => *ws == workspace && self.method == "GET",
             ["sync-operations", _, "approve" | "transfer-batches"] => self.method == "POST" && query.is_empty(),

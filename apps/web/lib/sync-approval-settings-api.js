@@ -31,7 +31,7 @@ function validOperation(value, workspaceId = null) {
     && value.approved_item_ids.every((id) => value.item_ids.includes(id))
     && value.completed_item_ids.every((id) => value.item_ids.includes(id))
     && recordArray(value.batches) && recordArray(value.conflicts) && recordArray(value.target_versions)
-    && (value.reindex_state === null || value.reindex_state === "reindex_requested")
+    && (value.reindex_state === null || value.reindex_state === "reindex_requested" || value.reindex_state === "indexed")
     && value.source_mutations === 0 && value.overwrite_count === 0;
 }
 
@@ -61,13 +61,14 @@ export async function workspaceSyncSourceManifest(file) {
 }
 
 export async function createWorkspaceSyncPreview(
-  workspaceId, manifest, { fetchImpl = fetch, idempotencyKey = crypto.randomUUID(), signal } = {},
+  workspaceId, manifest, { fetchImpl = fetch, idempotencyKey = crypto.randomUUID(), signal, notebookId } = {},
 ) {
-  if (!safeId(workspaceId) || !SAFE_IDEMPOTENCY.test(idempotencyKey)) throw new Error("SYNC_SETTINGS_INPUT_INVALID");
+  if (!safeId(workspaceId) || !SAFE_IDEMPOTENCY.test(idempotencyKey)
+      || (notebookId !== undefined && !safeId(notebookId))) throw new Error("SYNC_SETTINGS_INPUT_INVALID");
   const response = await fetchImpl(`/bff/api/workspaces/${encodeURIComponent(workspaceId)}/sync-operations`, {
     method: "POST", credentials: "same-origin", cache: "no-store", signal,
     headers: { "Content-Type": "application/json", "If-Match": "*", "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ target_area: "cloud_sync", items: [{
+    body: JSON.stringify({ target_area: "cloud_sync", ...(notebookId && { notebook_id: notebookId }), items: [{
       item_id: manifest.item_id, item_kind: "local_file", local_object_id: manifest.local_object_id,
       digest_sha256: manifest.digest_sha256, byte_size: manifest.byte_size, content_type: manifest.content_type,
     }] }),

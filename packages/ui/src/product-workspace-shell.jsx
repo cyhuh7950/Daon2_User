@@ -2738,7 +2738,7 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
             {adapter?.createSyncPreview && <fieldset disabled={syncPending}>
               <legend>Windows 로컬 파일</legend>
               <label>동기화할 파일 선택 <input type="file" accept=".txt,.md,.pdf" onChange={selectSyncSource} /></label>
-              <small>TXT, MD, PDF 한 건 · 최대 512KB · Cloud-sync</small>
+              <small>TXT, MD, PDF 한 건 · 최대 512KB · 승인 후 현재 노트북 원문 색인</small>
               {syncSource && <p>{syncSource.file.name} · {syncSource.manifest.byte_size}바이트</p>}
               {syncSource && !currentSyncSourceOperation && <button type="button" onClick={() => void updateSyncSource("preview",
                 (sourceAdapter, options) => sourceAdapter.createSyncPreview(syncSource.manifest, { ...options, idempotencyKey: syncSource.key }))}>Preview 만들기</button>}
@@ -2755,7 +2755,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   && operation.approved_item_ids.includes(syncSource.manifest.item_id) ? <button type="button" disabled={syncPending}
                   onClick={() => void updateSyncSource("transfer", (sourceAdapter, options) =>
                     sourceAdapter.transferSyncSource(operation, syncSource.file, options))}>승인된 파일 전송</button> : null}
-                {operation.state === "reindex_requested" && <p>전송 완료 · 인덱싱 요청됨</p>}
+                {operation.state === "reindex_requested" && <p>{operation.reindex_state === "indexed"
+                  ? "전송 완료 · 원문 색인 완료" : "전송 완료 · 인덱싱 요청됨"}</p>}
               </article>)}
             </div>
             {syncOperations.some((operation) => operation.state === "awaiting_approval") ? <label className="sync-step-up-password"><span>현재 비밀번호</span><input ref={syncPasswordRef} type="password" autoComplete="current-password" disabled={syncPending} /><small>승인 시 Step-up 인증에만 사용하며 저장하지 않습니다.</small></label> : null}

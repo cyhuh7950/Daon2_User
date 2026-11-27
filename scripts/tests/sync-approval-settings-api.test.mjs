@@ -25,11 +25,11 @@ test("Windows preview sends only a manifest and transmits the exact selected fil
   const preview = { ...operation, item_ids: [manifest.item_id] };
   const approved = { ...preview, state: "approved", version: 2, approved_item_ids: [manifest.item_id] };
   const completed = { ...approved, state: "reindex_requested", version: 3, completed_item_ids: [manifest.item_id] };
-  const options = { idempotencyKey: "synthetic-sync-test-0001", fetchImpl: async (path, request) => {
+  const options = { idempotencyKey: "synthetic-sync-test-0001", notebookId: "notebook-index", fetchImpl: async (path, request) => {
     const body = JSON.parse(request.body);
     if (path.endsWith("/sync-operations")) {
       assert.equal(request.headers["If-Match"], "*");
-      assert.deepEqual(body, { target_area: "cloud_sync", items: [manifest] });
+      assert.deepEqual(body, { target_area: "cloud_sync", notebook_id: "notebook-index", items: [manifest] });
       assert.doesNotMatch(request.body, /synthetic/);
       return response({ data: preview, meta: {} });
     }

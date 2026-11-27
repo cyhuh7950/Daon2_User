@@ -28,6 +28,7 @@ from .sync import (
     _Conflict,
     _Operation,
     _fingerprint,
+    _preview_fingerprint,
 )
 
 
@@ -53,9 +54,11 @@ class ObjectQueueSyncTransferPort:
         coordinator: ObjectQueueCoordinator,
         *,
         output_importer: OfflineStudioOutputImporter | None = None,
+        source_indexer=None,  # type: ignore[no-untyped-def]
     ) -> None:
         self._coordinator = coordinator
         self._output_importer = output_importer
+        self._source_indexer = source_indexer
 
     def transmit(
         self,
@@ -65,6 +68,7 @@ class ObjectQueueSyncTransferPort:
         idempotency_key: str,
         *,
         relation: str,
+        notebook_id: str | None = None,
     ) -> TargetVersion:
         if len(content) != item.byte_size:
             raise SyncError("SYNC_CONTENT_INVALID", 400)
@@ -77,6 +81,8 @@ class ObjectQueueSyncTransferPort:
             return self._output_importer.import_bundle(
                 context, item, content, idempotency_key, relation=relation,
             )
+        if notebook_id is not None and self._source_indexer is None:
+            raise SyncError("SYNC_INDEX_UNAVAILABLE", 503, retryable=True)
         try:
             storage_context = _cloud_context(context, "object.write")
             submitted = self._coordinator.submit(
@@ -85,7 +91,9 @@ class ObjectQueueSyncTransferPort:
                 trace_id=context.trace_id, reuse_submission=item.item_kind is SyncItemKind.LOCAL_FILE,
             )
             if item.item_kind is SyncItemKind.LOCAL_FILE:
-                self._coordinator.finalize(storage_context, submitted)
+                record = self._coordinator.finalize(storage_context, submitted)
+                if notebook_id is not None:
+                    self._source_indexer(context, notebook_id, item, record)
         except ObjectQueueError as error:
             raise SyncError(error.code, 503 if error.retryable else 409,
                             retryable=error.retryable) from None
@@ -157,6 +165,7 @@ def _dump_operation(operation: _Operation, repository: ReferenceSyncRepository) 
             "relation": item.relation,
         } for item in operation.target_versions],
         "reindex_state": operation.reindex_state,
+        "notebook_id": operation.notebook_id,
         "idempotency": idempotency,
     }
 
@@ -188,6 +197,7 @@ def _hydrate(row: tuple[object, ...]) -> tuple[_Operation, ReferenceSyncReposito
         target_versions=[TargetVersion(**raw) for raw in cast(list[dict[str, object]], data["target_versions"])],
         completed_item_ids=set(cast(list[str], data["completed_item_ids"])),
         reindex_state=cast(str | None, data["reindex_state"]),
+        notebook_id=cast(str | None, data.get("notebook_id")),
     )
     repository = ReferenceSyncRepository()
     repository.operations[operation.operation_id] = operation
@@ -250,8 +260,8 @@ class PostgresSyncService:
 
     def create_operation(self, context: SyncContext, *, target_area: str,
                          items: tuple[SyncItemInput, ...], idempotency_key: str,
-                         if_match: str) -> SyncOperationView:
-        fingerprint = _fingerprint((target_area, items))
+                         if_match: str, notebook_id: str | None = None) -> SyncOperationView:
+        fingerprint = _preview_fingerprint(target_area, items, notebook_id)
         try:
             with self._transaction(context, "sync.write") as connection:
                 replay = connection.execute(
@@ -270,7 +280,7 @@ class PostgresSyncService:
                 service = SyncService(repository, self._transfer, clock=self._clock)
                 view = service.create_operation(
                     context, target_area=target_area, items=items,
-                    idempotency_key=idempotency_key, if_match=if_match,
+                    idempotency_key=idempotency_key, if_match=if_match, notebook_id=notebook_id,
                 )
                 operation = repository.operations[view.operation_id]
                 now = self._clock()

@@ -9,6 +9,11 @@ from unittest.mock import Mock
 
 from daon2_user_api.cloud_storage import CloudAccessContext, PostgresCloudStore
 from daon2_user_api.data_canon import CanonicalContext, PostgresDataCanonStore, canonical_json_bytes
+from daon2_user_api.document_index_postgres import PostgresDocumentIndex
+from daon2_user_api.document_processing import DocumentProcessingContext
+from daon2_user_api.notebook import NotebookContext, NotebookService
+from daon2_user_api.notebook_postgres import PostgresNotebookRepository
+from daon2_user_api.sync_source_index import SyncSourceIndexer
 from daon2_user_api.object_queue import (
     ObjectQueueCoordinator, ObjectStorageError, ObjectSubmission, PostgresObjectQueueStore,
     StagedObject, StoredObject,
@@ -77,6 +82,22 @@ class ObjectQueueSyncTransferPortUnitTests(unittest.TestCase):
             CloudAccessContext("tenant-a", "workspace-a", "actor-a", "object.write"), submission,
         )
         self.assertEqual(target.target_object_id, submission.object_id)
+
+    def test_notebook_transfer_indexes_after_final_storage(self) -> None:
+        coordinator, indexer = Mock(), Mock()
+        submission = ObjectSubmission("0" * 32, "job-a", "event-a", False)
+        coordinator.submit.return_value = submission
+        parent = Mock()
+        parent.attach_mock(coordinator.finalize, "finalize")
+        parent.attach_mock(indexer, "index")
+        ctx = SyncContext("tenant-a", "workspace-a", "actor-a", "trace-a", "policy-a")
+        item = SyncItemInput("item-a", None, "local-a", hashlib.sha256(b"txt").hexdigest(),
+                             3, "text/plain", None, None, item_kind=SyncItemKind.LOCAL_FILE)
+        ObjectQueueSyncTransferPort(coordinator, source_indexer=indexer).transmit(
+            ctx, item, b"txt", "transfer-key", relation="copy", notebook_id="notebook-a",
+        )
+        self.assertEqual([c[0] for c in parent.mock_calls], ["finalize", "index"])
+        indexer.assert_called_once_with(ctx, "notebook-a", item, coordinator.finalize.return_value)
 
     def test_output_item_is_dispatched_to_output_importer(self) -> None:
         content = b"{}"
@@ -251,6 +272,44 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
             canon.close()
         self.assertEqual(preview().state, "awaiting_approval")
         self.assertEqual(self.storage.objects, {})
+
+    def test_notebook_sync_builds_searchable_original_index_once_without_model(self) -> None:
+        ctx = self.context
+        args = (ctx.tenant_id, ctx.workspace_id, ctx.actor_id, ctx.trace_id, ctx.policy_version)
+        clock = lambda: datetime.now(UTC)
+        notebook, _ = NotebookService(PostgresNotebookRepository(self.cloud), clock=clock).create(
+            NotebookContext(*args), title="Sync QA", description="", idempotency_key="sync-qa-notebook",
+        )
+        content = b"Internal test keyword txsyncoriginal"
+        item = SyncItemInput("local-sync-index", None, "local-sync-index", hashlib.sha256(content).hexdigest(),
+                             len(content), "text/plain", None, None, item_kind=SyncItemKind.LOCAL_FILE)
+        canon = PostgresDataCanonStore(os.environ["DAON_TEST_POSTGRES_DSN"])
+        self.addCleanup(canon.close)
+        port = ObjectQueueSyncTransferPort(
+            self.coordinator, source_indexer=SyncSourceIndexer(self.cloud, canon, self.storage),
+        )
+        service = PostgresSyncService(self.cloud, port, clock=clock)
+        created = service.create_operation(ctx, target_area="cloud_sync", items=(item,), notebook_id=notebook.notebook_id,
+                                           if_match="*", idempotency_key="notebook-sync-preview")
+        with self.assertRaisesRegex(SyncError, "IDEMPOTENCY_KEY_REUSED"):
+            service.create_operation(ctx, target_area="cloud_sync", items=(item,), notebook_id="different-notebook",
+                                     if_match="*", idempotency_key="notebook-sync-preview")
+        step = service.approve(ctx, operation_id=created.operation_id, approved_item_ids=(item.item_id,),
+                               step_up_authorization_id="step-sync-index", expected_version=created.version,
+                               idempotency_key="approve-sync-index", approval_verified=True)
+        for _ in range(2):
+            service.transfer_batch(ctx, operation_id=created.operation_id, expected_version=step.version,
+                                   idempotency_key="transfer-sync-index", cursor=None,
+                                   payloads=(TransferPayload(item.item_id, content, None, None),))
+        saved = service.get_operation(ctx, created.operation_id)
+        self.assertEqual(saved.reindex_state, "indexed")
+        object_id = saved.target_versions[0].target_object_id
+        hits = PostgresDocumentIndex(self.cloud).search(
+            DocumentProcessingContext(*args), source_id=f"src-{object_id}", source_version_id=f"sv-{object_id}",
+            query="txsyncoriginal",
+        )
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].text, content.decode())
 
 
 if __name__ == "__main__":
