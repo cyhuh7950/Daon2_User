@@ -36,6 +36,10 @@ class AuthoringTemplate:
     style: str = "proposal"  # proposal | terms | contract — 프롬프트와 점검·표시 방식을 고른다
     source_input: str | None = "rfp_document"
 
+    @property
+    def draft_title(self) -> str:
+        return self.title if self.title == "초안" or self.title.endswith(" 초안") else f"{self.title} 초안"
+
     def input(self, key: str) -> Mapping[str, Any]:
         for item in self.inputs:
             if item["key"] == key:
