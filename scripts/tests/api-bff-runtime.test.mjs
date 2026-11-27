@@ -208,6 +208,34 @@ test('audio BFF keeps same-origin Notebook scope and fixed binary MIME',async()=
   assert.match(calls[0].url,/notebook_id=notebook-1&representation=audio$/);
 });
 
+test("native BFF forwards only the exact sync preview and transfer routes with conditional headers", async () => {
+  const { createNativeBffProxy } = await import("../../apps/web/lib/bff-api-proxy.js");
+  const calls = [];
+  const proxy = createNativeBffProxy({ baseUrl: new URL("https://api.example.com"), fetchImpl: async (url, init) => {
+    calls.push([new URL(url).pathname, new Headers(init.headers)]);
+    return Response.json({ data: {} });
+  } });
+  const post = (path, authenticated = true) => proxy(new Request(`https://app.example.com/api/v1/${path}`, {
+    method: "POST",
+    headers: {
+      ...(authenticated ? { Authorization: "Bearer opaque-native-credential" } : {}),
+      "Content-Type": "application/json", "If-Match": "*", "Idempotency-Key": "windows-sync-preview-1",
+    },
+    body: "{}",
+  }), path.split("/"));
+  assert.equal((await post("workspaces/workspace-1/sync-operations", false)).status, 401);
+  assert.equal((await post("workspaces/workspace-1/sync-operations")).status, 200);
+  assert.equal((await post("sync-operations/op-1/transfer-batches")).status, 200);
+  assert.equal((await post("sync-operations/op-1/transfer-batches/other")).status, 404);
+  assert.deepEqual(calls.map(([path]) => path), [
+    "/api/v1/workspaces/workspace-1/sync-operations", "/api/v1/sync-operations/op-1/transfer-batches",
+  ]);
+  for (const [, headers] of calls) {
+    assert.equal(headers.get("if-match"), "*");
+    assert.equal(headers.get("idempotency-key"), "windows-sync-preview-1");
+  }
+});
+
 test('native audio BFF requires exact scope and refuses unknown or duplicate representation',async()=>{
   const {createNativeBffProxy}=await import('../../apps/web/lib/bff-api-proxy.js');
   const calls=[];

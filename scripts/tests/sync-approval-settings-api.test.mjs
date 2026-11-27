@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { approveWorkspaceSyncOperation, listWorkspaceSyncOperations } from "../../apps/web/lib/sync-approval-settings-api.js";
+import * as sync from "../../apps/web/lib/sync-approval-settings-api.js";
 
 const workspace = "workspace-sync-settings";
 const operation = Object.freeze({
@@ -15,6 +16,31 @@ const operation = Object.freeze({
 function response(data, etag = null, ok = true) {
   return { ok, headers: { get: (name) => name.toLowerCase() === "etag" ? etag : null }, json: async () => data };
 }
+
+test("Windows preview sends only a manifest and transmits the exact selected file only after approval", async () => {
+  const file = new File(["synthetic sync sample"], "synthetic.txt", { type: "text/plain" });
+  const manifest = await sync.workspaceSyncSourceManifest(file);
+  const preview = { ...operation, item_ids: [manifest.item_id] };
+  const approved = { ...preview, state: "approved", version: 2, approved_item_ids: [manifest.item_id] };
+  const completed = { ...approved, state: "reindex_requested", version: 3, completed_item_ids: [manifest.item_id] };
+  const options = { idempotencyKey: "synthetic-sync-test-0001", fetchImpl: async (path, request) => {
+    const body = JSON.parse(request.body);
+    if (path.endsWith("/sync-operations")) {
+      assert.equal(request.headers["If-Match"], "*");
+      assert.deepEqual(body, { target_area: "cloud_sync", items: [manifest] });
+      assert.doesNotMatch(request.body, /synthetic/);
+      return response({ data: preview, meta: {} });
+    }
+    assert.equal(path, "/bff/api/sync-operations/sync-operation-1/transfer-batches");
+    assert.equal(request.headers["If-Match"], '"sync:sync-operation-1:2"');
+    assert.equal(Buffer.from(body.items[0].content_base64, "base64").toString(), "synthetic sync sample");
+    return response({ data: {}, operation: completed, meta: {} });
+  } };
+  assert.deepEqual(await sync.createWorkspaceSyncPreview(workspace, manifest, options), preview);
+  await assert.rejects(sync.transferWorkspaceSyncSource(workspace, preview, file, options), /SYNC_SETTINGS_INPUT_INVALID/);
+  await assert.rejects(sync.transferWorkspaceSyncSource(workspace, approved, new File(["different"], "synthetic.txt"), options), /SYNC_SETTINGS_INPUT_INVALID/);
+  assert.deepEqual(await sync.transferWorkspaceSyncSource(workspace, approved, file, options), completed);
+});
 
 test("sync settings lists current workspace operations over same-origin", async () => {
   const calls = [];

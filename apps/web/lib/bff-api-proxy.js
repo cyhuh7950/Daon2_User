@@ -1113,6 +1113,14 @@ const NATIVE_STUDIO_MEDIA = [
 ];
 
 function nativeNotebookRoute(method, segments) {
+  if (method === "POST" && segments.length === 3 && SAFE_SEGMENT.test(segments[1])) {
+    if (segments[0] === "workspaces" && segments[2] === "sync-operations") {
+      return { path: `/api/v1/workspaces/${encodeURIComponent(segments[1])}/sync-operations`, query: null };
+    }
+    if (segments[0] === "sync-operations" && segments[2] === "transfer-batches") {
+      return { path: `/api/v1/sync-operations/${encodeURIComponent(segments[1])}/transfer-batches`, query: null, maxRequestBytes: 1024 * 1024 };
+    }
+  }
   const workspaceSettings = segments[0] === "workspaces" && (
     (segments.length === 3 && ["model-defaults", "output-version-settings", "egress-policy", "sync-operations", "daon-knowledge-scopes"].includes(segments[2]))
     || (segments.length === 4 && segments[2] === "operations" && segments[3] === "status"));
