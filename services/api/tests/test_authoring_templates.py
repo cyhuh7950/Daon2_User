@@ -70,6 +70,17 @@ def answered(template_id, answers):
 
 
 class DiffTests(unittest.TestCase):
+    def test_renamed_terms_heading_does_not_delete_the_article_or_hide_deleted_text(self):
+        base = ["제11조 보험금 청구", "보험금은 청구 서류를 받은 뒤 심사한다.",
+                "제11조의2 이의신청", "제13조 청구 결과 전달", "청구 결과는 인편으로 배달한다."]
+        paragraphs, removed = tag_section(
+            ["제11조 청구 서류 검토와 심사 절차\n보험금은 청구 서류를 받은 뒤 심사한다.",
+             "제13조에 따른 인편 배달은 적용하지 않는다."],
+            base, exact_unchanged=True, deletion_candidates=base,
+        )
+        self.assertEqual(paragraphs[0]["sentences"][0]["tag"], "modified")
+        self.assertEqual(removed, base[2:])
+
     def test_sentence_tags_and_delete_suggestions(self):
         base = ["회사는 보험금을 지급한다.", "면책 기간은 90일로 한다.", "분쟁은 계약자 주소지 법원에서 해결한다."]
         paragraphs, removed = tag_section(["회사는 보험금을 지급한다. 면책 기간은 30일로 한다.", "새로운 환급 조항을 둔다."], base)
@@ -117,6 +128,20 @@ class TermsTests(unittest.TestCase):
         self.assertEqual(self.session["inputs"]["product_type"], "자동차보험")
         with self.assertRaises(AuthoringError):
             S.apply_answers(self.template, S.new_session(self.template), [{"key": "product_type", "value": "해상보험"}])
+
+    def test_live_ruleset_does_not_receive_unmapped_virtual_draft(self):
+        self.connectors.list = lambda ctx: [{"connector_id": CONNECTOR, "kind": "daon2", "status": "verified", "virtual": False}]
+        check = self.pipeline.ruleset(ctx_for("generate")[0], self.template, [])
+        self.assertEqual((check["status"], check["reason"]), ("skipped", "실제 Daon2의 게시 RuleSet과 작성 항목이 연결되지 않았습니다"))
+        self.assertEqual(self.connectors.calls, [])
+
+    def test_registered_ontology_without_approved_notebook_scope_explains_scope(self):
+        from types import SimpleNamespace
+
+        self.connectors.list = lambda ctx: [{"connector_id": CONNECTOR, "kind": "daon2", "status": "verified", "virtual": False}]
+        self.pipeline._evidence = SimpleNamespace(prepare=lambda ctx: None, concepts=lambda target, terms: self.fail("조회 범위가 없습니다"))
+        check = self.pipeline._terms_units(ctx_for("generate")[0], {"units": []}, [])
+        self.assertEqual((check["status"], check["reason"]), ("skipped", "노트북에서 사용할 수 있는 승인 지식 범위가 없습니다"))
 
     def test_analyze_has_no_requirements_and_assigns_base_clauses_by_section_hints(self):
         reviewed = self.pipeline.analyze(ctx_for("analyze")[0], self.session)

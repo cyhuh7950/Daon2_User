@@ -476,17 +476,26 @@ class AuthoringPipeline:
 
     def _terms_units(self, ctx: GenerationContext, session: Mapping[str, Any], sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         """소목차가 정한 핵심 용어로 승인 온톨로지를 찾아 용어 사용을 점검한다."""
+        queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
+        return self._approved_terms(ctx, queries, sections)
+
+    def _approved_terms(self, ctx: GenerationContext, queries: Sequence[str], sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         base = {"id": "term_consistency", "title": "용어·일관성"}
         lookup = getattr(self._evidence, "concepts", None)
         if not callable(lookup):
             return {**base, "status": "skipped", "reason": "connector_not_registered"}
         try:
             target = self._evidence.prepare(ctx.context)
-            if target is None or target.daon2_connector_id is None:
+            if target is None:
+                connector = self._ops_connector(ctx)
+                reason = "connector_not_registered"
+                if connector and not connector.get("virtual") and connector["status"] == "verified":
+                    reason = "노트북에서 사용할 수 있는 승인 지식 범위가 없습니다"
+                return {**base, "status": "skipped", "reason": reason}
+            if target.daon2_connector_id is None:
                 return {**base, "status": "skipped", "reason": "connector_not_registered"}
-            queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
             concepts = lookup(target, queries)
-        except ExternalEvidenceError:  # 점검을 못 해도 작성된 문서를 실패로 만들지 않는다
+        except (ExternalEvidenceError, ConnectorError):  # 점검을 못 해도 작성된 문서를 실패로 만들지 않는다
             return {**base, "status": "skipped", "reason": "knowledge_unavailable"}
         return term_consistency(sections, concepts) if concepts else {**base, "status": "skipped", "reason": "no_approved_concepts"}
 
@@ -706,7 +715,11 @@ class AuthoringPipeline:
             connector = self._ops_connector(ctx)
             if connector is None:
                 return {"id": spec["id"], "title": spec["title"], "status": "skipped", "reason": "connector_not_registered"}
-            result = self._connectors.call(self._connector_ctx(ctx), connector, "ruleset_evaluate", {"ruleset_id": spec["ruleset_id"], "draft": draft}).structured["results"]
+            if not connector.get("virtual"):
+                # 실제 Daon2는 게시 규칙 UUID·승인 범위·구조화 사실을 받는다. 템플릿의 가상 규칙 ID로 본문을 보내지 않는다.
+                return {"id": spec["id"], "title": spec["title"], "status": "skipped",
+                        "reason": "실제 Daon2의 게시 RuleSet과 작성 항목이 연결되지 않았습니다"}
+            result = self._connectors.call(self._connector_ctx(ctx), connector["connector_id"], "ruleset_evaluate", {"ruleset_id": spec["ruleset_id"], "draft": draft}).structured["results"]
             return {"id": spec["id"], "title": spec["title"], "status": "done", "results": result}
         except (ConnectorError, McpError) as error:
             return {"id": spec["id"], "title": spec["title"], "status": "skipped", "reason": error.code}
@@ -753,9 +766,12 @@ class AuthoringPipeline:
             connector = self._ops_connector(ctx)
             if connector is None:
                 return {**base, "status": "skipped", "reason": "connector_not_registered"}
+            queries = list(dict.fromkeys([template.title, *[str(s["title"]) for s in sections][:8]]))
+            if not connector.get("virtual"):
+                return self._approved_terms(ctx, queries, sections)
             concepts: dict[str, Mapping[str, Any]] = {}
-            for query in dict.fromkeys([template.title, *[str(s["title"]) for s in sections][:8]]):
-                found = self._connectors.call(self._connector_ctx(ctx), connector, "ontology_search_concepts", {"query": query[:200], "limit": 20}).structured.get("concepts", [])
+            for query in queries:
+                found = self._connectors.call(self._connector_ctx(ctx), connector["connector_id"], "ontology_search_concepts", {"query": query[:200], "limit": 20}).structured.get("concepts", [])
                 for concept in found:
                     if isinstance(concept, Mapping) and concept.get("concept_id"):
                         concepts.setdefault(str(concept["concept_id"]), concept)
@@ -771,5 +787,9 @@ class AuthoringPipeline:
                 return item["connector_id"]
         return None
 
-    def _ops_connector(self, ctx: GenerationContext) -> str | None:
-        return self._connector_of_kind(ctx, "daon2")
+    def _ops_connector(self, ctx: GenerationContext) -> Mapping[str, Any] | None:
+        if self._connectors is None:
+            return None
+        candidates = [item for item in self._connectors.list(self._connector_ctx(ctx))
+                      if item["kind"] == "daon2" and item["status"] != "disabled"]
+        return next((item for item in candidates if not item.get("virtual")), candidates[0] if candidates else None)

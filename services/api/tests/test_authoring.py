@@ -45,7 +45,7 @@ class FakeConnectors:
         self.calls = []
 
     def list(self, ctx):
-        return [{"connector_id": "kc-" + "b" * 32, "kind": "daon2", "status": "verified"},
+        return [{"connector_id": "kc-" + "b" * 32, "kind": "daon2", "status": "verified", "virtual": True},
                 {"connector_id": "kc-" + "b" * 32, "kind": "law", "status": "verified"}]  # 가상 Daon2 서버가 법령 도구도 제공한다
 
     def call(self, ctx, connector_id, tool, args):

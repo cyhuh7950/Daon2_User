@@ -17,6 +17,7 @@ _NOISE = re.compile(r"[\s\W_]+", re.UNICODE)
 _CHAPTER = re.compile(r"^제\s*\d+\s*장")
 _HIGHER_BOUNDARY = re.compile(r"^(?:제\s*\d+\s*[편부]|(?:부칙|부록|별표|별지|특약)(?=$|[\s\d:：.\-]))")
 _ARTICLE = re.compile(r"^제\s*\d+\s*조")
+_ARTICLE_HEADING = re.compile(r"^제\s*(\d+)\s*조(?:\s*의\s*(\d+))?(?=$|[\s(（:：])")
 
 
 def normalize(text: str) -> str:
@@ -60,6 +61,17 @@ def _exact_text(text: str) -> str:
     return re.sub(r"\s+", "", text).rstrip(".。!?").casefold()
 
 
+def _article_heading(text: str) -> tuple[int, int | None] | None:
+    heading = text.lstrip("#").strip()
+    if heading.endswith((".", "。", "!", "?")):
+        return None
+    match = _ARTICLE_HEADING.match(heading)
+    if match is None:
+        return None
+    number, suffix = match.groups()
+    return int(number), int(suffix) if suffix is not None else None
+
+
 def similarity(a: str, b: str) -> float:
     na, nb = normalize(a), normalize(b)
     if not na or not nb:
@@ -71,6 +83,14 @@ def similarity(a: str, b: str) -> float:
 
 
 def tag_sentence(sentence: str, base: Sequence[str], *, exact_unchanged: bool = False) -> tuple[str, str | None, float]:
+    article = _article_heading(sentence) if exact_unchanged else None
+    if article is not None:
+        headings = [candidate for candidate in base if _article_heading(candidate) == article]
+        if not headings:
+            return "new", None, 0.0
+        matched = max(headings, key=lambda candidate: (_exact_text(sentence) == _exact_text(candidate), similarity(sentence, candidate)))
+        tag = "unchanged" if _exact_text(sentence) == _exact_text(matched) else "modified"
+        return tag, matched, similarity(sentence, matched)
     best, best_text = 0.0, None
     for candidate in base:
         score = similarity(sentence, candidate)
@@ -98,7 +118,15 @@ def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *
         paragraph_tag = "unchanged" if tags == {"unchanged"} else "new" if tags == {"new"} else "modified"
         paragraphs.append({"tag": paragraph_tag, "sentences": rows})
     candidates = base_sentences if deletion_candidates is None else deletion_candidates
-    removed = [b for b in candidates if all(similarity(b, s) < MODIFIED_AT for s in new_sentences)]
+    new_articles = {_article_heading(s) for s in new_sentences} - {None} if exact_unchanged else set()
+    removed = []
+    for candidate in candidates:
+        article = _article_heading(candidate) if exact_unchanged else None
+        if article is not None:
+            if article not in new_articles:
+                removed.append(candidate)
+        elif all(similarity(candidate, sentence) < MODIFIED_AT for sentence in new_sentences):
+            removed.append(candidate)
     return paragraphs, removed
 
 
