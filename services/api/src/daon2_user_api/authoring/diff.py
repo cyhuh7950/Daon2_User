@@ -28,6 +28,20 @@ def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENT.split(text) if s and s.strip()]
 
 
+def strip_repeated_chapter_heading(text: str, title: str) -> str:
+    """화면과 출력이 이미 렌더링하는 장 제목만 모델 본문 앞에서 제거한다."""
+    if not _CHAPTER.match(title):
+        return text
+    heading = r"[ \t]*".join(re.escape(char) for char in title if not char.isspace())
+    match = re.match(rf"(?:#{{1,6}}[ \t]+)?{heading}(?=\s|$)", text)
+    if match is None:
+        return text
+    remainder = text[match.end():].lstrip(" \t")
+    if not remainder or remainder.startswith(("\r", "\n")) or article_heading(remainder, allow_terminal_punctuation=True) is not None:
+        return remainder.lstrip()
+    return text
+
+
 def scoped_deletion_candidates(passages: Sequence[Passage], chapter_refs: Mapping[str, set[str]]) -> list[str]:
     """확정된 장과 해당 장을 작성할 때 참조한 구간의 교집합만 삭제 후보로 쓴다."""
     candidates: dict[str, None] = {}

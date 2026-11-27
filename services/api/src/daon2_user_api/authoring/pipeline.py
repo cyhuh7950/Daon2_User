@@ -20,7 +20,7 @@ from ..studio_workspace import StudioError
 from ..question_external_evidence import ExternalEvidenceError, build_plan_prompt, default_requests, parse_plan, run_planned
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
-from .diff import normalize, scoped_deletion_candidates, split_sentences, summarize, tag_section
+from .diff import normalize, scoped_deletion_candidates, split_sentences, strip_repeated_chapter_heading, summarize, tag_section
 from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
 from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition
 from .terms_review import TERMS_BODY_RULES, review_terms_body
@@ -350,6 +350,8 @@ class AuthoringPipeline:
             # 본문에 쓴 근거 번호는 근거로 옮기고 지운다. 번호의 숫자가 숫자 검증에 걸리지 않게 먼저 처리한다.
             inline = [label for found in INLINE_REF.findall(text) for label in re.findall(r"[SKL][0-9]+", found)]
             text = re.sub(r"[ \t]{2,}", " ", INLINE_REF.sub("", text)).strip()
+            if template.style == "terms":
+                text = strip_repeated_chapter_heading(text, unit["title"])
             refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
             if not text:
                 continue

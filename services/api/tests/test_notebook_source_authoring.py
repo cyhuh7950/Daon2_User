@@ -136,6 +136,7 @@ class FixtureModel:
         self.review_unavailable = False
         self.unmatched_review_quotes = 0
         self.split_payment = False
+        self.repeat_chapter_heading = False
 
     def generate(self, context, prompt, cancel_check=None):
         self.prompts.append(prompt)
@@ -153,6 +154,8 @@ class FixtureModel:
                 assert "전자우편" in prompt.user
                 cited = ref(TERMS)
                 paragraphs = [{"text": text, "refs": [cited]} for text in ("보험금은 서류를 받은 후 심사한다.", MODIFIED, ADDED)]
+                if self.repeat_chapter_heading:
+                    paragraphs[0]["text"] = "### 제 3 장 보험금의 지급\n" + paragraphs[0]["text"]
                 if self.conflicting_terms and not (self.repair_terms and "[검수 결과와 고쳐 쓸 본문]" in prompt.user):
                     paragraphs.extend({"text": text, "refs": [cited]} for text in (RETAINED, EDITORIAL))
             else:
@@ -345,6 +348,36 @@ def test_notebook_terms_writes_selected_chapter_once_even_if_outline_splits_it(w
     assert [unit["section_key"] for unit in completed["units"]] == ["payment"]
     body = [p["text"] for unit in completed["units"] for p in unit["paragraphs"]]
     assert body.count(MODIFIED) == 1
+
+
+def test_terms_chapter_heading_only_appears_as_the_section_title(writing):
+    _, repo, model, _ = writing
+    model.repeat_chapter_heading = True
+
+    _, completed = _generate_payment_terms(writing)
+
+    assert completed["state"] == "completed"
+    section, = completed["document"]["sections"]
+    assert section["title"] == "제3장 보험금의 지급"
+    assert section["paragraphs"][0]["text"] == "보험금은 서류를 받은 후 심사한다."
+    assert section["delete_suggested"] == ["증서는 인편으로 배달한다."]
+    exported = export_v2("docx", {"output_id": repo.output_id, "title": completed["document"]["title"],
+                                  "type_id": "authored_document", "revision": {"content": completed},
+                                  "evidence": repo.evidence}).content
+    with ZipFile(io.BytesIO(exported)) as archive:
+        docx = archive.read("word/document.xml").decode()
+    assert "제 3 장 보험금의 지급" not in docx
+    assert "보험금은 서류를 받은 후 심사한다." in docx
+
+
+def test_terms_chapter_heading_strips_joined_article_prefix_but_preserves_references():
+    from daon2_user_api.authoring.diff import strip_repeated_chapter_heading
+
+    title = "제3장 보험금의 지급"
+    assert strip_repeated_chapter_heading("제3장 보험금의 지급 제11조 보험금 청구", title) == "제11조 보험금 청구"
+    paragraph = "제3장 보험금의 지급 규정을 따릅니다."
+    assert strip_repeated_chapter_heading(paragraph, title) == paragraph
+    assert strip_repeated_chapter_heading("제4장 면책", title) == "제4장 면책"
 
 
 def test_terms_review_detects_repeated_numbered_headings_without_model_findings():
