@@ -61,6 +61,39 @@ def test_terms_requires_one_base_and_previous_session_still_reads():
         session.apply_answers(template, current, [{"key": "base_terms", "source_version_ids": ["one", "two"]}])
 
 
+def test_terms_product_choices_follow_the_requested_order():
+    template = TemplateRegistry().get("insurance_terms_draft")
+    expected = [
+        "연금보험", "저축보험", "종신보험", "정기보험", "암 보험", "건강보험", "치아보험", "자녀보험",
+        "실손보험", "여행보험", "생활보험", "화재보험", "자동차보험", "운전자보험", "팻 보험", "기타",
+    ]
+    current = session.new_session(template, mode="agent", notebook_references=True)
+    question = next(question for question in current["pending_questions"] if question["key"] == "product_type")
+    assert question["required"] is True
+    assert question["choices"] == expected
+    for product in expected:
+        updated = session.apply_answers(template, current, [{"key": "product_type", "value": product}])
+        assert updated["inputs"]["product_type"] == product
+
+
+def test_legacy_medical_insurance_answer_can_continue():
+    template = TemplateRegistry().get("insurance_terms_draft")
+    current = session.new_session(template, mode="agent", notebook_references=True)
+    legacy_answer = {"key": "product_type", "value": "실손의료보험"}
+    remaining = [
+        {"key": "base_terms", "source_version_ids": ["terms-v1"]},
+        {"key": "changes", "value": "지급 절차를 변경"},
+    ]
+    submitted = session.apply_answers(template, current, [legacy_answer, *remaining])
+    assert submitted["inputs"]["product_type"] == "실손보험"
+    assert submitted["state"] == "analyzing"
+
+    current["inputs"]["product_type"] = legacy_answer["value"]
+    resumed = session.apply_answers(template, current, remaining)
+    assert resumed["state"] == "analyzing"
+    assert resumed["inputs"]["product_type"] == "실손의료보험"
+
+
 def test_rfp_cannot_also_be_its_own_reference():
     template = TemplateRegistry().get("rfp_response_proposal")
     current = session.new_session(template, mode="agent", notebook_references=True)
