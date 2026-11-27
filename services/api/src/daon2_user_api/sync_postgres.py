@@ -78,11 +78,14 @@ class ObjectQueueSyncTransferPort:
                 context, item, content, idempotency_key, relation=relation,
             )
         try:
+            storage_context = _cloud_context(context, "object.write")
             submitted = self._coordinator.submit(
-                _cloud_context(context, "object.write"), area="source", content=content,
+                storage_context, area="source", content=content,
                 content_type=item.content_type, idempotency_key=idempotency_key,
-                trace_id=context.trace_id,
+                trace_id=context.trace_id, reuse_submission=item.item_kind is SyncItemKind.LOCAL_FILE,
             )
+            if item.item_kind is SyncItemKind.LOCAL_FILE:
+                self._coordinator.finalize(storage_context, submitted)
         except ObjectQueueError as error:
             raise SyncError(error.code, 503 if error.retryable else 409,
                             retryable=error.retryable) from None

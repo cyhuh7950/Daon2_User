@@ -5,11 +5,12 @@ import os
 import secrets
 import unittest
 from datetime import UTC, datetime
+from unittest.mock import Mock
 
 from daon2_user_api.cloud_storage import CloudAccessContext, PostgresCloudStore
 from daon2_user_api.data_canon import CanonicalContext, PostgresDataCanonStore, canonical_json_bytes
 from daon2_user_api.object_queue import (
-    ObjectQueueCoordinator, ObjectStorageError, PostgresObjectQueueStore,
+    ObjectQueueCoordinator, ObjectStorageError, ObjectSubmission, PostgresObjectQueueStore,
     StagedObject, StoredObject,
 )
 from daon2_user_api.sync import SyncContext, SyncError, SyncItemInput, SyncItemKind, TargetVersion, TransferPayload
@@ -60,6 +61,23 @@ class _OutputImporter:
 
 
 class ObjectQueueSyncTransferPortUnitTests(unittest.TestCase):
+    def test_local_file_is_finalized_before_returning_a_target(self) -> None:
+        coordinator = Mock()
+        submission = ObjectSubmission("0" * 32, "job-a", "event-a", False)
+        coordinator.submit.return_value = submission
+        context = SyncContext("tenant-a", "workspace-a", "actor-a", "trace-a", "policy-a")
+        item = SyncItemInput(
+            "item-a", None, "local-a", hashlib.sha256(b"txt").hexdigest(),
+            3, "text/plain", None, None, item_kind=SyncItemKind.LOCAL_FILE,
+        )
+        target = ObjectQueueSyncTransferPort(coordinator).transmit(
+            context, item, b"txt", "transfer-key", relation="copy",
+        )
+        coordinator.finalize.assert_called_once_with(
+            CloudAccessContext("tenant-a", "workspace-a", "actor-a", "object.write"), submission,
+        )
+        self.assertEqual(target.target_object_id, submission.object_id)
+
     def test_output_item_is_dispatched_to_output_importer(self) -> None:
         content = b"{}"
         importer = _OutputImporter()
@@ -94,10 +112,10 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
             self.context.actor_id, "sync.write",
         ))
         self.storage = _Storage()
-        coordinator = ObjectQueueCoordinator(
+        self.coordinator = ObjectQueueCoordinator(
             self.queue, self.storage, id_factory=lambda: secrets.token_hex(16)
         )
-        self.transfer = ObjectQueueSyncTransferPort(coordinator)
+        self.transfer = ObjectQueueSyncTransferPort(self.coordinator)
         self.service = PostgresSyncService(
             self.cloud, self.transfer,
             clock=lambda: datetime(2026, 7, 30, 15, 0, tzinfo=UTC),
@@ -109,6 +127,8 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
 
     def test_persists_approval_manifest_batch_target_and_restart_projection(self) -> None:
         content = b"postgres-sync"
+        cloud_context = CloudAccessContext(self.context.tenant_id, self.context.workspace_id,
+                                           self.context.actor_id, "object.write")
         digest = hashlib.sha256(content).hexdigest()
         item = SyncItemInput(
             f"source-txt-{digest}", None, "local-object-postgres",
@@ -135,6 +155,10 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
             approval_verified=True,
         )
         self.assertEqual(self.storage.objects, {})
+        other_job = self.coordinator.submit(
+            cloud_context, area="source", content=b"unrelated", content_type="text/plain",
+            idempotency_key="unrelated-object", trace_id=self.context.trace_id,
+        )
         batch = self.service.transfer_batch(
             self.context, operation_id=operation.operation_id,
             expected_version=approved.version, idempotency_key=batch_key,
@@ -156,6 +180,10 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
         self.assertEqual(tuple(item.operation_id for item in listed), (operation.operation_id,))
         self.assertEqual(listed[0].item_ids, (item.item_id,))
         self.assertEqual((view.source_mutations, view.overwrite_count), (0, 0))
+        stored = self.queue.get_object(cloud_context, view.target_versions[0].target_object_id)
+        self.assertEqual(stored.status, "completed")
+        self.assertEqual(self.storage.get(stored.object_key), content)
+        self.assertEqual(self.queue.get_job(cloud_context, other_job.job_id).attempt, 0)
         with self.cloud._transaction(CloudAccessContext(
             self.context.tenant_id, self.context.workspace_id,
             self.context.actor_id, "sync.read",
