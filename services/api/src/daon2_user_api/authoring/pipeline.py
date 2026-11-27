@@ -528,7 +528,7 @@ class AuthoringPipeline:
         warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]
         open_items = list(dict.fromkeys(item for unit in session["units"] for item in unit["open_items"]))
         final = transition(session, "completed")
-        final["document"] = {"template_id": template.template_id, "analysis": template.analysis, "title": f"{template.title} 초안",
+        final["document"] = {"template_id": template.template_id, "analysis": template.analysis, "title": template.draft_title,
                              "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
                              "checks": checks, "assumptions": session["assumptions"], "open_items": open_items, "notice": NOTICES[template.style], "style": template.style}
         used = [ref for unit in session["units"] for p in unit["paragraphs"] for ref in p["refs"]]
@@ -681,7 +681,7 @@ class AuthoringPipeline:
             checks.append(self.law_crosscheck(ctx, template, sections_out, knowledge))
         for c in session["assumptions"]:
             open_items.append(f"{c['key']}: {PLACEHOLDER}")
-        document = {"template_id": template.template_id, "title": f"{template.title} 초안", "sections": sections_out, "requirements": session["requirements"],
+        document = {"template_id": template.template_id, "title": template.draft_title, "sections": sections_out, "requirements": session["requirements"],
                     "coverage": coverage, "checks": checks, "assumptions": session["assumptions"], "open_items": list(dict.fromkeys(open_items)),
                     "notice": NOTICES[template.style], "style": template.style}
         final = transition(session, "completed")

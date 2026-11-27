@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from ..studio_text_generation import StudioPrompt, StudioTextGenerator
@@ -13,6 +15,8 @@ from ..studio_workspace import StudioError
 
 
 from .diff import article_heading
+
+_LOG = logging.getLogger(__name__)
 
 TERMS_BODY_RULES = (
     "약관 본문에는 개정 후 적용되는 조항만 쓰세요. 사용자가 명시한 변경·삭제를 기준 약관과 앞 소목차 요약보다 우선합니다. "
@@ -38,6 +42,27 @@ _ISSUES_SCHEMA = {
         "properties": {name: {"type": "string"} for name in ("unit_key", "quote", "reason")},
     }}},
 }
+
+
+def _validated_findings(data: Any, batch: list[dict[str, str]]) -> list[dict[str, str]]:
+    findings = data.get("issues") if isinstance(data, Mapping) else None
+    if not isinstance(findings, list):
+        raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+    validated = []
+    for item in findings:
+        if not isinstance(item, Mapping) or not all(isinstance(item.get(key), str) for key in ("unit_key", "quote", "reason")):
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        key, quote, reason = item["unit_key"], item["quote"].strip(), item["reason"].strip()
+        if not quote or not reason:
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        # 줄바꿈만 달라진 인용을 인정하고 실제 원문의 문자열로 돌려준다.
+        pattern = re.compile(r"\s+".join(re.escape(part) for part in quote.split()))
+        original = next((match.group(0) for row in batch if row["unit_key"] == key
+                         and (match := pattern.search(row["text"])) is not None), None)
+        if original is None:
+            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+        validated.append({"unit_key": key, "quote": original[:600], "reason": reason[:300]})
+    return validated
 
 
 def _batches(units: Sequence[Mapping[str, Any]], budget: int) -> Iterator[list[dict[str, str]]]:
@@ -75,30 +100,32 @@ def review_terms_body(ctx: GenerationContext, llm: StudioTextGenerator, *, chang
                         "reason": "같은 번호의 조항이 이미 작성됐습니다. 두 내용을 대조해 적용할 의무와 근거를 조항 하나에 통합하세요.",
                     })
                 seen.add(number)
-    for batch in _batches(units, max(4500, context_chars - len(changes) - len(_REVIEW_SYSTEM))):
-        ctx.cancel_check()
+    for batch_number, batch in enumerate(_batches(units, max(4500, context_chars - len(changes) - len(_REVIEW_SYSTEM))), 1):
         prompt = StudioPrompt(
             system=_REVIEW_SYSTEM,
             user=f"[사용자 변경 요청]\n{changes}\n[검사할 본문]\n{json.dumps(batch, ensure_ascii=False)}",
             json_schema=_ISSUES_SCHEMA, max_output_tokens=1500,
             prompt_version="authoring-terms-body-review-v2", schema_name="authoring_terms_body_review",
         )
-        data = llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data
-        findings = data.get("issues") if isinstance(data, Mapping) else None
-        if not isinstance(findings, list):
-            raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-        for item in findings:
-            if not isinstance(item, Mapping) or not all(isinstance(item.get(key), str) for key in ("unit_key", "quote", "reason")):
-                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-            key, quote, reason = item["unit_key"], item["quote"].strip(), item["reason"].strip()
-            if not quote or not reason:
-                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-            # 모델이 편집기 줄바꿈을 공백으로 바꿔 인용할 수 있다. 같은 문단과 같은 단어만 인정하고,
-            # 화면과 후속 재작성에는 저장된 원문의 실제 문자열을 제공한다.
-            pattern = re.compile(r"\s+".join(re.escape(part) for part in quote.split()))
-            original = next((match.group(0) for row in batch if row["unit_key"] == key
-                             and (match := pattern.search(row["text"])) is not None), None)
-            if original is None:
-                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-            issues.setdefault(key, {"unit_key": key, "quote": original[:600], "reason": reason[:300]})
+        for attempt in (1, 2):
+            ctx.cancel_check()
+            try:
+                data = llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data
+            except StudioError as error:
+                _LOG.warning("terms_review_model_failed batch=%d attempt=%d code=%s", batch_number, attempt, error.code)
+                raise
+            try:
+                findings = _validated_findings(data, batch)
+            except StudioError:
+                _LOG.warning("terms_review_reply_rejected batch=%d attempt=%d", batch_number, attempt)
+                if attempt == 2:
+                    raise
+                prompt = replace(prompt, system=prompt.system + (
+                    "\n이전 응답은 검사 형식 또는 인용 대조에서 실패했습니다. 문제가 있는 문단의 unit_key와 그 문단에 실제로 "
+                    "연속해서 적힌 짧은 문구를 그대로 복사하세요. 변경 요청이나 기준 문서에만 있는 문구는 인용하지 마세요."
+                ))
+                continue
+            for finding in findings:
+                issues.setdefault(finding["unit_key"], finding)
+            break
     return list(issues.values())

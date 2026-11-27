@@ -101,6 +101,7 @@ class FixtureModel:
         self.conflicting_terms = False
         self.repair_terms = False
         self.review_unavailable = False
+        self.unmatched_review_quotes = 0
         self.split_payment = False
 
     def generate(self, context, prompt, cancel_check=None):
@@ -132,6 +133,11 @@ class FixtureModel:
             rows = json.loads(prompt.user.split("[검사할 본문]\n", 1)[1])
             assert rows and {row["section_title"] for row in rows} == {"제3장 보험금의 지급"}
             assert "확정한 각 문단의 section_title" in prompt.system
+            if self.unmatched_review_quotes:
+                self.unmatched_review_quotes -= 1
+                data = {"issues": [{"unit_key": rows[0]["unit_key"], "quote": "기준 문서에만 있는 문장",
+                                    "reason": "저장된 초안과 대조할 수 없는 인용"}]}
+                return SimpleNamespace(data=data)
             data = {"issues": [{"unit_key": row["unit_key"], "quote": row["text"], "reason": "삭제 요청한 인편 배달을 본문에 유지했습니다."}
                                for row in rows if row["text"] == RETAINED]}
         else:
@@ -263,6 +269,8 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     with ZipFile(io.BytesIO(exported)) as archive:
         body = archive.read("word/document.xml").decode()
     if template == "insurance_terms_draft":
+        assert completed["document"]["title"] == "보험 약관 초안"
+        assert "보험 약관 초안 초안" not in body
         changes = next(check for check in completed["document"]["checks"] if check["id"] == "terms_change_summary")
         assert changes["summary"] == {"unchanged": 1, "modified": 1, "new": 1, "delete_suggested": 1}
         assert completed["document"]["sections"][-1]["delete_suggested"] == ["증서는 인편으로 배달한다."]
@@ -393,6 +401,21 @@ def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing)
     worker._process(repo.jobs.pop())
     assert client.get(output).json()["data"]["state"] == "completed"
     assert [prompt.schema_name for prompt in model.prompts].count("authoring_unit") == count
+
+
+@pytest.mark.parametrize(("invalid_replies", "expected_state"), [(1, "completed"), (2, "paused")])
+def test_terms_body_review_rechecks_unmatched_quote_once(writing, invalid_replies, expected_state):
+    _, _, model, _ = writing
+    model.unmatched_review_quotes = invalid_replies
+
+    _, result = _generate_payment_terms(writing)
+
+    assert result["state"] == expected_state
+    assert result["units"][0]["locked"] is False
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_unit") == 1
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    if expected_state == "paused":
+        assert (result["pause_reason"], result["document"]) == ("terms_review_unavailable", None)
 
 
 def test_worker_rechecks_access_revoked_after_queue(writing):
