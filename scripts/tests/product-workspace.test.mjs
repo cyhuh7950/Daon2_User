@@ -267,6 +267,45 @@ async function mountS17ReconnectWorkspace(initialAdapter) {
   }
 }
 
+test("준비된 MD·PDF 원문을 소스 목록에서 질문 실행 없이 연다", async () => {
+  const previewRequests = [];
+  let questions = 0;
+  const files = ["sync.md", "sync.pdf", "pending.md"];
+  const workspace = await mountS17ReconnectWorkspace(s17Adapter({
+    listSources: async () => files.map((filename, index) => ({
+      source_id: `source-${index}`, source_version_id: `version-${index}`, filename,
+      source_state: "ready", processing_state: index < 2 ? "completed" : "accepted",
+      job_state: index < 2 ? "completed" : "pending",
+    })),
+    askQuestion: async () => { questions += 1; },
+    studioV2: {
+      listTypes: async () => [],
+      listOutputs: async () => ({ items: [], nextCursor: null }),
+      getSourcePreview: async (source) => {
+        previewRequests.push([source.sourceId, source.sourceVersionId]);
+        const pdf = source.filename.endsWith(".pdf");
+        return new Response(pdf ? "%PDF-1.7" : "Markdown 원문", {
+          headers: { "content-type": pdf ? "application/pdf" : "text/plain; charset=utf-8" },
+        });
+      },
+    },
+  }));
+  const action = (label) => findElements(workspace.container, (node) =>
+    node.tagName === "BUTTON" && node.getAttribute("aria-label") === label)[0];
+  const click = (button) => workspace.act(async () => { button.dispatchEvent(new MinimalEvent("click")); });
+  try {
+    assert.equal(action("pending.md 원문 보기"), undefined);
+    await click(action("sync.md 원문 보기"));
+    assert.match(workspace.container.textContent, /Markdown 원문/u);
+    await click(action("sync.pdf 원문 보기"));
+    const frame = findElements(workspace.container, (node) => node.tagName === "IFRAME"
+      && node.getAttribute("title") === "PDF 원문")[0];
+    assert.match(frame.getAttribute("src"), /^blob:.*#page=1$/u);
+    assert.deepEqual(previewRequests, [["source-0", "version-0"], ["source-1", "version-1"]]);
+    assert.equal(questions, 0);
+  } finally { await workspace.cleanup(); }
+});
+
 test("S17 재연결 동기 중복 클릭은 한 요청만 보내고 성공 후 현재 목록을 갱신한다", async () => {
   const pending = deferred(); let calls = 0, lists = 0, connected = false;
   const workspace = await mountS17ReconnectWorkspace(s17Adapter({
