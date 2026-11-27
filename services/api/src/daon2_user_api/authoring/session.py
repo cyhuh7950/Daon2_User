@@ -150,6 +150,9 @@ def apply_answers(template: AuthoringTemplate, session: Mapping[str, Any], answe
                 raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
             updated["assumptions"].append({"key": key, "reason": "user_skipped", "default": "[작성 필요]"})
             continue
+        # 변경 전 화면을 열어 둔 세션도 기존 실손보험 명칭으로 제출할 수 있다.
+        if template.template_id == "insurance_terms_draft" and key == "product_type" and answer.get("value") == "실손의료보험":
+            answer = {**answer, "value": "실손보험"}
         updated["inputs"][key] = validate_value(item, answer)
         updated["assumptions"] = [a for a in updated["assumptions"] if a["key"] != key]
     if skip_remaining:

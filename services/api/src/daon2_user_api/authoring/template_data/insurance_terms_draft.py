@@ -10,7 +10,10 @@ TEMPLATE = {
     "style": "terms",
     "inputs": [
         {"key": "product_type", "question": "상품 유형을 선택해 주세요.", "kind": "choice", "required": True,
-         "choices": ["실손의료보험", "종신보험", "자동차보험", "기타"]},
+         "choices": [
+             "연금보험", "저축보험", "종신보험", "정기보험", "암 보험", "건강보험", "치아보험", "자녀보험",
+             "실손보험", "여행보험", "생활보험", "화재보험", "자동차보험", "운전자보험", "팻 보험", "기타",
+         ]},
         {"key": "base_terms", "question": "기준이 될 기존 약관을 선택해 주세요(지식 서버의 문서).", "kind": "knowledge_ref", "required": True, "document_type": "insurance_terms"},
         {"key": "changes", "question": "기준 약관에서 바꾸려는 점을 적어 주세요(없으면 건너뛰기).", "kind": "text", "required": False},
     ],
