@@ -5,6 +5,7 @@ import { approveWorkspaceSyncOperation, listWorkspaceSyncOperations } from "../.
 import { createStudioV2Adapter } from "../../web/lib/studio-v2-adapter.js";
 import { askGroundedQuestion, authorizeGroundedQuestion, citationContentUrl } from "../../web/lib/question-answering-api.js";
 import { downloadManualAsset, getManualManifest, readManualDocument } from "../../web/lib/manual-api.js";
+import { getNotebookKnowledgeScopes, getNotebookKnowledgeStatus, listDaonKnowledgeScopes, saveNotebookKnowledgeScopes } from "../../web/lib/daon-knowledge-scopes-api.js";
 
 const MAX_IPC_BYTES = 32 * 1024 * 1024 + 16_388;
 
@@ -61,6 +62,10 @@ export function createWindowsOnlineFeatures(workspaceId, notebookId, invoke) {
     listSyncOperations: (options) => listWorkspaceSyncOperations(workspaceId, { ...options, fetchImpl }),
     approveSyncOperation: (operation, input, options) => approveWorkspaceSyncOperation(workspaceId, operation, input, { ...options, fetchImpl }),
     issueStudioStepUp: (group, target, password, options) => issueStudioStepUp(group, target, password, { ...options, fetchImpl }),
+    listDaonKnowledgeScopes: (options) => listDaonKnowledgeScopes(workspaceId, { ...options, fetchImpl }),
+    getNotebookKnowledgeScopes: (options) => getNotebookKnowledgeScopes(workspaceId, notebookId, { ...options, fetchImpl }),
+    getNotebookKnowledgeStatus: (options) => getNotebookKnowledgeStatus(workspaceId, notebookId, { ...options, fetchImpl }),
+    saveNotebookKnowledgeScopes: (items, options) => saveNotebookKnowledgeScopes(workspaceId, notebookId, items, { ...options, fetchImpl }),
     studioV2: createStudioV2Adapter(workspaceId, notebookId, { fetchImpl }),
     askQuestion: (input, options) => askGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),
     authorizeQuestion: (input, options) => authorizeGroundedQuestion(workspaceId, { ...input, notebookId }, { ...options, fetchImpl }),

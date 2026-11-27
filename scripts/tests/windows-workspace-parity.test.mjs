@@ -78,3 +78,39 @@ test("Windows reader opens and validates the exact web manual assets", async () 
     assert.equal((await features.downloadManual(id, format, manifest)).blob.size, manifest.documents[0].assets[format].bytes);
   }
 });
+
+test("Windows loads approved knowledge scopes and saves the current notebook selection", async () => {
+  const calls = [];
+  const item = { project_id: "project-one", work_package_id: "package-one" };
+  const proxy = createNativeBffProxy({ baseUrl, fetchImpl: async (url, init) => {
+    const body = init.body == null ? null : JSON.parse(new TextDecoder().decode(init.body));
+    calls.push([init.method, url.pathname, body]);
+    const data = url.pathname.endsWith("/daon-knowledge-scopes") ? { projects: [] } : { items: [item] };
+    return new Response(JSON.stringify({ data }), { headers: { "content-type": "application/json" } });
+  } });
+  const features = createWindowsOnlineFeatures("ws-one", "nb-one", async (command, args) => {
+    assert.equal(command, "native_notebook_request");
+    assert.equal(args.notebookId, "nb-one");
+    const { path, method, body } = args.request;
+    const response = await proxy(new Request(gateway + path, {
+      method, body, headers: { authorization: "Bearer test-credential-012345", "content-type": "application/json" },
+    }), path.slice("/api/v1/".length).split("/"));
+    return packNativeResponse(await response.text(), { status: response.status });
+  });
+  assert.deepEqual(await features.listDaonKnowledgeScopes(), { projects: [] });
+  assert.deepEqual(await features.getNotebookKnowledgeScopes(), { items: [item] });
+  assert.deepEqual(await features.saveNotebookKnowledgeScopes([item]), { items: [item] });
+  assert.deepEqual(await features.getNotebookKnowledgeStatus(), { items: [item] });
+  const path = "/api/v1/workspaces/ws-one/notebooks/nb-one/knowledge-scopes";
+  const rejected = (url, method = "GET") => proxy(new Request(gateway + url, {
+    method, headers: { authorization: "Bearer test-credential-012345" },
+  }), url.split("?")[0].slice("/api/v1/".length).split("/"));
+  assert.equal((await rejected(path + "/status", "PUT")).status, 405);
+  assert.equal((await rejected(path + "?unexpected=1")).status, 400);
+  assert.deepEqual(calls, [
+    ["GET", "/api/v1/workspaces/ws-one/daon-knowledge-scopes", null],
+    ["GET", path, null],
+    ["PUT", path, { items: [item] }],
+    ["GET", path + "/status", null],
+  ]);
+});

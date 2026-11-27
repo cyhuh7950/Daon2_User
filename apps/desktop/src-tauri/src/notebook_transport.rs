@@ -64,10 +64,19 @@ impl NotebookRequest {
             ["workspaces", ws, "notebooks", nb, "source-preview", _, _, "content"] => {
                 *ws == workspace && *nb == notebook && query.is_empty() && self.method == "GET"
             }
+            ["workspaces", ws, "notebooks", nb, "knowledge-scopes"] => {
+                *ws == workspace && *nb == notebook && query.is_empty()
+                    && matches!(self.method.as_str(), "GET" | "PUT")
+            }
+            ["workspaces", ws, "notebooks", nb, "knowledge-scopes", "status"] => {
+                *ws == workspace && *nb == notebook && query.is_empty() && self.method == "GET"
+            }
             ["session"] => self.method == "GET" && query.is_empty(),
             ["workspaces", ws, "model-defaults" | "output-version-settings"] => *ws == workspace && query.is_empty()
                 && matches!(self.method.as_str(), "GET" | "PATCH"),
-            ["workspaces", ws, "egress-policy" | "sync-operations"] => *ws == workspace && query.is_empty() && self.method == "GET",
+            ["workspaces", ws, "egress-policy" | "sync-operations" | "daon-knowledge-scopes"] => {
+                *ws == workspace && query.is_empty() && self.method == "GET"
+            }
             ["workspaces", ws, "operations", "status"] => *ws == workspace && self.method == "GET",
             ["sync-operations", _, "approve"] => self.method == "POST" && query.is_empty(),
             ["provider-credentials"] => self.method == "GET" && query.is_empty(),
@@ -149,6 +158,29 @@ pub(crate) fn native_read_manual(asset: &str) -> Result<tauri::ipc::Response, &'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn knowledge_scopes_only_allow_the_active_workspace_and_notebook() {
+        let mut request = NotebookRequest {
+            method: "GET".into(), path: "/api/v1/workspaces/ws/daon-knowledge-scopes".into(),
+            headers: Vec::new(), body: None,
+        };
+        assert!(request.valid("ws", "nb"));
+        assert!(!request.valid("other", "nb"));
+        request.method = "PUT".into();
+        request.body = Some(r#"{"items":[]}"#.into());
+        assert!(!request.valid("ws", "nb"));
+        request.path = "/api/v1/workspaces/ws/notebooks/nb/knowledge-scopes".into();
+        assert!(request.valid("ws", "nb"));
+        assert!(!request.valid("ws", "other"));
+        request.path.push_str("/status");
+        assert!(!request.valid("ws", "nb"));
+        request.method = "GET".into();
+        request.body = None;
+        assert!(request.valid("ws", "nb"));
+        request.path.push_str("?unexpected=1");
+        assert!(!request.valid("ws", "nb"));
+    }
 
     #[test]
     fn settings_defaults_and_source_previews_remain_scoped() {
