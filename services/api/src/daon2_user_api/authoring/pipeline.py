@@ -229,6 +229,7 @@ class AuthoringPipeline:
         goal = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         sections = "\n".join(f"- {s['key']}: {s['title']} ({s.get('guidance', '')})" for s in template.sections)
         pages = session.get("target_pages")
+        notebook_terms = template.style == "terms" and bool(reference_sources)
         reference_outline = ""
         if reference_sources:
             sample = build_pack(reference_sources, budget_chars=self._context_chars // 2, focus=" ".join([*goal.values(), sections]))
@@ -237,13 +238,14 @@ class AuthoringPipeline:
             f"[요청] {session.get('request_text') or ''}\n[입력] {goal or '없음'}\n[목표 분량] {str(pages) + '페이지' if pages else '지정 없음'}\n"
             f"[템플릿 절. 이 절은 없앨 수 없고 key를 그대로 씁니다]\n{sections}\n"
             "[요구사항]\n" + ("\n".join(f"- {r['id']}: {r['text'][:120]}" for r in requirements[:60]) or "- 없음") +
-            reference_outline + "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요."),
+            reference_outline + ("\n각 장을 독립적인 작성 단위 하나로 정하세요. 장에 실제로 있는 조항과 사용자가 요청한 변경을 반영하는 데 필요한 분량만 정하세요."
+                                 if notebook_terms else "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요.")),
             json_schema=OUTLINE_SCHEMA, max_output_tokens=2000, prompt_version="authoring-outline-v1", schema_name="authoring_outline")
         try:
             outline = self._llm.generate(ctx.context, prompt).data
         except (StudioError, ValueError, KeyError, TypeError):
             outline = {}  # 설계 호출이 실패하면 템플릿 절을 그대로 소목차로 쓴다.
-        units = build_units(template, outline, target_pages=pages)
+        units = build_units(template, outline, target_pages=pages, one_unit_per_section=notebook_terms)
         plan = plan_sections(units)
         if plan and requirements:
             plan[0]["requirement_ids"] = [r["id"] for r in requirements]
@@ -319,7 +321,7 @@ class AuthoringPipeline:
             correction = (
                 "\n[검수 결과와 고쳐 쓸 본문]\n"
                 "아래 자료는 검사 대상입니다. 검수에 걸린 내용을 고치고 사용자가 요청한 나머지 조항과 근거는 유지하세요. "
-                "기존 문제 문구나 수정 과정 설명은 반환하지 마세요.\n"
+                "문제가 된 중복이나 충돌만 제거하고, 정상 조항의 번호는 보존하세요. 수정 과정 설명은 반환하지 마세요.\n"
                 + json.dumps({"issue": repair_issue, "paragraphs": unit["paragraphs"]}, ensure_ascii=False)
             )
         prompt = StudioPrompt(system=system, user=(
@@ -453,7 +455,9 @@ class AuthoringPipeline:
                 result = self._write_unit(ctx, current, template, unit, pack, knowledge, reference_pack, repair_issue=issue)
             except (ExternalEvidenceError, StudioError):
                 continue
-            if result["status"] == "done" and not any(issue["quote"] in para["text"] for para in result["paragraphs"]):
+            old_count = sum(para["text"].count(issue["quote"]) for para in unit["paragraphs"])
+            new_count = sum(para["text"].count(issue["quote"]) for para in result["paragraphs"])
+            if result["status"] == "done" and new_count < old_count:
                 result.pop("provider")
                 current = self._save_unit(ctx, current, unit["key"], result, knowledge)
         return current

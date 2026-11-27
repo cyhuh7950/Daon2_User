@@ -74,7 +74,7 @@ def _scale(units: list[dict[str, Any]], target_pages: int | None) -> list[dict[s
     return units
 
 
-def build_units(template: AuthoringTemplate, outline: Any, *, target_pages: int | None) -> list[dict[str, Any]]:
+def build_units(template: AuthoringTemplate, outline: Any, *, target_pages: int | None, one_unit_per_section: bool = False) -> list[dict[str, Any]]:
     """LLM이 소목차를 정한다. 템플릿의 절과 그 제목은 LLM이 없앨 수 없다. 범용 문서만 목차 전체를 LLM이 만든다."""
     rows = outline.get("sections") if isinstance(outline, Mapping) else None
     rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
@@ -89,7 +89,14 @@ def build_units(template: AuthoringTemplate, outline: Any, *, target_pages: int 
     by_key = {row.get("key"): row for row in rows}
     for section in template.sections:
         guidance = str(section.get("guidance", ""))
-        for index, (name, purpose, size) in enumerate(_subsections(by_key.get(section["key"]), section["title"], guidance), 1):
+        subsections = _subsections(by_key.get(section["key"]), section["title"], guidance)
+        if one_unit_per_section:
+            # 한 장을 한 번에 작성해야 같은 보장·의무 조항을 소목차마다 다시 정의하지 않는다.
+            purpose = " / ".join(f"{name}: {detail}" for name, detail, _ in subsections)
+            units.append(_unit(section["key"], section["title"], 1, section["title"], purpose[:600],
+                               max(size for _, _, size in subsections)))
+            continue
+        for index, (name, purpose, size) in enumerate(subsections, 1):
             units.append(_unit(section["key"], section["title"], index, name, purpose, size))
     return _scale(units[:MAX_UNITS], target_pages)
 

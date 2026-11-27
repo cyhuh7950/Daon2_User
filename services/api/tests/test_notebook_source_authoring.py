@@ -101,12 +101,16 @@ class FixtureModel:
         self.conflicting_terms = False
         self.repair_terms = False
         self.review_unavailable = False
+        self.split_payment = False
 
     def generate(self, context, prompt, cancel_check=None):
         self.prompts.append(prompt)
         name = prompt.schema_name
         if name == "authoring_outline":
-            data = {"sections": []}
+            data = {"sections": [{"key": "payment", "title": "보험금의 지급", "subsections": [
+                {"title": "청구 절차", "purpose": "청구 서류 심사"},
+                {"title": "지급 지연 통지", "purpose": "전자우편 통지"},
+            ]}] if self.split_payment else []}
         elif name == "authoring_unit":
             def ref(text):
                 return re.search(r'<source id="(S[0-9]+)"[^>]*>\n[^<]*' + re.escape(text), prompt.user).group(1)
@@ -289,6 +293,34 @@ def _generate_payment_terms(writing):
     assert receipt.status_code == 202, receipt.text
     worker._process(repo.jobs.pop())
     return output, client.get(output).json()["data"]
+
+
+def test_notebook_terms_writes_selected_chapter_once_even_if_outline_splits_it(writing):
+    _, _, model, _ = writing
+    model.split_payment = True
+    _, completed = _generate_payment_terms(writing)
+
+    assert completed["state"] == "completed"
+    assert [unit["section_key"] for unit in completed["units"]] == ["payment"]
+    body = [p["text"] for unit in completed["units"] for p in unit["paragraphs"]]
+    assert body.count(MODIFIED) == 1
+
+
+def test_terms_review_detects_repeated_numbered_headings_without_model_findings():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    ctx = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": []}))
+    unit = {"key": "payment-1", "section_title": "보험금의 지급", "title": "지급",
+            "paragraphs": [{"text": "제11조(보험금 청구)\n서류를 확인한다."},
+                           {"text": "제11조의2(지급 절차)\n절차를 안내한다."},
+                           {"text": "제11조 (청구 서류 심사)\n서류를 심사한다."},
+                           {"text": "제11조에 따른 서류를 제출한다."}]}
+    findings = review_terms_body(ctx, model, changes="기준 약관의 심사 절차를 유지한다.",
+                                 units=[unit], context_chars=10000)
+    assert [(issue["unit_key"], issue["quote"]) for issue in findings] == [
+        ("payment-1", "제11조 (청구 서류 심사)"),
+    ]
 
 
 def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):

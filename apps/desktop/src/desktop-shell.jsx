@@ -7,7 +7,7 @@ import navigation from "@daon2-user/contracts/navigation.json";
 import "@daon2-user/design-tokens/tokens.css";
 import "./desktop-shell.css";
 import { createWindowsNavigation, selectNativeRoute } from "./desktop-shell-model.js";
-import { describeLocalServiceState, retryLocalService, watchLocalServiceStatus } from "./local-service-bridge.js";
+import { retryLocalService, watchLocalServiceStatus } from "./local-service-bridge.js";
 import { createNativeSessionBridge } from "./native-session-bridge.js";
 import { createNativeNotebookBridge } from "./native-notebook-bridge.js";
 import { concealProtectedDesktop, revealProtectedDesktop } from "./desktop-protected-route.js";
@@ -418,12 +418,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
           <h1><button className="desktop-home-back" type="button" onClick={() => { void loadHome(); }}>← Notebook 홈</button>{selectedNotebook.notebook.title}</h1>
         </div>
         <div>
-          <span className="desktop-runtime-badge" role="status" aria-label={describeLocalServiceState(localService)}>
-            {localService.state === "ready" ? "정상" : localService.retryable ? "오류" : "주의"} · Offline · Cloud 인증됨
-          </span>
-          {localService.retryable ? (
-            <button type="button" onClick={retry}>다시 시도</button>
-          ) : null}
+          <span className="desktop-runtime-badge" role="status">Cloud 인증됨</span>
         </div>
         <div className="desktop-app-actions">
           <button type="button" onClick={() => setActiveModal("operations")}>운영상태</button>
@@ -451,7 +446,7 @@ export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNA
             </section>
         ))}
       </div>
-      <WorkspaceOperationsModal open={activeModal === "operations"} onClose={() => setActiveModal(null)} localService={localService} offlineState={offlineState} cloudState={nativeSession.authenticated ? "authenticated" : "unavailable"} />
+      <WorkspaceOperationsModal open={activeModal === "operations"} onClose={() => setActiveModal(null)} localService={localService} onRetryLocalService={retry} offlineState={offlineState} cloudState={nativeSession.authenticated ? "authenticated" : "unavailable"} />
       <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
     </div>
   );

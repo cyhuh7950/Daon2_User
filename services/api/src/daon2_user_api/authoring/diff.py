@@ -61,9 +61,9 @@ def _exact_text(text: str) -> str:
     return re.sub(r"\s+", "", text).rstrip(".。!?").casefold()
 
 
-def _article_heading(text: str) -> tuple[int, int | None] | None:
+def article_heading(text: str, *, allow_terminal_punctuation: bool = False) -> tuple[int, int | None] | None:
     heading = text.lstrip("#").strip()
-    if heading.endswith((".", "。", "!", "?")):
+    if not allow_terminal_punctuation and heading.endswith((".", "。", "!", "?")):
         return None
     match = _ARTICLE_HEADING.match(heading)
     if match is None:
@@ -83,9 +83,9 @@ def similarity(a: str, b: str) -> float:
 
 
 def tag_sentence(sentence: str, base: Sequence[str], *, exact_unchanged: bool = False) -> tuple[str, str | None, float]:
-    article = _article_heading(sentence) if exact_unchanged else None
+    article = article_heading(sentence) if exact_unchanged else None
     if article is not None:
-        headings = [candidate for candidate in base if _article_heading(candidate) == article]
+        headings = [candidate for candidate in base if article_heading(candidate) == article]
         if not headings:
             return "new", None, 0.0
         matched = max(headings, key=lambda candidate: (_exact_text(sentence) == _exact_text(candidate), similarity(sentence, candidate)))
@@ -118,10 +118,10 @@ def tag_section(paragraph_texts: Sequence[str], base_sentences: Sequence[str], *
         paragraph_tag = "unchanged" if tags == {"unchanged"} else "new" if tags == {"new"} else "modified"
         paragraphs.append({"tag": paragraph_tag, "sentences": rows})
     candidates = base_sentences if deletion_candidates is None else deletion_candidates
-    new_articles = {_article_heading(s) for s in new_sentences} - {None} if exact_unchanged else set()
+    new_articles = {article_heading(s) for s in new_sentences} - {None} if exact_unchanged else set()
     removed = []
     for candidate in candidates:
-        article = _article_heading(candidate) if exact_unchanged else None
+        article = article_heading(candidate) if exact_unchanged else None
         if article is not None:
             if article not in new_articles:
                 removed.append(candidate)
