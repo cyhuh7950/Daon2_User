@@ -7,12 +7,15 @@ import navigation from "@daon2-user/contracts/navigation.json";
 import "@daon2-user/design-tokens/tokens.css";
 import "./desktop-shell.css";
 import { createWindowsNavigation, selectNativeRoute } from "./desktop-shell-model.js";
-import { describeLocalServiceState, retryLocalService, watchLocalServiceStatus } from "./local-service-bridge.js";
+import { retryLocalService, watchLocalServiceStatus } from "./local-service-bridge.js";
 import { createNativeSessionBridge } from "./native-session-bridge.js";
 import { createNativeNotebookBridge } from "./native-notebook-bridge.js";
 import { concealProtectedDesktop, revealProtectedDesktop } from "./desktop-protected-route.js";
 import { NativeAuthPanel } from "./native-auth-panel.jsx";
 import { createWindowsWorkspaceAdapter } from "./windows-workspace-adapter.js";
+import { createWindowsManualFetch, createWindowsOnlineFeatures } from "./windows-online-features.js";
+import { ProviderSettingsWorkspace } from "../../web/components/provider-settings-workspace.jsx";
+import { ManualSettingsPane } from "../../web/components/manual-settings-pane.jsx";
 import { createOfflineStudioState, reduceOfflineStudioState } from "./offline-studio-model.js";
 import { WorkspaceOperationsModal } from "./workspace-operations-modal.jsx";
 import { WorkspaceSettingsModal } from "./workspace-settings-modal.jsx";
@@ -27,15 +30,50 @@ const LABELS = {
   Notifications: "Notifications"
 };
 
-function DesktopWorkspaceRoute({ workspaceId, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
-  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} adapter={workspaceAdapter} state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
+function DesktopWorkspaceRoute({ workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings, onLogout }) {
+  return <ProductWorkspaceShell key={sessionKey} workspaceId={workspaceId} notebookTitle={notebookTitle} adapter={workspaceAdapter} providerSettings={providerSettings}
+    onLogout={onLogout} onSettingsNavigate={openWebSettings}
+    state={createProductWorkspaceState({ status: workspaceAdapter ? "loading" : "unavailable", safeError: workspaceAdapter ? null : "WORKSPACE_ADAPTER_UNAVAILABLE" })} />;
 }
 
-function RouteSurface({ routeKey, workspaceId, workspaceAdapter, sessionKey, nativeInvoke, offlineState, dispatchOffline }) {
-  if (routeKey === "WorkspaceDetail") {
-    return <DesktopWorkspaceRoute workspaceId={workspaceId} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />;
+const WEB_SETTINGS = Object.freeze({
+  license: ["/settings/license", "라이선스"],
+  "model-connections": ["/settings/model-connections", "LLM 설정"],
+  "organization-join": ["/organization/join", "조직 가입"],
+  "organization-policy": ["/settings/organization", "조직 정책"],
+  "user-management": ["/admin", "사용자 관리"],
+  "organization-admin": ["/organization-admin", "조직 관리"],
+  "tts-engines": ["/settings/tts-engines", "음성 엔진"],
+});
+
+const WEB_ROUTES = Object.freeze({
+  AccountSettings: ["/settings/account", "계정 설정"],
+  OrganizationSettings: ["/settings/organization", "조직 설정"],
+  Operations: ["/operations", "운영상태"],
+  Notifications: ["/notifications", "알림"],
+});
+
+function openWebSettings(path) {
+  if (Object.values(WEB_SETTINGS).some(([destination]) => destination === path)) {
+    window.open("https://daon2-user.sinsan.kr" + path, "_blank", "noopener,noreferrer");
   }
-  return <section className="desktop-safe-surface" role="status"><h2>{LABELS[routeKey]}</h2><p>실제 사용자 기능 연결 전에는 성공 데이터를 표시하지 않습니다.</p></section>;
+}
+
+function WebSettingsLink({ destination, onClose }) {
+  const [path, label] = destination;
+  return <section className="desktop-safe-surface" aria-label={label}>
+    {onClose ? <button type="button" onClick={onClose}>홈으로 돌아가기</button> : null}
+    <h2>{label}</h2>
+    <a href={'https://daon2-user.sinsan.kr' + path} target="_blank" rel="noopener noreferrer">웹에서 {label} 열기</a>
+  </section>;
+}
+
+function RouteSurface({ routeKey, workspaceId, notebookTitle, workspaceAdapter, sessionKey, providerSettings, onLogout }) {
+  if (routeKey === "WorkspaceDetail") {
+    return <DesktopWorkspaceRoute workspaceId={workspaceId} notebookTitle={notebookTitle} workspaceAdapter={workspaceAdapter} sessionKey={sessionKey} providerSettings={providerSettings} onLogout={onLogout} />;
+  }
+  const destination = WEB_ROUTES[routeKey];
+  return destination ? <WebSettingsLink destination={destination} /> : null;
 }
 
 const NOTEBOOK_HASH = /^#\/notebooks\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u;
@@ -46,7 +84,7 @@ const writeDesktopRoute = (method, hash) => {
   else window.location.hash = hash;
 };
 
-export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
+export function DesktopShell({ nativeInvoke = globalThis.window?.__TAURI_INTERNALS__?.invoke, sessionWatchOptions } = {}) {
   const sessionBridge = useMemo(() => createNativeSessionBridge({ invoke: nativeInvoke }), [nativeInvoke]);
   const screenPreferences = useMemo(() => {
     try { return createScreenPreferencesBridge({ invoke: nativeInvoke }); }
@@ -164,12 +202,17 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
   const notebookBridge = useMemo(() => {
     try { return createNativeNotebookBridge({ invoke: nativeInvoke }); } catch { return null; }
   }, [nativeInvoke]);
+  const manualFetch = useMemo(() => createWindowsManualFetch(nativeInvoke), [nativeInvoke]);
+  const providerApi = useMemo(() => nativeSession.authenticated
+    ? createWindowsOnlineFeatures(nativeSession.workspaceId, "settings", nativeInvoke).providerSettings
+    : null, [nativeSession.authenticated, nativeSession.workspaceId, nativeInvoke]);
   const workspaceAdapter = useMemo(() => {
     if (!nativeSession.authenticated || !selectedNotebook) return null;
     const base = createWindowsWorkspaceAdapter(nativeSession.workspaceId, {
       invoke: nativeInvoke, organizationId: nativeSession.tenantId, notebookId: selectedNotebook.notebookId,
     });
-    return createNotebookContextWorkspaceAdapter(base, selectedNotebook.context);
+    const online = createWindowsOnlineFeatures(nativeSession.workspaceId, selectedNotebook.notebookId, nativeInvoke);
+    return createNotebookContextWorkspaceAdapter({ ...base, ...online }, selectedNotebook.context);
   }, [nativeInvoke, nativeSession.authenticated, nativeSession.sessionId, nativeSession.tenantId, nativeSession.workspaceId, selectedNotebook]);
 
   const beginNotebookRequest = useCallback((targetHash) => {
@@ -337,7 +380,23 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
     return <main className="desktop-login-shell" data-theme={effectiveScreenTheme} data-client-type="windows" aria-busy="true" />;
   }
   if (!selectedNotebook) {
-    return <div className="desktop-notebook-home" data-theme={effectiveScreenTheme} data-client-type="windows" data-session-tree-key={sessionTreeKey}>
+    if (activeModal === "manual") {
+      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <ManualSettingsPane fetchImpl={manualFetch} onBack={() => setActiveModal(null)} />
+      </div>;
+    }
+    if (activeModal === "model-connections" && providerApi) {
+      return <div className="desktop-shell desktop-manual-page desktop-provider-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <button type="button" onClick={() => setActiveModal(null)}>홈으로 돌아가기</button>
+        <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} />
+      </div>;
+    }
+    if (Object.hasOwn(WEB_SETTINGS, activeModal)) {
+      return <div className="desktop-shell desktop-manual-page" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows">
+        <WebSettingsLink destination={WEB_SETTINGS[activeModal]} onClose={() => setActiveModal(null)} />
+      </div>;
+    }
+    return <div className="desktop-shell desktop-notebook-home" data-visual-system="notebook-violet" data-theme={effectiveScreenTheme} data-client-type="windows" data-session-tree-key={sessionTreeKey}>
       <NotebookHome
         state={notebookHome.state}
         notebooks={notebookHome.notebooks}
@@ -345,10 +404,10 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
         onReload={loadHome}
         onCreate={createNotebook}
         onOpenNotebook={({ notebookId }) => { void openNotebook({ notebookId }); }}
-        onOpenSetting={() => setActiveModal("settings")}
+        onOpenSetting={(id) => setActiveModal(id === "screen" ? "settings" : id)}
         onLogout={logout}
       />
-      <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
+      <WorkspaceSettingsModal open={activeModal === "settings"} screenOnly onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
     </div>;
   }
   return (
@@ -359,12 +418,7 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
           <h1><button className="desktop-home-back" type="button" onClick={() => { void loadHome(); }}>← Notebook 홈</button>{selectedNotebook.notebook.title}</h1>
         </div>
         <div>
-          <span className="desktop-runtime-badge" role="status" aria-label={describeLocalServiceState(localService)}>
-            {localService.state === "ready" ? "정상" : localService.retryable ? "오류" : "주의"} · Offline · Cloud 인증됨
-          </span>
-          {localService.retryable ? (
-            <button type="button" onClick={retry}>다시 시도</button>
-          ) : null}
+          <span className="desktop-runtime-badge" role="status">Cloud 인증됨</span>
         </div>
         <div className="desktop-app-actions">
           <button type="button" onClick={() => setActiveModal("operations")}>운영상태</button>
@@ -388,11 +442,11 @@ export function DesktopShell({ nativeInvoke, sessionWatchOptions } = {}) {
       <div className="desktop-content" inert={activeModal ? "" : undefined} aria-hidden={activeModal ? "true" : undefined}>
         {routes.map((route) => (
             <section key={route.key} hidden={route.key !== activeKey} aria-label={LABELS[route.key]}>
-              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} nativeInvoke={nativeInvoke} offlineState={offlineState} dispatchOffline={dispatchOffline} />
+              <RouteSurface routeKey={route.key} workspaceId={nativeSession.workspaceId} notebookTitle={selectedNotebook.notebook.title} workspaceAdapter={workspaceAdapter} sessionKey={`${nativeSession.sessionId}:${selectedNotebook.notebookId}`} providerSettings={providerApi ? <ProviderSettingsWorkspace workspaceId={nativeSession.workspaceId} api={providerApi} embedded /> : null} onLogout={logout} />
             </section>
         ))}
       </div>
-      <WorkspaceOperationsModal open={activeModal === "operations"} onClose={() => setActiveModal(null)} localService={localService} offlineState={offlineState} cloudState={nativeSession.authenticated ? "authenticated" : "unavailable"} />
+      <WorkspaceOperationsModal open={activeModal === "operations"} onClose={() => setActiveModal(null)} localService={localService} onRetryLocalService={retry} offlineState={offlineState} cloudState={nativeSession.authenticated ? "authenticated" : "unavailable"} />
       <WorkspaceSettingsModal open={activeModal === "settings"} onClose={() => setActiveModal(null)} offlineState={offlineState} nativeInvoke={nativeInvoke} onScreenTheme={setScreenTheme} onSave={(deploymentId) => dispatchOffline({ type: "model_selected", deploymentId })} />
     </div>
   );

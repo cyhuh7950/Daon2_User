@@ -1,5 +1,6 @@
 pub mod local_service;
 pub mod native_session;
+mod notebook_transport;
 pub mod offline_studio_bridge;
 pub mod offline_sync_bridge;
 pub mod recovery_bridge;
@@ -187,6 +188,8 @@ pub fn run() {
     macro_rules! desktop_invoke_handler {
         ($($platform_command:ident),* $(,)?) => {
             tauri::generate_handler![
+                notebook_transport::native_notebook_request,
+                notebook_transport::native_read_manual,
                 local_service_status,
                 local_service_retry,
                 native_login,

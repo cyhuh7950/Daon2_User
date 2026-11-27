@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { packNativeResponse } from "./support/native-notebook-response.mjs";
 
 class MinimalEvent {
   constructor(type, options = {}) {
@@ -349,10 +350,15 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
         job_state: "completed"
       }];
       if (command === "workspace_list_studio_outputs") return [];
-      if (command === "workspace_ask_question") return {
+      if (command === "native_read_manual") {
+        const bytes = await readFile(new URL(`../../apps/web/public/manual/${args.asset}`, import.meta.url));
+        const mime = args.asset === "manifest.json" ? "application/json" : "text/markdown; charset=utf-8";
+        return packNativeResponse(bytes, { headers: [["content-type", mime]] });
+      }
+      if (command === "native_notebook_request" && args.request.path.endsWith("/questions")) return packNativeResponse(JSON.stringify({ data: {
         run_id: "run-1", run_result_id: "result-1", answer: "StrictMode 질문 성공", insufficient: false,
         citations: [{ citation_id: "citation-1", source_id: "source-workspace-1", source_version_id: "version-workspace-1", evidence_span_id: "span-1", page: 1, origin: "raw_source", context_item_id: "source-workspace-1", locator: { kind: "page", value: "1" } }]
-      };
+      }, meta: { trace_id: "trace-1", workspace_id: args.workspaceId } }));
       if (command === "recovery_cloud_list_backups") return { data: [], etag: null };
       if (command === "local_service_status") return { state: "ready", retryable: false, error_code: null };
       throw new Error(`unexpected:${command}`);
@@ -361,8 +367,9 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     dom.document.body.appendChild(container);
     root = createRoot(container);
     window.location.hash = "#/notebooks";
+    window.__TAURI_INTERNALS__ = { invoke };
     await act(async () => {
-      root.render(createElement(StrictMode, null, createElement(DesktopShell, { nativeInvoke: invoke, sessionWatchOptions: { schedule: (poll) => { scheduledPoll = poll; return 1; }, cancel: () => {} } })));
+      root.render(createElement(StrictMode, null, createElement(DesktopShell, { sessionWatchOptions: { schedule: (poll) => { scheduledPoll = poll; return 1; }, cancel: () => {} } })));
     });
     assert.ok(scheduledPoll, "제품 Tree가 주입된 watch scheduler를 사용해야 한다");
     assert.equal(findElements(container, (node) => node.getAttribute("aria-label") === "Windows 주 탐색").length, 0);
@@ -380,6 +387,12 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     assert.ok(calls.includes("native_login"), `native_login 호출 필요: ${calls.join(",")}`);
     assert.match(container.textContent, /지식에서 결과까지/u, "로그인 성공은 Notebook Home이어야 한다");
     assert.equal(calls.includes("workspace_list_sources"), false, "사용자가 Notebook을 고르기 전에는 3열 조회가 없어야 한다");
+    await act(async () => { buttonByText(container, "설정").dispatchEvent(new MinimalEvent("click")); });
+    const manualMenu = findElements(container, (node) => node.getAttribute("role") === "menuitem" && node.textContent === "사용자 설명서")[0];
+    await act(async () => { manualMenu.dispatchEvent(new MinimalEvent("click")); });
+    assert.match(container.textContent, /Daon 문서 Hub/u);
+    assert.ok(calls.includes("native_read_manual"));
+    await act(async () => { buttonByText(container, "Notebook으로").dispatchEvent(new MinimalEvent("click")); });
     const createOpener = findElements(container, (node) => node.tagName === "BUTTON" && node.textContent.includes("새 Notebook"))[0];
     await act(async () => { createOpener.dispatchEvent(new MinimalEvent("click")); });
     const createDialog = findElements(container, (node) => node.getAttribute("role") === "dialog")[0];
@@ -416,7 +429,7 @@ test("실제 React Tree는 Login 실패·성공·권한 없음·Logout 경쟁을
     const strictSubmit = findElements(strictQuestionForm, (node) => node.tagName === "BUTTON" && node.getAttribute("type") === "submit")[0];
     assert.equal(strictSubmit.disabled, false, "질문 state가 실제 composer에 반영되어야 한다");
     await act(async () => { strictQuestionForm.dispatchEvent(new MinimalEvent("submit")); await Promise.resolve(); });
-    assert.ok(calls.includes("workspace_ask_question"), `StrictMode 질문 Command 호출 필요: ${calls.join(",")} / ${container.textContent}`);
+    assert.ok(calls.includes("native_notebook_request"), `StrictMode 질문 Command 호출 필요: ${calls.join(",")} / ${container.textContent}`);
     assert.match(container.textContent, /StrictMode 질문 성공/u, "StrictMode effect 재실행 뒤에도 Session lifetime signal이 살아 있어야 한다");
     polledSession = { authenticated: true, session: sessionTwo };
     await act(async () => { await scheduledPoll(); await Promise.resolve(); });

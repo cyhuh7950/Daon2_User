@@ -99,13 +99,18 @@ class FixtureModel:
     def __init__(self):
         self.prompts = []
         self.conflicting_terms = False
+        self.repair_terms = False
         self.review_unavailable = False
+        self.split_payment = False
 
     def generate(self, context, prompt, cancel_check=None):
         self.prompts.append(prompt)
         name = prompt.schema_name
         if name == "authoring_outline":
-            data = {"sections": []}
+            data = {"sections": [{"key": "payment", "title": "보험금의 지급", "subsections": [
+                {"title": "청구 절차", "purpose": "청구 서류 심사"},
+                {"title": "지급 지연 통지", "purpose": "전자우편 통지"},
+            ]}] if self.split_payment else []}
         elif name == "authoring_unit":
             def ref(text):
                 return re.search(r'<source id="(S[0-9]+)"[^>]*>\n[^<]*' + re.escape(text), prompt.user).group(1)
@@ -114,7 +119,7 @@ class FixtureModel:
                 assert "전자우편" in prompt.user
                 cited = ref(TERMS)
                 paragraphs = [{"text": text, "refs": [cited]} for text in ("보험금은 서류를 받은 후 심사한다.", MODIFIED, ADDED)]
-                if self.conflicting_terms:
+                if self.conflicting_terms and not (self.repair_terms and "[검수 결과와 고쳐 쓸 본문]" in prompt.user):
                     paragraphs.extend({"text": text, "refs": [cited]} for text in (RETAINED, EDITORIAL))
             else:
                 paragraphs = [{"text": PROPOSAL, "refs": [ref(PROPOSAL)]}]
@@ -290,6 +295,34 @@ def _generate_payment_terms(writing):
     return output, client.get(output).json()["data"]
 
 
+def test_notebook_terms_writes_selected_chapter_once_even_if_outline_splits_it(writing):
+    _, _, model, _ = writing
+    model.split_payment = True
+    _, completed = _generate_payment_terms(writing)
+
+    assert completed["state"] == "completed"
+    assert [unit["section_key"] for unit in completed["units"]] == ["payment"]
+    body = [p["text"] for unit in completed["units"] for p in unit["paragraphs"]]
+    assert body.count(MODIFIED) == 1
+
+
+def test_terms_review_detects_repeated_numbered_headings_without_model_findings():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    ctx = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": []}))
+    unit = {"key": "payment-1", "section_title": "보험금의 지급", "title": "지급",
+            "paragraphs": [{"text": "제11조(보험금 청구)\n서류를 확인한다."},
+                           {"text": "제11조의2(지급 절차)\n절차를 안내한다."},
+                           {"text": "제11조 (청구 서류 심사)\n서류를 심사한다."},
+                           {"text": "제11조에 따른 서류를 제출한다."}]}
+    findings = review_terms_body(ctx, model, changes="기준 약관의 심사 절차를 유지한다.",
+                                 units=[unit], context_chars=10000)
+    assert [(issue["unit_key"], issue["quote"]) for issue in findings] == [
+        ("payment-1", "제11조 (청구 서류 심사)"),
+    ]
+
+
 def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
     client, repo, model, worker = writing
     model.conflicting_terms = True
@@ -311,7 +344,7 @@ def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
     completed = client.get(output).json()["data"]
     assert completed["state"] == "completed"
     assert not completed["terms_review"]
-    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 3
     exported = export_v2("docx", {"output_id": repo.output_id, "title": completed["document"]["title"],
                                   "type_id": "authored_document", "revision": {"content": completed},
                                   "evidence": repo.evidence}).content
@@ -320,6 +353,32 @@ def test_terms_body_conflict_pauses_until_edited_and_rechecked(writing):
     assert MODIFIED in body
     # 기준 조항은 변경 추적에 표시될 수 있지만 편집 지시 문장은 내보내지 않는다.
     assert EDITORIAL not in body
+
+
+def test_terms_body_repair_is_checked_before_completing(writing):
+    _, _, model, _ = writing
+    model.conflicting_terms = True
+    model.repair_terms = True
+    _, completed = _generate_payment_terms(writing)
+    assert completed["state"] == "completed"
+    assert not completed["terms_review"]
+    assert [prompt.schema_name for prompt in model.prompts].count("authoring_terms_body_review") == 2
+    assert all(RETAINED not in p["text"] and EDITORIAL not in p["text"]
+               for unit in completed["units"] for p in unit["paragraphs"])
+
+
+def test_terms_review_accepts_only_matching_words_when_the_model_flattens_whitespace():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    original = "제13조 청구 결과\n인편으로 전달한다."
+    context = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": [
+        {"unit_key": "payment-1", "quote": "제13조 청구 결과 인편으로 전달한다.", "reason": "삭제 요청과 충돌"},
+    ]}))
+    units = [{"key": "payment-1", "section_title": "보험금의 지급", "title": "청구 결과",
+              "paragraphs": [{"text": original}]}]
+    issues = review_terms_body(context, model, changes="인편 전달을 삭제한다.", units=units, context_chars=10000)
+    assert issues == [{"unit_key": "payment-1", "quote": original, "reason": "삭제 요청과 충돌"}]
 
 
 def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):

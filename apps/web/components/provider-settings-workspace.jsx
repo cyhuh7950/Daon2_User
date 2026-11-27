@@ -270,7 +270,7 @@ function modelKey(connectionId, modelId) {
   return JSON.stringify([connectionId, modelId]);
 }
 
-export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showNotebookLink = false, qaAsrBaseUrl = "" }) {
+export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showNotebookLink = false, qaAsrBaseUrl = "", api = providerSettingsApi }) {
   const [resolvedWorkspaceId, setResolvedWorkspaceId] = useState(workspaceId ?? null);
   const [isSystemAdmin, setIsSystemAdmin] = useState(null);
   const [connections, setConnections] = useState([]);
@@ -344,16 +344,16 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     discardPreview();
     setStatus({ kind: "loading", message: "Provider 설정을 불러오는 중입니다." });
     try {
-      const session = await providerSettingsApi.getSession();
+      const session = await api.getSession();
       const activeWorkspaceId = workspaceId ?? session.payload?.data?.workspace_id;
       if (typeof activeWorkspaceId !== "string" || !activeWorkspaceId.trim()) throw new Error("RESOURCE_UNAVAILABLE");
       setResolvedWorkspaceId(activeWorkspaceId);
       const systemAdmin = session.payload?.data?.is_system_admin === true;
       setIsSystemAdmin(systemAdmin);
       const [result, personal, health] = await Promise.all([
-        providerSettingsApi.listConnections(),
-        providerSettingsApi.listUserCredentials(),
-        systemAdmin ? providerSettingsApi.getHealthSettings() : Promise.resolve(null)
+        api.listConnections(),
+        api.listUserCredentials(),
+        systemAdmin ? api.getHealthSettings() : Promise.resolve(null)
       ]);
       applyConnections(Array.isArray(result.payload?.data) ? result.payload.data : []);
       applyUserCredentials(personal.payload?.data);
@@ -362,7 +362,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
         setHealthIntervalDraft(health.payload.data.interval_minutes);
       }
       try {
-        const defaultsResult = await providerSettingsApi.getModelDefaults(activeWorkspaceId);
+        const defaultsResult = await api.getModelDefaults(activeWorkspaceId);
         const snapshot = defaultsResult.payload?.data;
         if (!snapshot || snapshot.workspace_id !== activeWorkspaceId || !defaultsResult.etag) throw new Error("MODEL_DEFAULTS_INVALID");
         setModelDefaults({ ...snapshot, etag: defaultsResult.etag });
@@ -381,7 +381,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     } catch {
       setStatus({ kind: "error", message: "Provider 설정을 불러오지 못했습니다. 다시 시도해 주세요." });
     }
-  }, [applyConnections, applyUserCredentials, workspaceId, discardPreview]);
+  }, [applyConnections, applyUserCredentials, workspaceId, discardPreview, api]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -420,7 +420,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     setSavingDefault(true);
     setDefaultStatus("기본 모델을 저장하는 중입니다.");
     try {
-      const result = await providerSettingsApi.saveModelDefault(resolvedWorkspaceId, {
+      const result = await api.saveModelDefault(resolvedWorkspaceId, {
         capability: "text_generation", connection_id: selected.connection_id,
         model_id: selected.model_id, expected_version: savedTextModel?.version ?? 0,
       }, modelDefaults.etag, operationKey("text-model-default"));
@@ -442,7 +442,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     if(!selected)return;
     setSavingDefault(true);setDefaultStatus('QA ASR 역할을 저장하는 중입니다.');
     try{
-      const result=await providerSettingsApi.saveModelDefault(resolvedWorkspaceId,{
+      const result=await api.saveModelDefault(resolvedWorkspaceId,{
         capability:'speech_to_text',connection_id:selected.connection_id,model_id:selected.model_id,
         expected_version:savedAsrModel?.version??0,
       },modelDefaults.etag,operationKey('qa-asr-model-default'));
@@ -482,11 +482,11 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
         model_ids: normalizedLogicalModels(draft.logical_model_ids).slice(0, 8),
         persist: savedAsIs,
       };
-      const result = await providerSettingsApi.testConnection(body);
+      const result = await api.testConnection(body);
       const persisted = result.payload?.data?.persisted === true;
       setTestResult({ kind: "ok", persisted });
       if (persisted) {
-        const listed = await providerSettingsApi.listConnections();
+        const listed = await api.listConnections();
         const items = Array.isArray(listed.payload?.data) ? listed.payload.data : null;
         if (items) applyConnections(items, connectionId);
       }
@@ -509,7 +509,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     const key = modelKey(selectedConnection.connection_id, modelId);
     setReasoningProbe((current) => ({ ...current, [key]: { state: "running" } }));
     try {
-      const result = await providerSettingsApi.probeReasoning({ workspace_id: resolvedWorkspaceId, connection_id: selectedConnection.connection_id, model_id: modelId });
+      const result = await api.probeReasoning({ workspace_id: resolvedWorkspaceId, connection_id: selectedConnection.connection_id, model_id: modelId });
       setReasoningProbe((current) => ({ ...current, [key]: { state: "done", ...result.payload.data } }));
     } catch (error) {
       const cause = providerErrorCause(error);
@@ -535,7 +535,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       setStatus({ kind: "saving", message: "개인 Provider 키를 저장하는 중입니다." });
       try {
         const current = userCredentials[connectionId];
-        const result = await providerSettingsApi.replaceUserCredential(connectionId, {
+        const result = await api.replaceUserCredential(connectionId, {
           credential, expected_version: current?.credential_version ?? 0
         });
         setUserCredentials((items) => ({ ...items, [connectionId]: result.payload.data }));
@@ -558,7 +558,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       // 개인 연결은 시험 Key로 모델 확인을 통과해야 저장되지만 Key는 저장하지 않아 서버 상태가 늘 '사용 대기'다.
       const personalProbed = compatible && !plain && draft.access_mode === "personal" && Boolean(credential.trim());
       if (includeCredential && draft.version > 0 && !otherChanges && !plain) {
-        result = await providerSettingsApi.replaceCredential(connectionId, {
+        result = await api.replaceCredential(connectionId, {
           credential: requestCredential(credential),
           expected_version: draft.version
         }, operationKey("provider-credential-replace"));
@@ -584,8 +584,8 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
             : (includeCredential || (draft.access_mode === "public" && draft.credential_requirement === "required" && credential.trim())) ? { credential: requestCredential(credential) } : {})
         };
         result = draft.version === 0
-          ? await providerSettingsApi.createConnection({ connection_id: connectionId, provider_code: draft.provider_code, ...body }, operationKey("provider-create"))
-          : await providerSettingsApi.updateConnection(connectionId, body, operationKey("provider-update"));
+          ? await api.createConnection({ connection_id: connectionId, provider_code: draft.provider_code, ...body }, operationKey("provider-create"))
+          : await api.updateConnection(connectionId, body, operationKey("provider-update"));
       }
       const item = result.payload.data;
       applyConnections([...connections.filter((connection) => connection.connection_id !== item.connection_id), item], item.connection_id);
@@ -610,7 +610,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
       || !ownPersonalCredential.trim()) return;
     setStatus({ kind: "saving", message: "내 개인 Provider 키를 다시 검증하는 중입니다." });
     try {
-      const result = await providerSettingsApi.replaceUserCredential(connectionId, {
+      const result = await api.replaceUserCredential(connectionId, {
         credential: requestCredential(ownPersonalCredential),
         expected_version: current.credential_version,
       });
@@ -632,7 +632,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     const ownsPreview = () => previewRequestRef.current === request && previewScopeRef.current === request.scope;
     setStatus({ kind: "saving", message: "모델 목록을 조회하는 중입니다." });
     try {
-      const result = await providerSettingsApi.previewModels({
+      const result = await api.previewModels({
         connection_id: draft.connection_id.trim(), provider_code: "CUSTOM",
         adapter_type: draft.adapter_type, base_url: draft.base_url.trim(),
         ...(credential.trim() ? { credential: requestCredential(credential) } : {}),
@@ -658,7 +658,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     if (!isSystemAdmin || busy) return;
     setStatus({ kind: "saving", message: "연결 상태 확인 주기를 저장하는 중입니다." });
     try {
-      const result = await providerSettingsApi.saveHealthSettings({
+      const result = await api.saveHealthSettings({
         interval_minutes: Number(healthIntervalDraft),
         expected_version: healthSettings.version,
       });
@@ -675,7 +675,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     setStatus({ kind: "saving", message: "개인 Provider 키를 삭제하는 중입니다." });
     try {
       const current = userCredentials[selectedConnection.connection_id];
-      await providerSettingsApi.deleteUserCredential(selectedConnection.connection_id, {
+      await api.deleteUserCredential(selectedConnection.connection_id, {
         expected_version: current.credential_version
       });
       setUserCredentials((items) => {
@@ -694,7 +694,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     if (!selectedConnection) return;
     setStatus({ kind: "saving", message: "Credential을 삭제하는 중입니다." });
     try {
-      await providerSettingsApi.deleteCredential(selectedConnection.connection_id, {
+      await api.deleteCredential(selectedConnection.connection_id, {
         expected_version: selectedConnection.version
       }, operationKey("provider-credential-delete"));
       setCredential("");
@@ -709,7 +709,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     if (!isSystemAdmin || !selectedConnection || !confirmDelete) return;
     setStatus({ kind: "saving", message: "Provider 연결을 삭제하는 중입니다." });
     try {
-      await providerSettingsApi.deleteConnection(selectedConnection.connection_id, {
+      await api.deleteConnection(selectedConnection.connection_id, {
         expected_version: selectedConnection.version
       }, operationKey("provider-connection-delete"));
       applyConnections(connections.filter((item) => item.connection_id !== selectedConnection.connection_id));
@@ -725,7 +725,7 @@ export function ProviderSettingsWorkspace({ workspaceId, embedded = false, showN
     if (!selectedConnection) return;
     setStatus({ kind: "saving", message: "모델 카탈로그를 새로고침하는 중입니다." });
     try {
-      const result = await providerSettingsApi.refreshCatalog(selectedConnection.connection_id, {
+      const result = await api.refreshCatalog(selectedConnection.connection_id, {
         expected_version: selectedConnection.version
       }, operationKey("provider-catalog-refresh"));
       const item = result.payload.data;

@@ -168,6 +168,8 @@ export const STUDIO_MESSAGES = Object.freeze({
 });
 
 export const STUDIO_ERRORS = Object.freeze({
+  AUTHENTICATION_REQUIRED: "로그인이 만료되었습니다. 다시 로그인한 뒤 저장된 작업을 여세요.",
+  ACCESS_EXPIRED: "로그인이 만료되었습니다. 다시 로그인한 뒤 저장된 작업을 여세요.",
   CHAT_EDIT_UNSUPPORTED: "이 자료는 대화로 수정할 수 없습니다.",
   CHAT_EDIT_BUSY: "앞선 수정 요청을 처리하고 있습니다. 끝난 뒤 다시 입력하세요.",
   CHAT_EDIT_STALE: "자료가 바뀌었습니다. 다시 지시해 주세요.",

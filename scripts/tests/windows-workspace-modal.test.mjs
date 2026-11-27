@@ -40,8 +40,10 @@ test("Operations and Settings report only persisted or confirmed state", async (
   const shell = await readFile(new URL("../../apps/desktop/src/desktop-shell.jsx", import.meta.url), "utf8");
   const operations = await readFile(new URL("../../apps/desktop/src/workspace-operations-modal.jsx", import.meta.url), "utf8");
   const settings = await readFile(new URL("../../apps/desktop/src/workspace-settings-modal.jsx", import.meta.url), "utf8");
-  assert.doesNotMatch(shell, /Offline · Cloud 연결/u);
-  assert.match(shell, /Cloud 인증됨/u);
+  const badge = shell.split('className="desktop-runtime-badge"')[1].split("</span>")[0];
+  assert.doesNotMatch(badge, /Offline|localService/u);
+  assert.match(badge, /Cloud 인증됨/u);
+  assert.match(operations, /onRetryLocalService/u);
   assert.match(operations, /settingsConfirmed/u);
   assert.match(operations, /readiness === "ready"/u);
   assert.doesNotMatch(operations, /selectedModelDeploymentId \? "● 준비"/u);

@@ -155,6 +155,28 @@ export function createWindowsWorkspaceAdapter(workspaceId, { invoke = nativeInvo
         return value;
       });
     },
+    async uploadSource(file, { signal } = {}) {
+      const types = {
+        pdf: "application/pdf", txt: "text/plain", md: "text/markdown", csv: "text/csv",
+        jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", wav: "audio/wav",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      };
+      const suffix = typeof file?.name === "string" && file.name.includes(".")
+        ? file.name.split(".").at(-1).toLowerCase() : "";
+      if (!Object.hasOwn(types, suffix) || !Number.isSafeInteger(file.size)
+          || file.size < 1 || file.size > PDF_MAX_BYTES || typeof file.arrayBuffer !== "function") {
+        throw fail("SOURCE_UPLOAD_INPUT_INVALID");
+      }
+      // Windows may label files with an installed application's MIME type. Rust and the
+      // server validate the actual format before a notebook can use the source.
+      signal?.throwIfAborted();
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (bytes.byteLength !== file.size) throw fail("SOURCE_UPLOAD_INPUT_INVALID");
+      return call("workspace_upload_pdf", { workspace_id: workspaceId, notebook_id: notebookId,
+        filename: file.name, mime_type: types[suffix], bytes: [...bytes] }, signal);
+    },
     async uploadPdf(file, { signal } = {}) {
       if (!file || file.type !== "application/pdf" || typeof file.name !== "string" || file.size < 5 || file.size > PDF_MAX_BYTES || typeof file.arrayBuffer !== "function") {
         throw fail("PDF_UPLOAD_INPUT_INVALID");

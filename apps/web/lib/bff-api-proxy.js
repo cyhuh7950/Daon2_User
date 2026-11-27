@@ -274,6 +274,14 @@ function authoringTemplateRoute(method, segments) {
 }
 
 function routeFor(method, segments) {
+  if (segments.length === 8 && segments[0] === "workspaces" && segments[2] === "notebooks"
+      && segments[4] === "source-preview" && segments[7] === "content"
+      && [1, 3, 5, 6].every((index) => SAFE_SEGMENT.test(segments[index]))) {
+    return method === "GET"
+      ? { path: "/api/v1/" + segments.map(encodeURIComponent).join("/"), query: new Set(), strictQuery: true,
+          responseMediaTypes: ["application/pdf", "text/plain"], maxResponseBytes: MAX_SOURCE_UPLOAD_BYTES }
+      : { methodRejected: true };
+  }
   if (segments.length === 2 && segments[0] === "admin" && segments[1] === "export-policy") {
     return method === "GET" || method === "PUT"
       ? { path: "/api/v1/admin/export-policy", query: new Set(), strictQuery: true, csrfProvenanceRequired: method === "PUT" } : { methodRejected: true };
@@ -1094,8 +1102,43 @@ function routeFor(method, segments) {
   return null;
 }
 
+const NATIVE_NOTEBOOK_FEATURES = new Set([
+  "studio", "model-selection", "question-tools", "source-groups", "source-discovery", "overview", "copies", "chat-history", "source-preview",
+]);
+const NATIVE_STUDIO_MEDIA = [
+  "application/json", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain", "text/markdown", "text/csv", "text/html", "text/vtt", "image/svg+xml", "image/png", "image/jpeg",
+  "audio/mpeg", "audio/wav", "video/mp4", "application/octet-stream",
+];
+
+function nativeNotebookRoute(method, segments) {
+  const workspaceSettings = segments[0] === "workspaces" && (
+    (segments.length === 3 && ["model-defaults", "output-version-settings", "egress-policy", "sync-operations", "daon-knowledge-scopes"].includes(segments[2]))
+    || (segments.length === 4 && segments[2] === "operations" && segments[3] === "status"));
+  const syncApproval = segments.length === 3 && segments[0] === "sync-operations" && segments[2] === "approve";
+  const providerRoute = segments[0] === "provider-credentials" || (segments[0] === "admin"
+    && ["provider-connections", "provider-health-settings", "provider-catalog", "provider-models", "model-reasoning"].includes(segments[1]));
+  if (workspaceSettings || syncApproval || providerRoute) return routeFor(method, segments);
+  if (segments[0] === "workspaces" && segments[2] === "notebooks" && (NATIVE_NOTEBOOK_FEATURES.has(segments[4]) || segments[4] === "knowledge-scopes")) {
+    return routeFor(method, segments);
+  }
+  if (method === "GET" && segments[0] === "knowledge-connectors") return knowledgeConnectorRoute(method, segments);
+  if (method === "POST" && segments.length === 2 && segments.join("/") === "session/step-up") return routeFor(method, segments);
+  return null;
+}
+
 function nativeRouteFor(method, segments, requestUrl) {
   const route = (path, options = {}) => ({ path, protected: true, ...options });
+  const notebook = nativeNotebookRoute(method, segments);
+  if (notebook && !notebook.methodRejected) {
+    return {
+      ...notebook, protected: true, requestMediaType: "application/json",
+      maxResponseBytes: notebook.maxResponseBytes ?? MAX_NATIVE_RECOVERY_RESPONSE_BYTES,
+      responseMediaTypes: notebook.responseMediaTypes ?? (segments[4] === "studio" && notebook.maxResponseBytes ? NATIVE_STUDIO_MEDIA : undefined),
+    };
+  }
+  if (notebook?.methodRejected) return notebook;
   let matched = null;
   if (segments.length === 3 && segments[0] === "auth" && segments[1] === "native" && segments[2] === "login") {
     matched = method === "POST" ? route("/api/v1/auth/native/login", { protected: false, requestMediaType: "application/json" }) : { methodRejected: true };
@@ -1122,7 +1165,7 @@ function nativeRouteFor(method, segments, requestUrl) {
       : { methodRejected: true };
   } else if (segments.length === 3 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "sources") {
     matched = new Set(["GET", "POST"]).has(method)
-      ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, method === "POST" ? { maxRequestBytes: MAX_SOURCE_UPLOAD_BYTES, requestMediaTypes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "audio/wav"] } : {})
+      ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/sources`, method === "POST" ? { maxRequestBytes: MAX_SOURCE_UPLOAD_BYTES, requestMediaTypes: ["application/pdf", "text/plain", "text/markdown", "text/csv", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "audio/wav"] } : {})
       : { methodRejected: true };
   } else if (segments.length === 4 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "processing-runs" && SAFE_SEGMENT.test(segments[3])) {
     matched = method === "GET"
@@ -1131,7 +1174,7 @@ function nativeRouteFor(method, segments, requestUrl) {
   } else if (segments.length === 4 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "questions" && segments[3] === "authorization") {
     matched = method === "POST" ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/questions/authorization`, { requestMediaType: "application/json" }) : { methodRejected: true };
   } else if (segments.length === 3 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "questions") {
-    matched = method === "POST" ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/questions`, { requestMediaType: "application/json" }) : { methodRejected: true };
+    matched = method === "POST" ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/questions`, { requestMediaType: "application/json", timeoutMs: 240_000, groundedQuestion: true }) : { methodRejected: true };
   } else if (segments.length === 5 && segments[0] === "workspaces" && SAFE_SEGMENT.test(segments[1]) && segments[2] === "citations" && SAFE_SEGMENT.test(segments[3]) && segments[4] === "content") {
     matched = method === "GET"
       ? route(`/api/v1/workspaces/${encodeURIComponent(segments[1])}/citations/${encodeURIComponent(segments[3])}/content`, { responseMediaTypes: ["application/pdf", "text/plain", "image/png", "image/jpeg", "application/json", "audio/wav"], maxResponseBytes: MAX_SOURCE_UPLOAD_BYTES })
@@ -1697,6 +1740,12 @@ export function createNativeBffProxy({ baseUrl, publicOrigin, fetchImpl = fetch,
     if (!route) return createBffSafeError(404, "RESOURCE_UNAVAILABLE", trace);
     if (route.methodRejected) return createBffSafeError(405, "METHOD_NOT_ALLOWED", trace);
     if (request.headers.has("cookie")) return createBffSafeError(400, "COOKIE_NOT_ALLOWED", trace);
+    if (route.strictQuery) {
+      const query = new URL(request.url).searchParams;
+      if ([...query.keys()].some((key) => !route.query.has(key) || query.getAll(key).length !== 1)
+        || (route.includeSourcesQuery && query.has("include_sources") && !["0", "1"].includes(query.get("include_sources")))
+        || (route.tableProfileQuery && !validTableProfileQuery(query))) return createBffSafeError(400, "INVALID_REQUEST", trace);
+    }
 
     const bearer = route.protected ? nativeBearer(request) : null;
     if (route.protected && !bearer) return createBffSafeError(401, "AUTHENTICATION_REQUIRED", trace);
@@ -1715,12 +1764,15 @@ export function createNativeBffProxy({ baseUrl, publicOrigin, fetchImpl = fetch,
       if (REQUEST_HEADERS.has(key.toLowerCase())) headers.set(key, value);
     }
     if (bearer) headers.set("authorization", `Bearer ${bearer}`);
+    if (route.studioExport && request.headers.has("x-daon-step-up-authorization")) {
+      headers.set("x-daon-step-up-authorization", request.headers.get("x-daon-step-up-authorization"));
+    }
     headers.set("x-trace-id", trace);
     headers.set("x-daon-bff-transport", "internal");
 
     const init = { method: request.method, headers, redirect: "manual" };
     const sensitiveValues = bearer ? [bearer] : [];
-    const abortScope = createAbortScope(request.signal, timeoutMs);
+    const abortScope = createAbortScope(request.signal, route.timeoutMs ?? timeoutMs);
     try {
       if (abortScope.signal.aborted) return cancellationError(abortScope, trace);
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -1743,7 +1795,8 @@ export function createNativeBffProxy({ baseUrl, publicOrigin, fetchImpl = fetch,
 
       let upstream;
       try {
-        upstream = await waitWithAbort(fetchImpl(destination, { ...init, signal: abortScope.signal }), abortScope.signal);
+        const forward = route.groundedQuestion && fetchImpl === fetch ? requestQuestionWithoutFetchTimeout : fetchImpl;
+        upstream = await waitWithAbort(forward(destination, { ...init, signal: abortScope.signal }), abortScope.signal);
       } catch {
         return cancellationError(abortScope, trace) ?? createBffSafeError(503, "GATEWAY_UNAVAILABLE", trace, true);
       }
@@ -1775,7 +1828,10 @@ export function createNativeBffProxy({ baseUrl, publicOrigin, fetchImpl = fetch,
       if (upstream.status !== 204) {
         const contentType = upstream.headers.get("content-type")?.toLowerCase() ?? "";
         const expectedTypes = route.responseMediaTypes ?? [route.expectsPdf ? "application/pdf" : "application/json"];
-        if (!expectedTypes.includes(exactMediaType(contentType))) return createBffSafeError(502, "GATEWAY_RESPONSE_REJECTED", trace);
+        if (!expectedTypes.includes(exactMediaType(contentType))
+          && !(upstream.status >= 400 && exactMediaType(contentType) === "application/json")) {
+          return createBffSafeError(502, "GATEWAY_RESPONSE_REJECTED", trace);
+        }
         try {
           body = await waitWithAbort(upstream.arrayBuffer(), abortScope.signal, () => upstream.body?.cancel());
         } catch {

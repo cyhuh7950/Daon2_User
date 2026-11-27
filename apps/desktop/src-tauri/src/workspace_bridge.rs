@@ -153,6 +153,24 @@ pub fn valid_pdf_upload_for_contract(filename: &str, mime_type: &str, bytes: &[u
         && bytes.starts_with(b"%PDF-")
 }
 
+fn valid_source_upload(filename: &str, mime_type: &str, bytes: &[u8]) -> bool {
+    if !valid_filename(filename) || !(1..=MAX_WORKSPACE_PDF_BYTES).contains(&bytes.len()) {
+        return false;
+    }
+    let Some((_, suffix)) = filename.rsplit_once('.') else { return false };
+    match (suffix.to_ascii_lowercase().as_str(), mime_type) {
+        ("pdf", "application/pdf") => valid_pdf_upload_for_contract(filename, mime_type, bytes),
+        ("txt", "text/plain") | ("md", "text/markdown") | ("csv", "text/csv") => true,
+        ("png", "image/png") => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        ("jpg" | "jpeg", "image/jpeg") => bytes.starts_with(b"\xff\xd8\xff"),
+        ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        | ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        | ("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation") => bytes.starts_with(b"PK\x03\x04"),
+        ("wav", "audio/wav") => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WAVE"),
+        _ => false,
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceListSourcesInput {
@@ -549,6 +567,8 @@ pub struct WorkspaceCitation {
     pub origin: String,
     pub context_item_id: String,
     pub locator: WorkspaceCitationLocator,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_name: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -565,9 +585,10 @@ impl WorkspaceCitation {
             && valid_id(&self.source_version_id)
             && valid_id(&self.evidence_span_id)
             && self.page >= 1
-            && matches!(self.origin.as_str(), "raw_source" | "daon_knowledge")
+            && matches!(self.origin.as_str(), "raw_source" | "daon_knowledge" | "mcp_daon_rag")
             && valid_id(&self.context_item_id)
-            && matches!(self.locator.kind.as_str(), "page" | "section")
+            && matches!(self.locator.kind.as_str(), "page" | "section" | "sheet_cell" | "image_region" | "docx_block" | "pptx_block" | "audio_segment")
+            && self.document_name.as_deref().is_none_or(|value| safe_text(value, 255))
             && safe_text(&self.locator.value, 255)
     }
 }
@@ -877,13 +898,13 @@ pub async fn workspace_upload_pdf(
     session: tauri::State<'_, NativeSessionRuntime>,
 ) -> Result<WorkspaceUploadResult, WorkspaceError> {
     if !valid_id(&input.workspace_id) || !valid_id(&input.notebook_id)
-        || !valid_pdf_upload_for_contract(&input.filename, &input.mime_type, &input.bytes)
+        || !valid_source_upload(&input.filename, &input.mime_type, &input.bytes)
     {
         input.bytes.zeroize();
         return Err(map_error("INVALID_REQUEST"));
     }
     let key = workspace_idempotency_key(
-        &format!("upload:{}:{}", input.workspace_id, input.filename),
+        &format!("upload:{}:{}:{}", input.workspace_id, input.notebook_id, input.filename),
         &input.bytes,
     )
     .map_err(map_error)?;
@@ -892,6 +913,7 @@ pub async fn workspace_upload_pdf(
         workspace_id: input.workspace_id.clone(),
         notebook_id: input.notebook_id,
         filename: input.filename,
+        mime_type: input.mime_type,
         bytes: Zeroizing::new(std::mem::take(&mut input.bytes)),
         idempotency_key: key,
     };
@@ -1232,6 +1254,7 @@ mod tests {
             Box::pin(async move {
                 assert_eq!(access, b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
                 let kind = match operation {
+                    NativeWorkspaceOperation::NotebookRequest { .. } => "notebook_request",
                     NativeWorkspaceOperation::ListNotebooks { .. } => "list_notebooks",
                     NativeWorkspaceOperation::CreateNotebook { .. } => "create_notebook",
                     NativeWorkspaceOperation::GetNotebook { .. } => "get_notebook",
@@ -1249,7 +1272,7 @@ mod tests {
                 };
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 self.kinds.lock().expect("contract kinds").push(kind);
-                Ok(NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.to_vec()) })
+                Ok(NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.to_vec()), headers: Vec::new() })
             })
         }
     }
@@ -1323,7 +1346,7 @@ mod tests {
             br#"{"data":{"sources":[],"unknown":true},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"}}"#.as_slice(),
             br#"{"data":{"sources":[]},"meta":{"trace_id":"trace-1","workspace_id":"workspace-1"},"access_credential":"secret"}"#.as_slice(),
         ] {
-            let response = NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(body.to_vec()) };
+            let response = NativeWorkspaceResponse { status: 200, content_type: Some("application/json".into()), citation_page: None, body: Zeroizing::new(body.to_vec()), headers: Vec::new() };
             assert!(parse_json::<SourceListData>(response, "workspace-1", false).is_err());
         }
     }
@@ -1357,7 +1380,7 @@ mod tests {
         })).unwrap();
         let response = NativeWorkspaceResponse {
             status: 200, content_type: Some("application/json".into()),
-            citation_page: None, body: Zeroizing::new(body),
+            citation_page: None, body: Zeroizing::new(body), headers: Vec::new(),
         };
         let data: SourceListData = parse_json(response, "workspace-1", false).unwrap();
         assert!(data.sources.iter().all(WorkspaceSource::valid));
@@ -1439,6 +1462,7 @@ mod tests {
                 content_type: Some("application/json".into()),
                 citation_page: None,
                 body: Zeroizing::new(body(replayed).into_bytes()),
+                headers: Vec::new(),
             };
             assert_eq!(
                 parse_json::<SourceListData>(response, "workspace-1", true).is_ok(),

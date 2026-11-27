@@ -5767,6 +5767,31 @@ def create_app(dependencies: RuntimeDependencies) -> FastAPI:
         }
         return _json_with_etag(content, json.dumps(content["data"], sort_keys=True))
 
+    @app.get("/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-preview/{source_id}/{source_version_id}/content")
+    async def get_notebook_source_preview(
+        id: str, notebook_id: str, source_id: str, source_version_id: str, request: Request,
+    ) -> Response:
+        _require_query_keys(request, frozenset())
+        principal = _principal(request, dependencies)
+        dependencies.authorization_service.authorize_action(
+            principal=principal, workspace_id=id, action=Action.VIEW,
+            trace_id=request.state.trace_id, policy_version=dependencies.settings.policy_version,
+        )
+        reader = getattr(citation_content_repository, "read_notebook_source_preview", None)
+        if reader is None:
+            raise QuestionRepositoryError("CITATION_CONTENT_UNAVAILABLE", status=503)
+        content = await asyncio.to_thread(
+            reader,
+            QuestionContext(principal.tenant_id, id, principal.user_id,
+                            request.state.trace_id, dependencies.settings.policy_version, notebook_id),
+            source_id, source_version_id,
+        )
+        return Response(
+            content=content.content, media_type=content.media_type,
+            headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                     "ETag": f'"source-preview:{hashlib.sha256(content.content).hexdigest()}"'},
+        )
+
     @app.get("/api/v1/workspaces/{id}/citations/{citation_id}/content")
     async def get_citation_content(
         id: str, citation_id: str, request: Request, notebook_id: str = Query(),

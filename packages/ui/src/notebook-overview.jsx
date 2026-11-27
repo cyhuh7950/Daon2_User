@@ -168,7 +168,7 @@ export function NotebookOverview({ studio, notebookId = null, refreshKey = null,
           const { citation } = part;
           if (typeof onOpenSource === "function") {
             return <button key={index} type="button" className="notebook-overview__cite" data-overview-citation={citation.label}
-              aria-label={citationText(citation, true)} title={citationText(citation, false)} onClick={() => onOpenSource({ ...citation })}>{citation.label}</button>;
+              aria-label={citationText(citation, true)} title={citationText(citation, false)} onClick={() => onOpenSource({ ...citation }, { stale: data.stale })}>{citation.label}</button>;
           }
           return <span key={index} className="notebook-overview__cite" data-overview-citation={citation.label} role="img"
             aria-label={citationText(citation, false)} title={citationText(citation, false)}>{citation.label}</span>;

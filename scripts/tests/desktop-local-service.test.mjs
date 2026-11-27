@@ -97,7 +97,8 @@ test("desktop bridge maps runtime error codes to stable user-visible Korean text
 test("desktop shell subscribes continuously and exposes mapped runtime text", async () => {
   const source = await read("apps/desktop/src/desktop-shell.jsx");
   assert.match(source, /watchLocalServiceStatus/);
-  assert.match(source, /describeLocalServiceState/);
+  const operations = await readFile(new URL("../../apps/desktop/src/workspace-operations-modal.jsx", import.meta.url), "utf8");
+  assert.match(operations, /describeLocalServiceState/);
   assert.doesNotMatch(source, /readLocalServiceStatus\(\)\.then/);
 });
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
@@ -11,10 +12,14 @@ from ..studio_v2_generation import GenerationContext
 from ..studio_workspace import StudioError
 
 
+from .diff import article_heading
+
 TERMS_BODY_RULES = (
     "약관 본문에는 개정 후 적용되는 조항만 쓰세요. 사용자가 명시한 변경·삭제를 기준 약관과 앞 소목차 요약보다 우선합니다. "
     "삭제 요청을 받은 내용은 인용 예시로도 본문에 옮기지 마세요. '이 조항을 삭제한다', '유지했다'와 같은 편집 설명을 약관 본문에 쓰지 마세요. "
-    "판단하기 어려운 변경은 open_items에 남기고 임의로 유지하거나 삭제하지 마세요."
+    "확정한 장에서 실제로 적용되는 조항만 쓰세요. 장을 설명하는 서론, 조항의 요약 재진술, 범위 밖 내용, 삭제한 조항은 본문에서 생략하세요. "
+    "기준 약관의 조 번호를 보존하고, 번호마다 제목과 본문을 한 번만 쓰세요. 각 조의 제목은 새 줄에서 시작하고 본문은 다음 줄에 쓰세요. "
+    "분량을 채우려고 내용을 반복하거나 새 조건을 추가하지 마세요. 근거가 부족한 내용과 판단하기 어려운 변경은 본문 대신 open_items에 남기세요."
 )
 
 _REVIEW_SYSTEM = (
@@ -56,6 +61,20 @@ def review_terms_body(ctx: GenerationContext, llm: StudioTextGenerator, *, chang
                       context_chars: int) -> list[dict[str, str]]:
     # 변경 요청은 검사 창마다 함께 전달한다. 한 창이 모델에 과도한 분량을 보내지 않게 한다.
     issues: dict[str, dict[str, str]] = {}
+    seen: set[tuple[int, int | None]] = set()
+    for unit in units:
+        for paragraph in unit["paragraphs"]:
+            for raw_line in paragraph["text"].splitlines():
+                line = raw_line.strip()
+                number = article_heading(line, allow_terminal_punctuation=True)
+                if number is None:
+                    continue
+                if number in seen:
+                    issues.setdefault(unit["key"], {
+                        "unit_key": unit["key"], "quote": line[:600],
+                        "reason": "같은 번호의 조항이 이미 작성됐습니다. 두 내용을 대조해 적용할 의무와 근거를 조항 하나에 통합하세요.",
+                    })
+                seen.add(number)
     for batch in _batches(units, max(4500, context_chars - len(changes) - len(_REVIEW_SYSTEM))):
         ctx.cancel_check()
         prompt = StudioPrompt(
@@ -72,7 +91,14 @@ def review_terms_body(ctx: GenerationContext, llm: StudioTextGenerator, *, chang
             if not isinstance(item, Mapping) or not all(isinstance(item.get(key), str) for key in ("unit_key", "quote", "reason")):
                 raise StudioError("STUDIO_VALIDATION_FAILED", 502)
             key, quote, reason = item["unit_key"], item["quote"].strip(), item["reason"].strip()
-            if not quote or not reason or not any(row["unit_key"] == key and quote in row["text"] for row in batch):
+            if not quote or not reason:
                 raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-            issues.setdefault(key, {"unit_key": key, "quote": quote[:600], "reason": reason[:300]})
+            # 모델이 편집기 줄바꿈을 공백으로 바꿔 인용할 수 있다. 같은 문단과 같은 단어만 인정하고,
+            # 화면과 후속 재작성에는 저장된 원문의 실제 문자열을 제공한다.
+            pattern = re.compile(r"\s+".join(re.escape(part) for part in quote.split()))
+            original = next((match.group(0) for row in batch if row["unit_key"] == key
+                             and (match := pattern.search(row["text"])) is not None), None)
+            if original is None:
+                raise StudioError("STUDIO_VALIDATION_FAILED", 502)
+            issues.setdefault(key, {"unit_key": key, "quote": original[:600], "reason": reason[:300]})
     return list(issues.values())

@@ -26,7 +26,7 @@ test("Windows Workspace Adapter는 정확한 7개 전용 Command만 호출한다
     return { studio_output_id: "output-1", output_version_id: "version-1", output_type: "evidence_report", title: "title", purpose: "purpose", status: "draft", content: "content", run_id: "run-1", run_result_id: "result-1", citations: [{ citation_id: "citation-1", source_id: "source-1", source_version_id: "version-1", evidence_span_id: "span-1", page: 1, origin: "raw_source", context_item_id: "source-1", locator: { kind: "page", value: "1" } }] };
   };
   const adapter = createWindowsWorkspaceAdapter("workspace-1", { invoke, notebookId: "notebook-1" });
-  assert.deepEqual(Object.keys(adapter).sort(), ["applyLicense", "askQuestion", "citationContent", "citationUrl", "createReport", "getLicense", "getProcessingStatus", "listSources", "listStudioOutputs", "uploadPdf"].sort());
+  assert.deepEqual(Object.keys(adapter).sort(), ["applyLicense", "askQuestion", "citationContent", "citationUrl", "createReport", "getLicense", "getProcessingStatus", "listSources", "listStudioOutputs", "uploadPdf", "uploadSource"].sort());
   await adapter.listSources();
   await adapter.uploadPdf({ name: "guide.pdf", type: "application/pdf", size: 5, arrayBuffer: async () => Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d]).buffer });
   await adapter.getProcessingStatus("run-1");
@@ -44,6 +44,26 @@ test("Windows Workspace Adapter는 정확한 7개 전용 Command만 호출한다
     const wire = JSON.stringify(args).toLowerCase();
     assert.doesNotMatch(wire, /"method"|"path"|"url"|"gateway"|"authorization"|"credential"|"password"/u);
   }
+});
+
+test("Windows의 CSV는 등록된 Windows MIME과 무관하게 노트북 파일로 전송된다", async () => {
+  const bytes = new TextEncoder().encode("부서,인원\n운영,2");
+  const adapter = createWindowsWorkspaceAdapter("workspace-1", {
+    notebookId: "notebook-1",
+    invoke: async (command, { input }) => {
+      assert.equal(command, "workspace_upload_pdf");
+      assert.equal(input.filename, "검수.csv");
+      assert.equal(input.mime_type, "text/csv");
+      assert.equal(input.notebook_id, "notebook-1");
+      assert.deepEqual(input.bytes, [...bytes]);
+      return { source_id: "source-1", source_version_id: "version-1", object_id: "a".repeat(32),
+        digest_sha256: "b".repeat(64), byte_size: bytes.length, status: "accepted", replayed: false,
+        processing_run_id: "run-1", processing_state: "queued", job_state: "queued" };
+    },
+  });
+  const source = await adapter.uploadSource({ name: "검수.csv", type: "application/vnd.ms-excel",
+    size: bytes.length, arrayBuffer: async () => bytes.buffer });
+  assert.equal(source.source_version_id, "version-1");
 });
 
 test("Windows Adapter source에는 WebView network와 내부주소가 없다", async () => {

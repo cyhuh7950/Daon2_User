@@ -704,6 +704,41 @@
         }
       }
     },
+    "/api/v1/workspaces/{id}/notebooks/{notebook_id}/source-preview/{source_id}/{source_version_id}/content": {
+      "get": {
+        "operationId": "getNotebookSourcePreview", "tags": ["Workspace"],
+        "summary": "노트북에 연결된 최신 PDF·텍스트 원문 미리보기",
+        "x-implementation-owner": "WO-N1-NB2-F2",
+        "parameters": [
+          { "$ref": "#/components/parameters/ResourceId" },
+          { "name": "notebook_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } },
+          { "name": "source_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } },
+          { "name": "source_version_id", "in": "path", "required": true, "schema": { "$ref": "#/components/schemas/OpaqueId" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified source bytes",
+            "headers": {
+              "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" },
+              "ETag": { "$ref": "#/components/headers/ETag" }
+            },
+            "content": {
+              "application/pdf": { "schema": { "type": "string", "format": "binary" } },
+              "text/plain": { "schema": { "type": "string" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "412": { "$ref": "#/components/responses/PreconditionFailed" },
+          "415": { "description": "Unsupported source type", "headers": { "X-Trace-Id": { "$ref": "#/components/headers/XTraceId" } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SafeErrorEnvelope" } } } },
+          "500": { "$ref": "#/components/responses/SafeFailure" },
+          "503": { "$ref": "#/components/responses/ServiceUnavailable" }
+        }
+      }
+    },
     "/api/v1/workspaces/{id}/notebooks/{notebook_id}/overview/regenerate": {
       "post": {
         "operationId": "regenerateNotebookOverview", "tags": ["Workspace"],

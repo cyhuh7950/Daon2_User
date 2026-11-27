@@ -1,6 +1,7 @@
+import { describeLocalServiceState } from "./local-service-bridge.js";
 import { WorkspaceModal } from "./workspace-modal.jsx";
 
-export function WorkspaceOperationsModal({ open, onClose, localService, offlineState, cloudState = "unknown" }) {
+export function WorkspaceOperationsModal({ open, onClose, localService, onRetryLocalService, offlineState, cloudState = "unknown" }) {
   const localOk = localService.state === "ready";
   const storageState = localService.storage_state ?? "unknown";
   const selectedModel = offlineState.models.find(
@@ -14,7 +15,7 @@ export function WorkspaceOperationsModal({ open, onClose, localService, offlineS
   return (
     <WorkspaceModal open={open} onRequestClose={onClose} title="운영상태" titleId="operations-dialog-title">
       <dl className="operations-status-list">
-        <div><dt>Local Service</dt><dd>{localOk ? "● 정상" : "▲ 주의"}</dd></div>
+        <div><dt>로컬 서비스</dt><dd>{describeLocalServiceState(localService)}</dd></div>
         <div><dt>Encrypted storage</dt><dd>{storageState === "unlocked" ? "◆ 연결됨" : storageState === "locked" ? "▲ unavailable" : "○ unknown"}</dd></div>
         <div><dt>Managed Local Model</dt><dd>{modelStatus}</dd></div>
         <div><dt>Cloud</dt><dd>{cloudStatus}</dd></div>
@@ -23,6 +24,7 @@ export function WorkspaceOperationsModal({ open, onClose, localService, offlineS
         <div><dt>Last checked</dt><dd>현재 Session</dd></div>
       </dl>
       {!localOk ? <p className="modal-inline-alert" role="alert">LOCAL_SERVICE_ATTENTION</p> : null}
+      {localService.retryable && onRetryLocalService ? <button type="button" onClick={onRetryLocalService}>로컬 서비스 다시 시도</button> : null}
       <button type="button" onClick={onClose}>확인</button>
     </WorkspaceModal>
   );

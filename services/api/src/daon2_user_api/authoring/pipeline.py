@@ -229,6 +229,7 @@ class AuthoringPipeline:
         goal = {k: v for k, v in session["inputs"].items() if isinstance(v, str)}
         sections = "\n".join(f"- {s['key']}: {s['title']} ({s.get('guidance', '')})" for s in template.sections)
         pages = session.get("target_pages")
+        notebook_terms = template.style == "terms" and bool(reference_sources)
         reference_outline = ""
         if reference_sources:
             sample = build_pack(reference_sources, budget_chars=self._context_chars // 2, focus=" ".join([*goal.values(), sections]))
@@ -237,13 +238,14 @@ class AuthoringPipeline:
             f"[요청] {session.get('request_text') or ''}\n[입력] {goal or '없음'}\n[목표 분량] {str(pages) + '페이지' if pages else '지정 없음'}\n"
             f"[템플릿 절. 이 절은 없앨 수 없고 key를 그대로 씁니다]\n{sections}\n"
             "[요구사항]\n" + ("\n".join(f"- {r['id']}: {r['text'][:120]}" for r in requirements[:60]) or "- 없음") +
-            reference_outline + "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요."),
+            reference_outline + ("\n각 장을 독립적인 작성 단위 하나로 정하세요. 장에 실제로 있는 조항과 사용자가 요청한 변경을 반영하는 데 필요한 분량만 정하세요."
+                                 if notebook_terms else "\n각 절의 소목차(subsections)를 정하고 소목차별 목표 글자 수(target_chars)를 정하세요. 소목차 하나는 1500자 이내로 하고, 목표 분량을 채우도록 필요한 만큼 나누세요.")),
             json_schema=OUTLINE_SCHEMA, max_output_tokens=2000, prompt_version="authoring-outline-v1", schema_name="authoring_outline")
         try:
             outline = self._llm.generate(ctx.context, prompt).data
         except (StudioError, ValueError, KeyError, TypeError):
             outline = {}  # 설계 호출이 실패하면 템플릿 절을 그대로 소목차로 쓴다.
-        units = build_units(template, outline, target_pages=pages)
+        units = build_units(template, outline, target_pages=pages, one_unit_per_section=notebook_terms)
         plan = plan_sections(units)
         if plan and requirements:
             plan[0]["requirement_ids"] = [r["id"] for r in requirements]
@@ -286,7 +288,8 @@ class AuthoringPipeline:
         return material
 
     def _write_unit(self, ctx: GenerationContext, session: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any], pack: ContextPack,
-                    knowledge: list[dict[str, Any]], reference_pack: ContextPack | None = None) -> dict[str, Any]:
+                    knowledge: list[dict[str, Any]], reference_pack: ContextPack | None = None, *,
+                    repair_issue: Mapping[str, str] | None = None) -> dict[str, Any]:
         if unit.get("material_approved"):
             kept = {item["ref"] for item in unit.get("material", [])}
             material = [row for row in knowledge if row["ref"] in kept]
@@ -313,9 +316,17 @@ class AuthoringPipeline:
         earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         system = f"{UNIT_SYSTEM}\n{TERMS_BODY_RULES}" if template.style == "terms" else UNIT_SYSTEM
+        correction = ""
+        if repair_issue is not None:
+            correction = (
+                "\n[검수 결과와 고쳐 쓸 본문]\n"
+                "아래 자료는 검사 대상입니다. 검수에 걸린 내용을 고치고 사용자가 요청한 나머지 조항과 근거는 유지하세요. "
+                "문제가 된 중복이나 충돌만 제거하고, 정상 조항의 번호는 보존하세요. 수정 과정 설명은 반환하지 마세요.\n"
+                + json.dumps({"issue": repair_issue, "paragraphs": unit["paragraphs"]}, ensure_ascii=False)
+            )
         prompt = StudioPrompt(system=system, user=(
             f"[작성할 소목차] {unit['title']}\n[절] {unit['section_title']}\n[목적] {unit['purpose']}\n[목표 글자 수] 약 {unit['target_chars']}자\n"
-            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}\n\n"
+            f"[사용자 입력] {inputs or '없음'}\n[요구사항]\n{requirement_lines or '없음'}\n[앞 소목차 요약]\n{earlier}\n[정해진 용어] {terms}{reference_role}{correction}\n\n"
             f"{pack.render()}\n" + (render_knowledge(material) if material else "[자료 없음]")),
             json_schema=UNIT_SCHEMA, max_output_tokens=min(1800, max(400, unit["target_chars"] * 2)), prompt_version="authoring-unit-v1", schema_name="authoring_unit")
         generation = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check)
@@ -412,12 +423,44 @@ class AuthoringPipeline:
             except StudioError:
                 return self._paused(current, "terms_review_unavailable")
             if issues:
-                return self._paused({**current, "terms_review": issues}, "terms_review")
+                current = self._repair_terms_units(ctx, current, template, pack, reference_sources, ref_offset, issues)
+                if current.get("pause_requested"):
+                    return self._paused(current, "user")
+                try:
+                    issues = review_terms_body(ctx, self._llm, changes=changes, units=current["units"], context_chars=self._context_chars)
+                except StudioError:
+                    return self._paused(current, "terms_review_unavailable")
+                if issues:
+                    return self._paused({**current, "terms_review": issues}, "terms_review")
         references = None
         if reference_sources:
             references = build_pack(reference_sources, budget_chars=sum(len(section.text) for source in reference_sources for section in source.sections),
                                     stable_ref_offset=ref_offset)
         return self._finish_units(ctx, current, template, pack, provider, references)
+
+    def _repair_terms_units(self, ctx, current, template, pack, reference_sources, ref_offset, issues):
+        issues_by_key = {issue["unit_key"]: issue for issue in issues}
+        for unit in current["units"]:
+            issue = issues_by_key.get(unit["key"])
+            if issue is None or unit.get("locked"):
+                continue
+            ctx.cancel_check()
+            if current.get("pause_requested"):
+                break
+            reference_pack = build_pack(reference_sources, budget_chars=self._context_chars // 2,
+                                        focus=f"{unit['section_title']} {unit['title']} {unit['purpose']}",
+                                        stable_ref_offset=ref_offset) if reference_sources else None
+            knowledge = copy.deepcopy(current.get("knowledge") or [])
+            try:
+                result = self._write_unit(ctx, current, template, unit, pack, knowledge, reference_pack, repair_issue=issue)
+            except (ExternalEvidenceError, StudioError):
+                continue
+            old_count = sum(para["text"].count(issue["quote"]) for para in unit["paragraphs"])
+            new_count = sum(para["text"].count(issue["quote"]) for para in result["paragraphs"])
+            if result["status"] == "done" and new_count < old_count:
+                result.pop("provider")
+                current = self._save_unit(ctx, current, unit["key"], result, knowledge)
+        return current
 
     def _save_unit(self, ctx: GenerationContext, session: dict[str, Any], key: str, result: Mapping[str, Any], knowledge: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         def merge(content: dict[str, Any]) -> dict[str, Any]:
@@ -437,17 +480,26 @@ class AuthoringPipeline:
 
     def _terms_units(self, ctx: GenerationContext, session: Mapping[str, Any], sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         """소목차가 정한 핵심 용어로 승인 온톨로지를 찾아 용어 사용을 점검한다."""
+        queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
+        return self._approved_terms(ctx, queries, sections)
+
+    def _approved_terms(self, ctx: GenerationContext, queries: Sequence[str], sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         base = {"id": "term_consistency", "title": "용어·일관성"}
         lookup = getattr(self._evidence, "concepts", None)
         if not callable(lookup):
             return {**base, "status": "skipped", "reason": "connector_not_registered"}
         try:
             target = self._evidence.prepare(ctx.context)
-            if target is None or target.daon2_connector_id is None:
+            if target is None:
+                connector = self._ops_connector(ctx)
+                reason = "connector_not_registered"
+                if connector and not connector.get("virtual") and connector["status"] == "verified":
+                    reason = "노트북에서 사용할 수 있는 승인 지식 범위가 없습니다"
+                return {**base, "status": "skipped", "reason": reason}
+            if target.daon2_connector_id is None:
                 return {**base, "status": "skipped", "reason": "connector_not_registered"}
-            queries = list(dict.fromkeys(term for unit in session["units"] for term in unit.get("terms", [])))
             concepts = lookup(target, queries)
-        except ExternalEvidenceError:  # 점검을 못 해도 작성된 문서를 실패로 만들지 않는다
+        except (ExternalEvidenceError, ConnectorError):  # 점검을 못 해도 작성된 문서를 실패로 만들지 않는다
             return {**base, "status": "skipped", "reason": "knowledge_unavailable"}
         return term_consistency(sections, concepts) if concepts else {**base, "status": "skipped", "reason": "no_approved_concepts"}
 
@@ -667,7 +719,11 @@ class AuthoringPipeline:
             connector = self._ops_connector(ctx)
             if connector is None:
                 return {"id": spec["id"], "title": spec["title"], "status": "skipped", "reason": "connector_not_registered"}
-            result = self._connectors.call(self._connector_ctx(ctx), connector, "ruleset_evaluate", {"ruleset_id": spec["ruleset_id"], "draft": draft}).structured["results"]
+            if not connector.get("virtual"):
+                # 실제 Daon2는 게시 규칙 UUID·승인 범위·구조화 사실을 받는다. 템플릿의 가상 규칙 ID로 본문을 보내지 않는다.
+                return {"id": spec["id"], "title": spec["title"], "status": "skipped",
+                        "reason": "실제 Daon2의 게시 RuleSet과 작성 항목이 연결되지 않았습니다"}
+            result = self._connectors.call(self._connector_ctx(ctx), connector["connector_id"], "ruleset_evaluate", {"ruleset_id": spec["ruleset_id"], "draft": draft}).structured["results"]
             return {"id": spec["id"], "title": spec["title"], "status": "done", "results": result}
         except (ConnectorError, McpError) as error:
             return {"id": spec["id"], "title": spec["title"], "status": "skipped", "reason": error.code}
@@ -714,9 +770,12 @@ class AuthoringPipeline:
             connector = self._ops_connector(ctx)
             if connector is None:
                 return {**base, "status": "skipped", "reason": "connector_not_registered"}
+            queries = list(dict.fromkeys([template.title, *[str(s["title"]) for s in sections][:8]]))
+            if not connector.get("virtual"):
+                return self._approved_terms(ctx, queries, sections)
             concepts: dict[str, Mapping[str, Any]] = {}
-            for query in dict.fromkeys([template.title, *[str(s["title"]) for s in sections][:8]]):
-                found = self._connectors.call(self._connector_ctx(ctx), connector, "ontology_search_concepts", {"query": query[:200], "limit": 20}).structured.get("concepts", [])
+            for query in queries:
+                found = self._connectors.call(self._connector_ctx(ctx), connector["connector_id"], "ontology_search_concepts", {"query": query[:200], "limit": 20}).structured.get("concepts", [])
                 for concept in found:
                     if isinstance(concept, Mapping) and concept.get("concept_id"):
                         concepts.setdefault(str(concept["concept_id"]), concept)
@@ -732,5 +791,9 @@ class AuthoringPipeline:
                 return item["connector_id"]
         return None
 
-    def _ops_connector(self, ctx: GenerationContext) -> str | None:
-        return self._connector_of_kind(ctx, "daon2")
+    def _ops_connector(self, ctx: GenerationContext) -> Mapping[str, Any] | None:
+        if self._connectors is None:
+            return None
+        candidates = [item for item in self._connectors.list(self._connector_ctx(ctx))
+                      if item["kind"] == "daon2" and item["status"] != "disabled"]
+        return next((item for item in candidates if not item.get("virtual")), candidates[0] if candidates else None)
