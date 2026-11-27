@@ -137,7 +137,17 @@ class PostgresStudioReportRepository:
                     "AND length(chunk->>'text')>0 AND chunk->>'text'=es.canonical_json->>'text')))) AS approved_knowledge,oq.last_safe_error_code,"
                     "EXISTS (SELECT 1 FROM index_versions agg WHERE agg.tenant_id=sv.tenant_id "
                     "AND agg.workspace_id=sv.workspace_id AND agg.source_version_id=sv.record_id "
-                    "AND agg.canonical_json->'lineage'->>'aggregation_only'='true') AS aggregation_only "
+                    "AND agg.canonical_json->'lineage'->>'aggregation_only'='true') AS aggregation_only, "
+                    "(s.state='ready' AND pr.record_id IS NULL AND EXISTS ("
+                    "SELECT 1 FROM index_versions ix JOIN object_records stored "
+                    "ON stored.tenant_id=ix.tenant_id AND stored.workspace_id=ix.workspace_id "
+                    "AND stored.object_id=sv.object_id AND stored.status='completed' "
+                    "WHERE ix.tenant_id=sv.tenant_id AND ix.workspace_id=sv.workspace_id "
+                    "AND ix.source_version_id=sv.record_id "
+                    "AND ix.canonical_json->>'strategy'='sync_original_text' "
+                    "AND ix.canonical_json->'lineage'->>'content_digest_sha256'=stored.digest_sha256 "
+                    "AND jsonb_array_length(CASE WHEN jsonb_typeof(ix.canonical_json->'chunks')='array' "
+                    "THEN ix.canonical_json->'chunks' ELSE '[]'::jsonb END)>0)) AS sync_original "
                     "FROM sources s "
                     "JOIN source_versions sv ON sv.tenant_id=s.tenant_id AND sv.workspace_id=s.workspace_id "
                     "AND sv.source_id=s.record_id JOIN notebook_bindings nb ON nb.tenant_id=sv.tenant_id "
@@ -167,13 +177,12 @@ class PostgresStudioReportRepository:
                 rows=accessible
         except CloudDatabaseError as error:
             raise StudioReportError("STUDIO_DATABASE_UNAVAILABLE", status=503, retryable=error.retryable) from None
-        # Approved knowledge is a directly registered/indexed OutputVersion
-        # snapshot, not a document-processing job. Reuse the existing public
-        # completion projection only when the catalog proves that exact path;
-        # never create a fake ProcessingRun/job or upgrade an unready upload.
+        # Approved knowledge and verified sync originals are indexed directly.
+        # Reuse the completion projection without creating a processing run.
         return tuple(WorkspaceSourceProjection(
             *(str(item) for item in row[:4]),
-            *(('completed', 'completed') if len(row) >= 7 and row[6] is True and row[3] == 'ready'
+            *(('completed', 'completed') if row[3] == 'ready' and (
+                (len(row) >= 7 and row[6] is True) or (len(row) >= 10 and row[9] is True))
               else (str(row[4]), str(row[5]))),
             str(row[7]) if len(row) >= 8 and row[7] and row[3] != 'ready' else None,
             True if len(row) >= 9 and row[8] is True and row[3] == 'ready' else None,

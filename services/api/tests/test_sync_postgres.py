@@ -13,6 +13,9 @@ from daon2_user_api.document_index_postgres import PostgresDocumentIndex
 from daon2_user_api.document_processing import DocumentProcessingContext
 from daon2_user_api.notebook import NotebookContext, NotebookService
 from daon2_user_api.notebook_postgres import PostgresNotebookRepository
+from daon2_user_api.question_answering_postgres import PostgresQuestionAnsweringRepository, QuestionContext
+from daon2_user_api.studio_report import StudioReportContext
+from daon2_user_api.studio_report_postgres import PostgresStudioReportRepository
 from daon2_user_api.sync_source_index import SyncSourceIndexer
 from daon2_user_api.object_queue import (
     ObjectQueueCoordinator, ObjectStorageError, ObjectSubmission, PostgresObjectQueueStore,
@@ -310,6 +313,15 @@ class PostgresSyncIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0].text, content.decode())
+        sources = PostgresStudioReportRepository(self.cloud).list_sources(
+            StudioReportContext(*args, notebook_id=notebook.notebook_id),
+        )
+        self.assertEqual(len(sources), 1)
+        self.assertEqual((sources[0].processing_state, sources[0].job_state), ("completed", "completed"))
+        preview = PostgresQuestionAnsweringRepository(self.cloud, self.storage).read_notebook_source_preview(
+            QuestionContext(*args, notebook_id=notebook.notebook_id), f"src-{object_id}", f"sv-{object_id}",
+        )
+        self.assertEqual(preview.content, content)
 
 
 if __name__ == "__main__":

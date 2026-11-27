@@ -776,7 +776,7 @@ export async function openNativeCitation(event, { adapter, citation, signal, reg
   return true;
 }
 
-function OverviewSourcePreview({ studio, preview, onClose }) {
+function SourceOriginalPreview({ studio, preview, onClose }) {
   const { source, page } = preview;
   const [content, setContent] = useState(null);
   useEffect(() => {
@@ -806,13 +806,13 @@ function OverviewSourcePreview({ studio, preview, onClose }) {
       if (url) URL.revokeObjectURL(url);
     };
   }, [studio, source, page]);
-  return <section className="citation-sheet-view" aria-label="개요 근거 원문">
+  return <section className="citation-sheet-view" aria-label="소스 원문">
     <button type="button" onClick={onClose}>원문 닫기</button>
     <strong>{source.filename}</strong>
     {!content ? <p role="status">원문을 불러오는 중입니다.</p> : content.error
       ? <p role="alert">원문을 확인할 수 없습니다.</p> : content.url
         ? <><a href={content.url} target="_blank" rel="noopener noreferrer">PDF 원문 새 창에서 열기</a>
-          <iframe title="개요 근거 PDF 원문" src={content.url} width="100%" height="450" /></>
+          <iframe title="PDF 원문" src={content.url} width="100%" height="450" /></>
         : <pre style={{ whiteSpace: "pre-wrap" }}>{content.text}</pre>}
   </section>;
 }
@@ -952,17 +952,22 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
     memoSourceRowRef.current?.scrollIntoView?.({ block: "nearest" });
     setMemoSourceFocusId(null);
   }, [memoSourceFocusId, viewState.sources]);
-  const [overviewSourcePreview, setOverviewSourcePreview] = useState(null);
+  const [sourcePreview, setSourcePreview] = useState(null);
+  const canOpenSourceOriginal = (source) => source.ready && /\.(pdf|csv|txt|md)$/iu.test(source.filename ?? "")
+    && typeof adapter?.studioV2?.getSourcePreview === "function";
+  const openSourceOriginal = (source, page = 1) => {
+    setSourcePreview({ source, page });
+    setNarrowTab("conversation");
+  };
   // 기간이 지난 개요는 같은 이름의 다른 버전을 원문으로 표시하지 않는다.
   const openOverviewSource = (citation, { stale } = {}) => {
     const sources = Array.isArray(viewState.sources) ? viewState.sources : [];
     const named = sources.filter((item) => (item.lawSnapshot?.title ?? item.websiteSnapshot?.title ?? item.filename) === citation?.source_title);
     const source = named.find((item) => item.ready) ?? named[0];
     if (!source) return;
-    if (!stale && named.length === 1 && source.ready && /\.(pdf|csv|txt|md)$/iu.test(source.filename ?? "")
-        && typeof adapter?.studioV2?.getSourcePreview === "function") {
+    if (!stale && named.length === 1 && canOpenSourceOriginal(source)) {
       const page = Number(citation.page);
-      setOverviewSourcePreview({ source, page: Number.isSafeInteger(page) && page > 0 ? page : 1 });
+      openSourceOriginal(source, Number.isSafeInteger(page) && page > 0 ? page : 1);
       return;
     }
     setNarrowTab("sources");
@@ -2332,6 +2337,8 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
                   <span className="source-file-icon" aria-hidden="true">{source.lawSnapshot?'LAW':source.websiteSnapshot?'WEB':'FILE'}</span><span className="source-row-copy"><strong>{source.lawSnapshot?.title ?? source.websiteSnapshot?.title ?? source.filename ?? source.sourceId}</strong><small>Version {source.sourceVersionId} · {source.lawCandidate?(source.lawSnapshot?'법령 수집·저장 완료':'법령 사용 불가'):source.websiteSnapshot?`웹 수집·저장 완료 · ${source.websiteSnapshot.fetched_at}`:SOURCE_STATE_LABELS[source.sourceState] ?? "상태 확인 필요"}</small></span><span className={`source-ready-dot ${source.ready ? "is-ready" : ""}`} aria-hidden="true" />
                 </button>
                 {groupControl}
+                {canOpenSourceOriginal(source) && <button type="button" className="source-action-trigger"
+                  aria-label={`${source.filename} 원문 보기`} onClick={() => openSourceOriginal(source)}>원문</button>}
                 <button type="button" className="source-action-trigger" title="Source 작업" aria-label={`${source.filename ?? source.sourceId} 작업`} onClick={() => { setSourceAction(source); setSourceActionKind("unbind"); setSourceActionSafeError(null); }}><StudioIcon name="more_vertical" size={18} /></button>
                 <MemoOriginBadge origin={source.memoOrigin} name={source.filename ?? source.sourceId} onOpen={openMemoFromSource} />
                 {source.aggregationOnly && <AggregationOnlyBadge />}
@@ -2423,10 +2430,10 @@ function ProductWorkspaceShellInner({ workspaceId, notebookTitle = null, state =
           {questionScopeNotice ? <div className="context-selection-status" role="status">{questionScopeNotice}</div> : null}
           <NotebookOverview studio={adapter?.studioV2} notebookId={adapter?.notebookContext?.notebook_id ?? null} refreshKey={overviewRefreshKey}
             onAskQuestion={fillQuestionFromOverview} onOpenSource={openOverviewSource} />
-          {overviewSourcePreview && viewState.sources.some(source => source.ready
-            && source.sourceVersionId === overviewSourcePreview.source.sourceVersionId) && <OverviewSourcePreview studio={adapter.studioV2} preview={overviewSourcePreview}
-            key={`${overviewSourcePreview.source.sourceVersionId}:${overviewSourcePreview.page}`}
-            onClose={() => setOverviewSourcePreview(null)} />}
+          {sourcePreview && viewState.sources.some(source => canOpenSourceOriginal(source)
+            && source.sourceVersionId === sourcePreview.source.sourceVersionId) && <SourceOriginalPreview studio={adapter.studioV2} preview={sourcePreview}
+            key={`${sourcePreview.source.sourceVersionId}:${sourcePreview.page}`}
+            onClose={() => setSourcePreview(null)} />}
           {questionPending && !viewState.turns?.length ? <div className="context-selection-status" role="status">답변을 기다리고 있습니다.</div> : null}
           {(() => {
             const turns = viewState.turns?.length ? viewState.turns

@@ -325,6 +325,23 @@ class StudioReportPostgresTests(unittest.TestCase):
         self.assertIn("ORDER BY created_at DESC,record_id DESC", connection.statement)
         self.assertIn("processing_run_id=pr.record_id", connection.statement)
 
+    def test_source_list_projects_completed_for_verified_sync_original_index(self) -> None:
+        connection = FakeConnection(source_rows=(
+            ("source-md", "version-md", "sync.md", "ready", "accepted", "pending", False, None, False, True),
+            ("source-pdf", "version-pdf", "sync.pdf", "ready", "accepted", "pending", False, None, False, True),
+            ("source-upload", "version-upload", "upload.pdf", "ready", "accepted", "pending", False, None, False, False),
+            ("source-unready", "version-unready", "sync.md", "processing", "processing", "pending", False, None, False, True),
+        ))
+        sources = PostgresStudioReportRepository(FakeCloud(connection)).list_sources(self.context)
+        self.assertEqual([(source.processing_state, source.job_state) for source in sources], [
+            ("completed", "completed"), ("completed", "completed"),
+            ("accepted", "pending"), ("processing", "pending"),
+        ])
+        sql = connection.statements[0][0]
+        for predicate in ("sync_original_text", "content_digest_sha256", "stored.status='completed'",
+                          "ix.source_version_id=sv.record_id", "pr.record_id IS NULL"):
+            self.assertIn(predicate, sql)
+
     def test_registered_knowledge_projection_requires_verified_catalog_flag_and_ready_source(self) -> None:
         class ProjectionConnection(FakeConnection):
             def execute(self, sql, params=()):
