@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from daon2_user_api import runtime
 from daon2_user_api.authoring import session
+from daon2_user_api.authoring.export import authored_elements
 from daon2_user_api.authoring.pipeline import AuthoringPipeline
 from daon2_user_api.authoring.service import AuthoringGenerator, AuthoringService
 from daon2_user_api.authoring.templates import AuthoringError, TemplateRegistry
@@ -316,6 +317,98 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     else:
         assert PROPOSAL in body
         assert ("부록 A. 요구사항 대응표" in body) == (template == "rfp_response_proposal")
+        assert "price_schedule: [작성 필요]" in completed["document"]["open_items"]
+        assert "미결 항목 없음" not in body
+        if template == "rfp_response_proposal":
+            coverage = completed["document"]["coverage"]
+            assert coverage
+            assert {row["section_key"] for row in coverage} <= {section["key"] for section in completed["document"]["sections"]}
+
+
+@pytest.mark.parametrize(("claim", "warning"), [
+    ("이 사업은 목록 999건을 처리한다.", "ANCHOR_MISMATCH"),
+    ("현행 검색과 반출 과정에 일부 불편이 있다.", "UNSUPPORTED_SOURCE_CLAIM"),
+    ("현행 검색 절차를 검토하고 개선안을 제안한다.", None),
+    ("현행 검색과 반출은 별도 화면에서 처리한다.", None),
+])
+def test_proposal_grounding_requires_correction_before_resume(writing, monkeypatch, claim, warning):
+    client, repo, model, worker = writing
+    generate = model.generate
+    calls = []
+
+    def generate_with_claim(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            calls.append(prompt.user)
+            if len(calls) == 2:
+                result.data["paragraphs"][0]["text"] = claim
+        return result
+
+    monkeypatch.setattr(model, "generate", generate_with_claim)
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"})
+    output = PATH + "/" + opened.json()["data"]["output_id"]
+    assert client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "도서관 업무 절차 개선. 현행 검색과 반출은 별도 화면에서 처리한다."},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": review["plan"]["sections"][:2]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    current = client.get(output).json()["data"]
+    assert len(calls) >= 2
+    if warning is None:
+        assert current["state"] == "completed"
+        return
+    assert current["state"] == "paused"
+    assert current["units"][0]["status"] == "done"
+    unit = current["units"][1]
+    assert unit["status"] == "needs_review"
+    assert [item["code"] for item in unit["warnings"]] == [warning]
+    control = output + "/control"
+    assert client.post(control, json={"action": "resume", "expected_revision": current["revision_no"]}).status_code == 409
+    assert not repo.jobs
+    assert client.get(output).json()["data"] == current
+    assert client.put(output + "/units/" + unit["key"], json={"expected_revision": current["revision_no"],
+                                                              "paragraphs": [claim, "다른 문장 추가"]}).status_code == 422
+    assert client.put(output + "/units/" + unit["key"], json={"expected_revision": current["revision_no"],
+                                                              "paragraphs": [PROPOSAL]}).status_code == 202
+    edited = client.get(output).json()["data"]
+    assert client.post(control, json={"action": "resume", "expected_revision": edited["revision_no"]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    final = client.get(output).json()["data"]
+    assert final["state"] == "completed"
+    assert final["units"][0] == current["units"][0]
+    assert final["units"][1]["paragraphs"] == [{"text": PROPOSAL, "refs": [], "origin": "user"}]
+    assert not final["units"][1]["warnings"]
+    assert len(calls) == 2
+
+
+def test_docx_uses_existing_subsection_for_legacy_coverage():
+    sections = [
+        {"key": "schedule__u1", "title": "운영 개요", "paragraphs": [{"text": "사용자를 안내한다."}]},
+        {"key": "schedule__u2", "title": "검수 일정", "paragraphs": [{"text": "8주 안에 납품을 완료한다."}]},
+    ]
+    doc = {"title": "제안서", "sections": sections, "coverage": [
+        {"requirement_id": "REQ-001", "text": "8주 안에 납품한다.", "section_key": "schedule", "status": "covered"},
+    ]}
+    output = {"type_id": "authored_document", "output_id": "fixture", "title": doc["title"], "revision": {"content": {"document": doc}}}
+    table = next(entry[1] for entry in authored_elements(output) if entry[0] == "table")
+    assert table[1][2] == "검수 일정"
+    with ZipFile(io.BytesIO(export_v2("docx", output).content)) as archive:
+        assert "검수 일정</w:t>" in archive.read("word/document.xml").decode()
+
+
+@pytest.mark.parametrize(("analysis", "key"), [("rfp_requirements", "proposer_profile"), ("base_document", "price_schedule")])
+def test_legacy_proposal_docx_keeps_skipped_inputs_open(analysis, key):
+    doc = {"title": "제안서", "analysis": analysis, "sections": [], "open_items": [],
+           "assumptions": [{"key": key, "reason": "user_skipped", "default": "[작성 필요]"}]}
+    output = {"type_id": "authored_document", "output_id": "fixture", "title": doc["title"], "revision": {"content": {"document": doc}}}
+    with ZipFile(io.BytesIO(export_v2("docx", output).content)) as archive:
+        body = archive.read("word/document.xml").decode()
+    assert f"{key}: [작성 필요]" in body
+    assert "미결 항목 없음" not in body
 
 
 def _generate_payment_terms(writing):

@@ -13,6 +13,9 @@ const UNIT_LABEL = { pending: msg("authoring.unit.pending"), done: msg("authorin
 const REASON_LABEL = { user: msg("authoring.reason.user"), needs_review: msg("authoring.reason.needs_review"), unit_failed: msg("authoring.reason.unit_failed"),
   material_review: msg("authoring.reason.material_review"), terms_review: msg("authoring.reason.terms_review"),
   terms_review_unavailable: msg("authoring.reason.terms_review_unavailable") };
+const GROUNDING_WARNINGS = new Set(["ANCHOR_MISMATCH", "UNSUPPORTED_SOURCE_CLAIM"]);
+const groundingWarnings = (unit) => unit.status === "needs_review"
+  ? (unit.warnings ?? []).filter((warning) => GROUNDING_WARNINGS.has(warning.code)) : [];
 const PAGE_CHOICES = [1, 5, 10, 20];
 const STATUS_LABEL = { covered: msg("authoring.coverage.covered"), partial: msg("authoring.coverage.partial"), missing: msg("authoring.coverage.missing") };
 const POLL_MS = 3000;
@@ -228,7 +231,8 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
   const units = session.units ?? [];
   const termsReview = session.terms_review ?? [];
   const paused = session.state === "paused";
-  const finished = units.filter((unit) => unit.status === "done" || unit.status === "needs_review").length;
+  const groundingReview = units.some((unit) => groundingWarnings(unit).length > 0);
+  const finished = units.filter((unit) => unit.status === "done" || (unit.status === "needs_review" && !groundingWarnings(unit).length)).length;
   const change = units.map((unit) => titles[unit.key] !== undefined && titles[unit.key] !== unit.title ? { key: unit.key, title: titles[unit.key] } : { key: unit.key });
   const changed = change.some((item) => item.title !== undefined);
   const preview = async () => setImpact(await onOutline(change, false));
@@ -237,11 +241,11 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
   const titleOf = (key) => units.find((unit) => unit.key === key)?.title ?? key;
   return <div aria-label={msg("authoring.units")}>
     <p role="status">{msg("authoring.units.progress", { done: finished, total: units.length })}</p>
-    {paused && session.pause_reason && <p role="status">{REASON_LABEL[session.pause_reason]}</p>}
+    {paused && session.pause_reason && <p role="status">{groundingReview ? msg("authoring.reason.grounding_review") : REASON_LABEL[session.pause_reason]}</p>}
     {session.pause_requested && !paused && <p role="status">{msg("authoring.pause.requested")}</p>}
     <div className="studio-row">
       {session.state === "generating" && <button type="button" className="studio-btn" disabled={busy || session.pause_requested} onClick={onPause}>{msg("authoring.pause")}</button>}
-      {paused && <button type="button" className="studio-btn studio-btn--primary" disabled={busy || termsReview.length > 0} onClick={onResume}>{msg("authoring.resume")}</button>}
+      {paused && <button type="button" className="studio-btn studio-btn--primary" disabled={busy || termsReview.length > 0 || groundingReview} onClick={onResume}>{msg("authoring.resume")}</button>}
     </div>
     <ol>{units.map((unit) => <li key={unit.key}>
       {paused ? <input aria-label={msg("authoring.unit.title", { title: unit.title })} value={titles[unit.key] ?? unit.title} maxLength={120} onChange={(event) => { const value = event.target.value; setImpact(null); setTitles((old) => ({ ...old, [unit.key]: value })); }} /> : <strong>{unit.title}</strong>}
@@ -251,7 +255,7 @@ function UnitProgress({ session, busy, onPause, onResume, onEdit, onOutline, onR
       </div>)}
       {paused && unit.status === "material_review" && <MaterialChoice unit={unit} busy={busy} onApply={onMaterial} />}
       {paused && unit.paragraphs?.length > 0 && editing !== unit.key && <>
-        {unit.paragraphs.map((paragraph, index) => <p key={index}>{paragraph.text}</p>)}
+        {unit.paragraphs.map((paragraph, index) => <p key={index} className={groundingWarnings(unit).some((warning) => warning.path === `units.${unit.key}.p${index}`) ? "studio-warning" : undefined}>{paragraph.text}</p>)}
         <button type="button" className="studio-btn" disabled={busy} onClick={() => { setEditing(unit.key); setDraft(unit.paragraphs.map((paragraph) => paragraph.text).join("\n\n")); }}>{msg("authoring.unit.edit")}</button>
         {!unit.locked && <button type="button" className="studio-btn" disabled={busy} onClick={() => onRedo(unit.key)}>{msg("authoring.unit.redo")}</button>}
       </>}

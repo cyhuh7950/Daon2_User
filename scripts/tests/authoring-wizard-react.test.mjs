@@ -328,6 +328,24 @@ test("멈춘 뒤 사유가 보이고 이어서 작성을 요청한다", async ()
   } finally { await view.close(); }
 });
 
+test("근거가 불일치한 문단을 표시하고 수정 전에는 이어서 작성을 막는다", async () => {
+  const session = agent("paused", { pause_reason: "needs_review", revision_no: 9 });
+  const unit = session.units.find((item) => item.status === "needs_review");
+  unit.warnings = [{ code: "UNSUPPORTED_SOURCE_CLAIM", path: `units.${unit.key}.p0` }];
+  const studio = withControls(fakeStudio([session]));
+  const view = await mount(studio, { outputId: OID });
+  try {
+    await view.flush();
+    assert.match(text(view), /근거와 일치하지 않는 문단/u);
+    assert.ok(findElements(view.container, (node) => node.tagName === "P" && reactProps(node)?.className === "studio-warning")
+      .some((node) => node.textContent === unit.paragraphs[0].text));
+    const resume = buttonByText(view.container, "이어서 작성");
+    assert.equal(resume.disabled, true);
+    await view.click(resume);
+    assert.equal(studio.calls.some(([action]) => action === "control"), false);
+  } finally { await view.close(); }
+});
+
 test("약관 본문 충돌 문장과 이유를 표시하고 수정 전에는 이어서 작성을 막는다", async () => {
   const studio = withControls(fakeStudio([agent("paused", { style: "terms", pause_reason: "terms_review", revision_no: 9,
     terms_review: [{ unit_key: "s1__u1", quote: "증서는 인편으로 배달한다.", reason: "삭제 요청한 조항을 유지했습니다." }] })]));
