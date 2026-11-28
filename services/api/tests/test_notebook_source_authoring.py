@@ -332,6 +332,8 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     ("현행 검색과 반출은 별도 화면에서 처리한다.", None),
     ("현재 운영 현황은 포함하지 않는다.", None),
     ("다만 현재 사업의 일정·가격·담당자는 확정하지 않으며, 이 부분은 미결로 남긴다.", None),
+    ("발주 배경은 명시돼 있지 않으며, 시범 운영에서는 단계별 인수 목록을 사용한다.", None),
+    ("제안사 정보와 가격은 현재 미결로 둔다.", None),
     ("현재 운영 현황은 불안정하지만 가격은 확정하지 않는다.", "UNSUPPORTED_SOURCE_CLAIM"),
 ])
 def test_proposal_grounding_requires_correction_before_resume(writing, monkeypatch, claim, warning):
@@ -433,9 +435,39 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
     from daon2_user_api.document_understanding_adapter import _evidence_anchors
 
     source = _evidence_anchors("Digitize 240 catalogue records. Verify 30 samples. Delivery in eight weeks. Retain the three-phase structure.")
-    assert _evidence_anchors("목록 240건, 표본 30건, 8주, 3단계").issubset(source)
+    assert _evidence_anchors("목록 240건, 표본 30개, 8주, 3단계").issubset(source)
     for wrong in ("목록 241건", "표본 31건", "8개월", "4단계"):
         assert not _evidence_anchors(wrong).issubset(source)
+
+
+def test_proposal_last_recovery_rejects_paragraph_that_is_not_an_exact_excerpt(writing, monkeypatch):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def non_excerpt(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            if "[원문만 사용해 다시 작성]" in prompt.user:
+                result.data["paragraphs"][0]["text"] = "별도의 미확인 요건을 사업에 추가한다."
+            else:
+                result.data["paragraphs"][0]["text"] = "현재 사업은 999개 특수 장비를 사용한다."
+        return result
+
+    monkeypatch.setattr(model, "generate", non_excerpt)
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"}).json()["data"]
+    path = PATH + "/" + opened["output_id"]
+    assert client.post(path + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "도서관 업무 절차 개선"},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(path).json()["data"]
+    assert client.put(path + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                              "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(path).json()["data"]
+    assert result["state"] == "paused"
+    assert result["document"] is None
 
 
 def test_proposal_keeps_grounded_body_and_moves_unreferenced_unknowns_to_open_items(writing, monkeypatch):

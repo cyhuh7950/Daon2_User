@@ -31,7 +31,7 @@ _UNIT_KIND = {
     "hour": "hour", "hours": "hour", "시간": "hour",
     "minute": "minute", "minutes": "minute", "분": "minute",
     "second": "second", "seconds": "second", "초": "second",
-    "item": "item", "items": "item", "건": "item",
+    "item": "item", "items": "item", "건": "item", "개": "item",
     "catalogue record": "item", "catalogue records": "item", "catalog record": "item", "catalog records": "item",
     "sample": "item", "samples": "item",
     "phase": "phase", "phases": "phase", "단계": "phase",
