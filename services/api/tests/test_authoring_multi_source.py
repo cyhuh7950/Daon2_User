@@ -61,7 +61,7 @@ class ScanRequirementsTests(unittest.TestCase):
         self.assertTrue(any("240" in text for text in texts))
         self.assertTrue(any("author" in text for text in texts))
         self.assertFalse(any("Synthetic" in text for text in texts))
-        originals, _ = scan([rfp])
+        originals, _ = scan([rfp], Llm({1: ["Synthetic fixture only. No personal data or commercial commitments."]}))
         self.assertEqual(len(originals), 16)
         self.assertEqual([row["text"] for row in originals[1:8]], [
             "search by title", "search by author", "export catalogue CSV",

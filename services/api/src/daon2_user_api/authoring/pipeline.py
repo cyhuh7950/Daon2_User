@@ -946,6 +946,11 @@ class AuthoringPipeline:
             if status == "missing" and not key and not quote:
                 row.update(section_key=None, status="missing", score=0.0)
             elif status in ("covered", "partial") and len(quote) >= 10 and any(quote in p for p in passages.get(key, [])):
+                warnings = Warnings()
+                check_anchors(row["text"], ["Q"], ContextPack((Passage("Q", "", "", "", None, "page", "", None, quote),), False, 0),
+                              warnings, "coverage")
+                if warnings.items:
+                    status = "partial"
                 row.update(section_key=key, status=status, score=1.0 if status == "covered" else 0.5)
             else:
                 continue
