@@ -47,6 +47,10 @@ _SCOPE_NOTE = re.compile(
     rf"{_PENDING_FIELD}(?:\s*[·,]\s*{_PENDING_FIELD})*(?:은|는|을|를)\s+"
     r"(?:포함|기재|작성|확정)하지\s+않(?:는다|습니다|으며,\s*이\s*부분은\s*미결로\s*남긴다)[.。]?"
 )
+_MISSING_PROPOSAL_INPUT = re.compile(
+    r"현재 입력 범위에서는?\s+(?:세부 인원|투입 인원|담당자|제안사 정보|가격|사업비|착수일|완료일)"
+    r"(?:은|는|을|를)?\s+(?:제시|확정|기재)할 수 없(?:다|습니다)[.。]?$"
+)
 _SYNTHETIC_PROPOSAL_TITLE = re.compile(r"(?im)^\s*(?:[A-Z]{2,}\d+\s+)?synthetic\s+(?:reference\s+)?proposal\b[^\n]*")
 _REFERENCE_PARTY = re.compile(
     r"(?im)\b(?P<role>delivery owner|review owner|client name|customer name|고객명|발주처명|납품 담당 조직|검토 담당 조직)"
@@ -569,11 +573,15 @@ class AuthoringPipeline:
                 if not refs and any(marker in text for marker in (NO_MATERIAL, PLACEHOLDER)):
                     explicit_gaps.append({"text": text, "refs": [], "origin": "new"})
                     continue
-                if refs and NO_MATERIAL in text:
+                if refs and (NO_MATERIAL in text or "현재 입력 범위" in text):
                     sentences = split_sentences(text)
-                    explicit_gaps.extend({"text": sentence, "refs": [], "origin": "new"}
-                                         for sentence in sentences if NO_MATERIAL in sentence)
-                    text = " ".join(sentence for sentence in sentences if NO_MATERIAL not in sentence)
+                    kept = []
+                    for sentence in sentences:
+                        if NO_MATERIAL in sentence or _MISSING_PROPOSAL_INPUT.search(sentence):
+                            explicit_gaps.append({"text": sentence, "refs": [], "origin": "new"})
+                        else:
+                            kept.append(sentence)
+                    text = " ".join(kept)
                     if not text:
                         continue
             path = f"units.{unit['key']}.p{len(paragraphs)}"

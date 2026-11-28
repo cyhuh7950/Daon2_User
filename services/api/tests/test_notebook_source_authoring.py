@@ -594,6 +594,7 @@ def test_rfp_preserves_grounded_body_but_moves_explicit_missing_material_to_open
     for data in (
         [{"text": body, "refs": ["S1"]}, {"text": gap, "refs": []}],
         [{"text": f"{body} {gap}", "refs": ["S1"]}],
+        [{"text": f"{body} 확정된 조직은 별도 명단이 필요하여 현재 입력 범위에서는 세부 인원을 제시할 수 없다.", "refs": ["S1"]}],
     ):
         paragraphs, warnings, pending = AuthoringPipeline._checked_unit_paragraphs(
             {"paragraphs": data}, template, unit, pack, [], {})
