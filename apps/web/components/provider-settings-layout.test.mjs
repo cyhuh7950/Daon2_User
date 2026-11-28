@@ -42,3 +42,14 @@ test("provider styles load with the shared component for standalone and embedded
   const component = readFileSync(fileURLToPath(new URL("./provider-settings-workspace.jsx", import.meta.url)), "utf8");
   assert.match(component, /import ["']\.\.\/app\/settings\/model-connections\/provider-settings\.css["']/u);
 });
+
+test("shared workspace selects use theme colors regardless of web CSS load order", () => {
+  const workspaceCss = postcss.parse(readFileSync(new URL("../../../packages/ui/src/workspace.css", import.meta.url), "utf8"));
+  const colors = {};
+  workspaceCss.walkRules("select", (rule) => {
+    if (rule.parent.type !== "root") return;
+    rule.walkDecls((declaration) => { colors[declaration.prop] = declaration.value; });
+  });
+  assert.equal(colors.background, "var(--daon-color-surface)");
+  assert.equal(colors.color, "var(--daon-color-text-primary)");
+});
