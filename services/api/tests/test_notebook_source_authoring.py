@@ -477,15 +477,15 @@ def test_reference_proposal_prompt_keeps_roles_and_work_without_prior_names():
     assert "Old Delivery Team" in original.text
 
 
-def test_cross_language_rfp_coverage_links_only_quotes_present_in_cited_body():
+def test_cross_language_rfp_coverage_links_only_paragraphs_present_in_cited_body():
     from daon2_user_api.authoring.pipeline import AuthoringPipeline
 
     body = "도서관 담당자가 목록을 CSV로 내보내도록 실습을 진행한다."
     sample = "검수 단계에서 표본 31건을 확인한다."
     findings = [
-        {"id": "REQ-001", "status": "covered", "section_key": "approach__u1", "quote": body},
-        {"id": "REQ-002", "status": "covered", "section_key": "approach__u1", "quote": "본문에 없는 최종 검수 근거"},
-        {"id": "REQ-003", "status": "covered", "section_key": "approach__u1", "quote": sample},
+        {"id": "REQ-001", "status": "covered", "paragraph_id": "P1"},
+        {"id": "REQ-002", "status": "covered", "paragraph_id": "P999"},
+        {"id": "REQ-003", "status": "covered", "paragraph_id": "P2"},
     ]
     llm = SimpleNamespace(generate=lambda *_args, **_kwargs: SimpleNamespace(data={"rows": findings}))
     pipeline = AuthoringPipeline(None, None, llm, None, lambda *_: {})
