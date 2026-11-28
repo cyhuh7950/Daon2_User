@@ -43,6 +43,10 @@ _WORD_QUANTITY = re.compile(
     rf"(?<![a-z0-9_-])(?P<number>{'|'.join(_WORD_NUMBERS)})[ -]+(?P<unit>{_UNIT_PATTERN})(?![a-z])"
 )
 _PHASE_ORDINAL = re.compile(rf"\bphase\s+(?P<number>\d+|{'|'.join(_WORD_NUMBERS)})\b")
+_KOREAN_WEEK_NUMBERS = dict(zip("한 두 세 네 다섯 여섯 일곱 여덟 아홉 열".split(), range(1, 11)))
+_KOREAN_WEEK = re.compile(
+    rf"(?<![가-힣])(?P<number>{'|'.join(_KOREAN_WEEK_NUMBERS)})\s+주(?=$|[\s\W]|이내|동안|간|에|는|를|부터|까지)"
+)
 _QUANTITY = re.compile(
     rf"(?<![a-z0-9])(?P<number>\d+(?:[.,]\d+)?)\s*(?P<unit>{_UNIT_PATTERN})(?![a-z])"
 )
@@ -78,6 +82,7 @@ def _evidence_anchors(value: str) -> frozenset[str]:
     remaining = _KOREAN_DATE.sub(date_anchor, remaining)
     remaining = _WORD_QUANTITY.sub(lambda match: f"{_WORD_NUMBERS[match['number']]} {match['unit']}", remaining)
     remaining = _PHASE_ORDINAL.sub(lambda match: f"{_WORD_NUMBERS.get(match['number'], match['number'])} phase", remaining)
+    remaining = _KOREAN_WEEK.sub(lambda match: f"{_KOREAN_WEEK_NUMBERS[match['number']]}주", remaining)
 
     def identifier_anchor(match: re.Match[str]) -> str:
         token = match.group(0)

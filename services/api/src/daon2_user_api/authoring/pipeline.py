@@ -56,6 +56,9 @@ _REFERENCE_FIXTURE_NOTICE = re.compile(r"(?im)^\s*synthetic (?:fixture|test data
 _RFP_SOURCE = re.compile(r"제안\s*요청서|(?<![a-z0-9])RFP(?![a-z0-9])|발주처", re.IGNORECASE)
 _RFP_OBLIGATION = re.compile(r"요구|필수|의무|명시|must|required|requires?", re.IGNORECASE)
 _WEEKLY_DEMO = re.compile(r"(?:주간|매주|주 단위|주별)\s*(?:기능\s*)?시연|weekly\s+(?:demos?|demonstrations?)", re.IGNORECASE)
+_RFP_WEEK_DEADLINE = re.compile(
+    r"delivery (?:in|within) (?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve) weeks?", re.IGNORECASE,
+)
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
     "key": {"type": "string"}, "purpose": {"type": "string"}, "knowledge_refs": {"type": "array", "items": {"type": "string"}},
@@ -977,6 +980,7 @@ class AuthoringPipeline:
                     "원문 요구사항과 초안의 언어가 달라도 의미와 수치·기한을 대조하세요. "
                     "요구사항을 모두 충족하는 본문은 covered, 일부만 있으면 partial, 본문에 없으면 missing으로 판정하세요. "
                     "covered 또는 partial이면 해당 요구를 실제로 뒷받침하는 문단 번호 하나를 paragraph_id에 쓰세요. "
+                    "기한이 있는 요구사항은 납품·인계와 기한이 함께 명시된 문단을 골라야 합니다. "
                     "제목만으로는 covered로 판정하지 마세요. missing에는 paragraph_id를 빈 문자열로 쓰세요."),
             user=("[요구사항]\n" + json.dumps({r["id"]: r["text"] for r in requirements}, ensure_ascii=False) + "\n[작성 본문]\n" + body),
             json_schema={"type": "object", "required": ["rows"], "properties": {"rows": {"type": "array", "items": {
@@ -990,7 +994,7 @@ class AuthoringPipeline:
         try:
             reviewed = self._llm.generate(ctx.context, prompt, cancel_check=ctx.cancel_check).data.get("rows")
         except StudioError:
-            return rows
+            reviewed = []
         by_id = {row["requirement_id"]: row for row in rows}
         confirmed = set()
         for result in reviewed if isinstance(reviewed, list) else []:
@@ -1014,6 +1018,19 @@ class AuthoringPipeline:
             else:
                 continue
             confirmed.add(row["requirement_id"])
+        for row in rows:
+            if row["status"] == "covered" or not _RFP_WEEK_DEADLINE.fullmatch(row["text"].rstrip(".")):
+                continue
+            for paragraph_id, (key, text) in passages.items():
+                if (not key.startswith("schedule__") or not re.search(r"납품|인계|사업\s*기간|사업은", text)
+                        or re.search(r"지연|초과|미결|자료 없음", text)):
+                    continue
+                warnings = Warnings()
+                body_pack = ContextPack((Passage(paragraph_id, "", "", "", None, "page", "", None, text),), False, 0)
+                check_anchors(row["text"], [paragraph_id], body_pack, warnings, "coverage")
+                if not warnings.items:
+                    row.update(section_key=key, status="covered", score=1.0)
+                    break
         return rows
 
     def ruleset(self, ctx: GenerationContext, template: AuthoringTemplate, sections: Sequence[Mapping[str, Any]]) -> dict[str, Any]:

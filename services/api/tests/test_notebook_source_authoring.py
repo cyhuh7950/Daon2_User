@@ -452,7 +452,9 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
 
     source = _evidence_anchors("Digitize 240 catalogue records. Verify 30 samples. Delivery in eight weeks. Retain the three-phase structure.")
     assert _evidence_anchors("목록 240건, 표본 30개, 8주, 3단계").issubset(source)
-    for wrong in ("목록 241건", "표본 31건", "8개월", "4단계"):
+    assert _evidence_anchors("여덟 주 이내에 최종 인계한다.") == _evidence_anchors("8주 안에 최종 인계한다.")
+    assert _evidence_anchors("여덟 주에 인계한다.").issubset(source)
+    for wrong in ("목록 241건", "표본 31건", "8개월", "4단계", "아홉 주 안에 인계한다"):
         assert not _evidence_anchors(wrong).issubset(source)
     phases = _evidence_anchors("Phase one: review data. Phase two: build search. Phase three: train staff.")
     assert _evidence_anchors("1단계, 2단계, 3단계").issubset(phases)
@@ -494,11 +496,14 @@ def test_cross_language_rfp_coverage_links_only_paragraphs_present_in_cited_body
         {"id": "REQ-001", "text": "show the library team how to export CSV", "mandatory": True},
         {"id": "REQ-002", "text": "verify thirty samples", "mandatory": True},
         {"id": "REQ-003", "text": "verify 30 samples", "mandatory": True},
+        {"id": "REQ-004", "text": "delivery in eight weeks", "mandatory": True},
     ]}
     rows = pipeline._check_rfp_coverage(ctx, session, [{"key": "approach__u1", "title": "수행 방법",
-                                                       "paragraphs": [{"text": text, "refs": ["S1"]} for text in (body, sample)]}])
+                                                       "paragraphs": [{"text": text, "refs": ["S1"]} for text in (body, sample)]},
+                                                      {"key": "schedule__u1", "title": "납품 일정",
+                                                       "paragraphs": [{"text": "여덟 주 안에 인계한다.", "refs": ["S1"]}]}])
     assert [(row["status"], row["section_key"]) for row in rows] == [
-        ("covered", "approach__u1"), ("partial", "approach__u1"), ("partial", "approach__u1"),
+        ("covered", "approach__u1"), ("partial", "approach__u1"), ("partial", "approach__u1"), ("covered", "schedule__u1"),
     ]
 
 
