@@ -21,7 +21,7 @@ from ..question_external_evidence import ExternalEvidenceError, build_plan_promp
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import normalize, scoped_deletion_candidates, split_sentences, strip_repeated_chapter_heading, summarize, tag_section
-from .rfp import MAX_WINDOWS, assign_requirements_to_plan, best_subsection, extract_requirements, matching_sections, overlap, scan_requirements
+from .rfp import MAX_WINDOWS, assign_requirements_to_plan, best_subsection, extract_requirements, matching_sections, overlap, scan_requirements, schedule_prose
 from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition, unresolved_inputs
 from .terms_review import TERMS_BODY_RULES, review_terms_body
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
@@ -448,6 +448,20 @@ class AuthoringPipeline:
                     result_data = corrected_data
                     break
         lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
+        if lacking and rfp_passages and unit["section_key"] == "schedule":
+            for passage in rfp_passages:
+                text = schedule_prose(passage.text)
+                if text is None:
+                    continue
+                fallback = [{"text": text, "refs": [passage.ref]}]
+                demo = next((p for p in pack.passages if p.ref in reference_refs and _WEEKLY_DEMO.search(p.text)), None)
+                if demo is not None:
+                    fallback.append({"text": "추진 상황을 점검하기 위해 참고 제안서의 주간 시연 방식을 적용한다.", "refs": [demo.ref]})
+                result_data = {"paragraphs": fallback, "summary": text}
+                paragraphs, warnings, pending = self._checked_unit_paragraphs(
+                    result_data, template, unit, pack, material, inputs, rfp_passages=rfp_passages)
+                lacking = bool(warnings.items)
+                break
         if (lacking and template.template_id in {"rfp_response_proposal", "reference_proposal_draft"}
                 and unit["section_key"] == "price" and not section_ids
                 and f"price_schedule: {PLACEHOLDER}" in unresolved_inputs(session["assumptions"])):

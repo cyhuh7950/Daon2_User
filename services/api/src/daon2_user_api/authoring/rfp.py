@@ -31,7 +31,13 @@ _SECTION_BY_OUTLINE_ITEM = {"approach": "approach", "delivery plan": "schedule",
                             "수행 방안": "approach", "추진 일정": "schedule", "투입 조직": "team", "검수 기준": "approach"}
 _SEARCH_SCOPE = re.compile(r"(search by )([^,]+?) and ([^,]+),\s+and\s+(.+)", re.IGNORECASE)
 _ACCEPTANCE_ACTION = re.compile(r"\s+and\s+(?=(?:show|demonstrate|train|verify|test|submit|deliver)\s)", re.IGNORECASE)
-_DELIVERY_WINDOW = re.compile(r"(.+?)\s+((?:in|within)\s+(?:\d+|[a-z]+(?:-[a-z]+)?)\s+(?:business\s+)?(?:days?|weeks?|months?))", re.IGNORECASE)
+_DELIVERY_WINDOW = re.compile(
+    r"(?P<milestones>.+?)\s+(?P<duration>(?:in|within)\s+(?P<amount>\d+|[a-z]+(?:-[a-z]+)?)\s+"
+    r"(?P<business>business\s+)?(?P<unit>days?|weeks?|months?))", re.IGNORECASE,
+)
+_SCHEDULE_STEPS = {"inventory review": "기존 목록 검토", "pilot": "시범 운영", "validation": "검증",
+                   "testing": "시험", "training": "교육", "deployment": "배포", "final handover": "최종 인계"}
+_DURATION_WORDS = dict(zip("one two three four five six seven eight nine ten eleven twelve".split(), range(1, 13)))
 _FIXTURE_NOTICE = re.compile(r"^synthetic\s+(?:fixture|test data|sample)\s+only\s*[.!]?(?:\s+no personal data or commercial commitments[.!]?)?$", re.IGNORECASE)
 _TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
 SCHEMA = {"type": "object", "properties": {"requirements": {"type": "array", "items": {"type": "object", "properties": {
@@ -53,9 +59,30 @@ def _labelled_items(label: str, value: str) -> list[str]:
     if label == "acceptance":
         return _ACCEPTANCE_ACTION.split(clause)
     if label == "delivery" and (window := _DELIVERY_WINDOW.fullmatch(clause)):
-        milestones, duration = window.groups()
-        return [milestones, f"delivery {duration}"]
+        return [window["milestones"], f"delivery {window['duration']}"]
     return [value]
+
+
+def schedule_prose(source: str) -> str | None:
+    """기간과 순서가 모두 원문에 명시되고 해석 가능한 경우만 일정 본문으로 옮긴다."""
+    for line in source.splitlines():
+        labelled = _LABELLED_REQUIREMENT.fullmatch(line.strip())
+        if not labelled or labelled["label"].casefold() != "delivery":
+            continue
+        window = _DELIVERY_WINDOW.fullmatch(labelled["text"].rstrip("."))
+        if window is None or window["business"]:
+            continue
+        steps = [p.strip() for p in re.split(r"\s*,\s*(?:and\s+)?|\s+and\s+", window["milestones"].casefold())]
+        if not steps or any(step not in _SCHEDULE_STEPS for step in steps):
+            continue
+        number = window["amount"].casefold()
+        amount = number if number.isdecimal() else _DURATION_WORDS.get(number)
+        if not amount:
+            continue
+        unit = {"day": "일", "week": "주", "month": "개월"}[window["unit"].lower().rstrip("s")]
+        milestones = ", ".join(_SCHEDULE_STEPS[step] for step in steps)
+        return f"납품 기한인 {amount}{unit} 이내에 {milestones} 순으로 진행한다."
+    return None
 
 
 def assign_requirements_to_plan(requirements: Sequence[Mapping[str, Any]], plan: Sequence[dict[str, Any]]) -> None:

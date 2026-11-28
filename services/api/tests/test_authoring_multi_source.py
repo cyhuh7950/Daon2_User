@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from daon2_user_api.authoring import session as S
-from daon2_user_api.authoring.rfp import MAX_WINDOWS, assign_requirements_to_plan, scan_requirements
+from daon2_user_api.authoring.rfp import MAX_WINDOWS, assign_requirements_to_plan, scan_requirements, schedule_prose
 from daon2_user_api.authoring.templates import AuthoringError
 from daon2_user_api.studio_source_reader import SourceSection, SourceText
 
@@ -39,6 +39,15 @@ def scan(sources, llm=None, **options):
 
 
 class ScanRequirementsTests(unittest.TestCase):
+    def test_schedule_prose_uses_only_interpretable_original_milestones_and_duration(self):
+        self.assertEqual(
+            schedule_prose("Delivery: inventory review, pilot, validation, and final handover in eight weeks."),
+            "납품 기한인 8주 이내에 기존 목록 검토, 시범 운영, 검증, 최종 인계 순으로 진행한다.",
+        )
+        self.assertIsNone(schedule_prose("Delivery: pilot, undisclosed approval, and final handover in eight weeks."))
+        self.assertIsNone(schedule_prose("Delivery: validation and final handover."))
+        self.assertIsNone(schedule_prose("Delivery: validation and final handover within ten business days."))
+
     def test_source_labels_preserve_requirements_missing_from_model(self):
         rfp = source("rfp", "library.pdf", "\n".join([
             "Goal: digitize 240 catalogue records for a fictional public library.",
