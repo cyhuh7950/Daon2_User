@@ -104,6 +104,7 @@ def test_rfp_cannot_also_be_its_own_reference():
 
 
 PROPOSAL = "시범 운영에서는 단계별 인수 목록을 사용한다."
+GROUNDED_PROPOSAL = "시범 운영 기간에는 각 단계에서 인수할 항목을 목록으로 확인한다."
 RFP = "서비스 전환 계획을 제출해야 한다."
 TERMS = ("별빛 자동차보험 약관\n제1장 총칙\n계약자는 보험계약의 내용을 확인할 수 있다.\n"
          "제2장 보장내용\n보장 범위는 보험증권에 적는다.\n제3장 보험금의 지급\n"
@@ -148,6 +149,16 @@ class FixtureModel:
                 {"title": "지급 지연 통지", "purpose": "전자우편 통지"},
             ]}] if self.split_payment else []}
         elif name == "authoring_unit":
+            if "[선택된 원문 근거]\n" in prompt.user:
+                options = json.loads(prompt.user.split("[선택된 원문 근거]\n", 1)[1])
+                assert options[0]["text"] == PROPOSAL
+                return SimpleNamespace(data={"paragraphs": [{"text": GROUNDED_PROPOSAL, "refs": [options[0]["id"]]}]},
+                                       provider_code="FIXTURE", model_id="fixture", connection_short_code="FIXTURE")
+            if "[선택 가능한 근거 발췌]\n" in prompt.user:
+                options = json.loads(prompt.user.split("[선택 가능한 근거 발췌]\n", 1)[1])
+                excerpt = next(item for item in options if item["text"] == PROPOSAL)
+                return SimpleNamespace(data={"excerpt_ids": [excerpt["id"]]}, provider_code="FIXTURE",
+                                       model_id="fixture", connection_short_code="FIXTURE")
             def ref(text):
                 return re.search(r'<source id="(S[0-9]+)"[^>]*>\n[^<]*' + re.escape(text), prompt.user).group(1)
 
@@ -330,6 +341,11 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     ("현행 검색과 반출 과정에 일부 불편이 있다.", "UNSUPPORTED_SOURCE_CLAIM"),
     ("현행 검색 절차를 검토하고 개선안을 제안한다.", None),
     ("현행 검색과 반출은 별도 화면에서 처리한다.", None),
+    ("현재 운영 현황은 포함하지 않는다.", None),
+    ("다만 현재 사업의 일정·가격·담당자는 확정하지 않으며, 이 부분은 미결로 남긴다.", None),
+    ("발주 배경은 명시돼 있지 않으며, 시범 운영에서는 단계별 인수 목록을 사용한다.", None),
+    ("제안사 정보와 가격은 현재 미결로 둔다.", None),
+    ("현재 운영 현황은 불안정하지만 가격은 확정하지 않는다.", "UNSUPPORTED_SOURCE_CLAIM"),
 ])
 def test_proposal_grounding_requires_correction_before_resume(writing, monkeypatch, claim, warning):
     client, repo, model, worker = writing
@@ -340,7 +356,9 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
             calls.append(prompt.user)
-            if len(calls) == 2:
+            if "[선택 가능한 근거 발췌]" in prompt.user:
+                result.data["excerpt_ids"] = []
+            elif len(calls) == 2 or "[근거 검사 후 수정]" in prompt.user:
                 result.data["paragraphs"][0]["text"] = claim
         return result
 
@@ -382,7 +400,271 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
     assert final["units"][0] == current["units"][0]
     assert final["units"][1]["paragraphs"] == [{"text": PROPOSAL, "refs": [], "origin": "user"}]
     assert not final["units"][1]["warnings"]
-    assert len(calls) == 2
+    assert len(calls) == 4
+
+
+@pytest.mark.parametrize("template", ["rfp_response_proposal", "reference_proposal_draft"])
+@pytest.mark.parametrize("invalid_attempts", [1, 2])
+def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing, monkeypatch, template, invalid_attempts):
+    client, repo, model, worker = writing
+    generate = model.generate
+    prompts = []
+
+    def generate_with_claim(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            prompts.append(prompt.user)
+            if len(prompts) <= invalid_attempts:
+                result.data["paragraphs"][0]["text"] = "현재 장비 999대가 고장 상태이다."
+        return result
+
+    monkeypatch.setattr(model, "generate", generate_with_claim)
+    opened = client.post(PATH, json={"template_id": template}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    answers = [{"key": "reference_proposals", "source_version_ids": ["proposal-v1"]}]
+    if template == "rfp_response_proposal":
+        answers.insert(0, {"key": "rfp_document", "source_version_ids": ["rfp-v1"]})
+    else:
+        answers.append({"key": "purpose", "value": "도서관 업무 절차 개선"})
+    assert client.post(output + "/answers", json={"expected_revision": 1, "answers": answers,
+                                                 "skip_remaining": True}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    completed = client.get(output).json()["data"]
+    assert completed["state"] == "completed"
+    assert "[근거 검사 후 수정]" in prompts[1]
+    assert "ANCHOR_MISMATCH" in prompts[1]
+    assert "UNSUPPORTED_SOURCE_CLAIM" in prompts[1]
+    if invalid_attempts == 2:
+        assert "[원문만 사용해 다시 작성]" in prompts[2]
+        assert "장비 999대" not in prompts[2]
+        assert "[선택된 원문 근거]" in prompts[3]
+        assert GROUNDED_PROPOSAL in str(completed["document"])
+        assert "본문 보완" not in str(completed["document"])
+    assert "999대" not in str(completed["document"])
+
+
+def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
+    from daon2_user_api.document_understanding_adapter import _evidence_anchors
+
+    source = _evidence_anchors("Digitize 240 catalogue records. Verify 30 samples. Delivery in eight weeks. Retain the three-phase structure.")
+    assert _evidence_anchors("목록 240건, 표본 30개, 8주, 3단계").issubset(source)
+    assert _evidence_anchors("여덟 주 이내에 최종 인계한다.") == _evidence_anchors("8주 안에 최종 인계한다.")
+    assert _evidence_anchors("여덟 주에 인계한다.").issubset(source)
+    for wrong in ("목록 241건", "표본 31건", "8개월", "4단계", "아홉 주 안에 인계한다"):
+        assert not _evidence_anchors(wrong).issubset(source)
+    phases = _evidence_anchors("Phase one: review data. Phase two: build search. Phase three: train staff.")
+    assert _evidence_anchors("1단계, 2단계, 3단계").issubset(phases)
+    assert not _evidence_anchors("1주, 2주, 3주").issubset(phases)
+
+
+def test_reference_proposal_prompt_keeps_roles_and_work_without_prior_names():
+    from daon2_user_api.authoring.pipeline import _reference_proposal_passage
+    from daon2_user_api.studio_context_builder import Passage
+
+    original = Passage("S1", "version", "source", "QA123-fixture.pdf", "span", "page", "1", "old heading", (
+        "QA123 synthetic reference proposal - Previous Library catalogue\n"
+        "Phase one: review data; phase two: implement search.\n"
+        "Delivery owner: Old Delivery Team. Review owner: Old Review Team.\n"
+        "Synthetic fixture only. No commercial commitments."
+    ))
+    prompt = _reference_proposal_passage(original)
+    assert "Phase one: review data; phase two: implement search." in prompt.text
+    assert all(role in prompt.text for role in ("Delivery owner", "Review owner"))
+    assert not any(name in prompt.text for name in ("QA123", "Previous Library", "Old Delivery Team", "Old Review Team", "fixture"))
+    assert (prompt.ref, prompt.source_version_id, prompt.evidence_span_id) == (original.ref, original.source_version_id, original.evidence_span_id)
+    assert "Old Delivery Team" in original.text
+
+
+def test_cross_language_rfp_coverage_links_only_paragraphs_present_in_cited_body():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+
+    body = "도서관 담당자가 목록을 CSV로 내보내도록 실습을 진행한다."
+    sample = "검수 단계에서 표본 31건을 확인한다."
+    findings = [
+        {"id": "REQ-001", "status": "covered", "paragraph_id": "P1"},
+        {"id": "REQ-002", "status": "covered", "paragraph_id": "P999"},
+        {"id": "REQ-003", "status": "covered", "paragraph_id": "P2"},
+    ]
+    llm = SimpleNamespace(generate=lambda *_args, **_kwargs: SimpleNamespace(data={"rows": findings}))
+    pipeline = AuthoringPipeline(None, None, llm, None, lambda *_: {})
+    ctx = SimpleNamespace(context=None, cancel_check=lambda: None)
+    session = {"plan": {"sections": [{"key": "approach", "requirement_ids": ["REQ-001", "REQ-002", "REQ-003"]}]}, "requirements": [
+        {"id": "REQ-001", "text": "show the library team how to export CSV", "mandatory": True},
+        {"id": "REQ-002", "text": "verify thirty samples", "mandatory": True},
+        {"id": "REQ-003", "text": "verify 30 samples", "mandatory": True},
+        {"id": "REQ-004", "text": "delivery in eight weeks", "mandatory": True},
+    ]}
+    rows = pipeline._check_rfp_coverage(ctx, session, [{"key": "approach__u1", "title": "수행 방법",
+                                                       "paragraphs": [{"text": text, "refs": ["S1"]} for text in (body, sample)]},
+                                                      {"key": "schedule__u1", "title": "납품 일정",
+                                                       "paragraphs": [{"text": "여덟 주 안에 인계한다.", "refs": ["S1"]}]}])
+    assert [(row["status"], row["section_key"]) for row in rows] == [
+        ("covered", "approach__u1"), ("partial", "approach__u1"), ("partial", "approach__u1"), ("covered", "schedule__u1"),
+    ]
+
+
+@pytest.mark.parametrize("invalid", ["unknown_selection", "unknown_citation", "verbatim", "unsupported_number"])
+def test_proposal_last_recovery_rejects_unverified_prose(writing, monkeypatch, invalid):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def non_excerpt(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            if "[선택된 원문 근거]" in prompt.user:
+                para = result.data["paragraphs"][0]
+                if invalid == "unknown_citation":
+                    para["refs"] = ["unknown-excerpt"]
+                elif invalid == "verbatim":
+                    para["text"] = PROPOSAL
+                else:
+                    para["text"] = "시범 운영에서는 인수 항목 999건을 확인한다."
+            elif "[선택 가능한 근거 발췌]" in prompt.user:
+                if invalid != "unknown_selection":
+                    return result
+                result.data["excerpt_ids"] = ["unknown-excerpt"]
+            else:
+                result.data["paragraphs"][0]["text"] = "현재 사업은 999개 특수 장비를 사용한다."
+        return result
+
+    monkeypatch.setattr(model, "generate", non_excerpt)
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"}).json()["data"]
+    path = PATH + "/" + opened["output_id"]
+    assert client.post(path + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "도서관 업무 절차 개선"},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(path).json()["data"]
+    assert client.put(path + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                              "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(path).json()["data"]
+    assert result["state"] == "paused"
+    assert result["document"] is None
+
+
+def test_proposal_grounding_recognizes_model_written_inline_reference_spellings():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    template = TemplateRegistry().get("reference_proposal_draft")
+    pack = ContextPack((Passage("S1", "1", "1", "fixture", None, "page", "1", None, PROPOSAL),
+                        Passage("S2", "2", "2", "fixture", None, "page", "1", None, RFP)), False, 2)
+    data = {"paragraphs": [{"text": f"{PROPOSAL} ref:S1,ref:S2", "refs": []},
+                           {"text": f"{RFP} (S2)", "refs": []},
+                           {"text": f"{RFP} [근거 라벨: S2]", "refs": []}]}
+    paragraphs, warnings, _ = AuthoringPipeline._checked_unit_paragraphs(
+        data, template, {"key": "background", "title": "사업 배경"}, pack, [], {})
+    assert not warnings.items
+    assert [(p["text"], p["refs"]) for p in paragraphs] == [(PROPOSAL, ["S1", "S2"]), (RFP, ["S2"]), (RFP, ["S2"])]
+
+
+@pytest.mark.parametrize(("rfp_text", "text", "refs", "rejected"), [
+    ("Delivery in eight weeks.", "RFP는 주간 시연을 포함한 8주 일정을 요구한다.", ["S1", "S2"], True),
+    ("Delivery in eight weeks.", "참고 제안서의 방법을 채택해 주간 시연을 진행한다.", ["S2"], False),
+    ("Delivery in eight weeks. Weekly demonstrations required.", "RFP는 8주 동안 주간 시연을 요구한다.", ["S1"], False),
+])
+def test_rfp_does_not_turn_reference_demonstrations_into_rfp_requirements(rfp_text, text, refs, rejected):
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    rfp = Passage("S1", "1", "1", "rfp", None, "page", "1", None, rfp_text)
+    reference = Passage("S2", "2", "2", "proposal", None, "page", "1", None, "Example plan: weekly demonstrations.")
+    template = TemplateRegistry().get("rfp_response_proposal")
+    _, warnings, _ = AuthoringPipeline._checked_unit_paragraphs(
+        {"paragraphs": [{"text": text, "refs": refs}]}, template, {"key": "schedule", "title": "추진 일정"},
+        ContextPack((rfp, reference), False, 2), [], {}, rfp_passages=(rfp,))
+    assert any(w["code"] == "UNSUPPORTED_SOURCE_CLAIM" for w in warnings.items) is rejected
+
+
+def test_rfp_preserves_grounded_body_but_moves_explicit_missing_material_to_open_items():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    body = "수행 책임자는 납품을 맡고 검토 책임자는 결과를 확인한다."
+    gap = "실제 투입 인원은 [자료 없음]으로 두고 추후 확정한다."
+    pack = ContextPack((Passage("S1", "1", "1", "proposal", None, "page", "1", None, body),), False, 1)
+    template = TemplateRegistry().get("rfp_response_proposal")
+    unit = {"key": "team", "title": "수행 조직과 역할"}
+    for data in (
+        [{"text": body, "refs": ["S1"]}, {"text": gap, "refs": []}],
+        [{"text": f"{body} {gap}", "refs": ["S1"]}],
+        [{"text": f"{body} 확정된 조직은 별도 명단이 필요하여 현재 입력 범위에서는 세부 인원을 제시할 수 없다.", "refs": ["S1"]}],
+    ):
+        paragraphs, warnings, pending = AuthoringPipeline._checked_unit_paragraphs(
+            {"paragraphs": data}, template, unit, pack, [], {})
+        assert not warnings.items
+        assert paragraphs == [{"text": body, "refs": ["S1"], "origin": "sourced"}]
+        assert pending == ["수행 조직과 역할: [작성 필요]"]
+    paragraphs, _, pending = AuthoringPipeline._checked_unit_paragraphs(
+        {"paragraphs": [{"text": gap, "refs": []}]}, template, unit, pack, [], {})
+    assert "[자료 없음]" in paragraphs[0]["text"] and not pending
+
+
+def test_skipped_proposal_price_remains_open_when_automatic_grounding_fails(writing, monkeypatch):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def unsupported_price(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            if "excerpt_ids" in result.data:
+                result.data["excerpt_ids"] = []
+            else:
+                result.data["paragraphs"][0]["text"] = "계약 가격은 999원으로 확정했다."
+        return result
+
+    monkeypatch.setattr(model, "generate", unsupported_price)
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    assert client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "도서관 업무 절차 개선"},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    price = next(section for section in review["plan"]["sections"] if section["key"] == "price")
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": [price]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(output).json()["data"]
+    assert result["state"] == "completed"
+    assert "price_schedule: [작성 필요]" in result["document"]["open_items"]
+    assert "999원" not in str(result["document"])
+
+
+def test_proposal_keeps_grounded_body_and_moves_unreferenced_unknowns_to_open_items(writing, monkeypatch):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def with_pending(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            result.data["paragraphs"].append({"text": "추가 검증 절차는 제공된 자료에 없다. [자료 없음]", "refs": []})
+        return result
+
+    monkeypatch.setattr(model, "generate", with_pending)
+    opened = client.post(PATH, json={"template_id": "rfp_response_proposal"}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    assert client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "rfp_document", "source_version_ids": ["rfp-v1"]},
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(output).json()["data"]
+    assert result["state"] == "completed"
+    assert any(item.endswith("[작성 필요]") and result["units"][0]["title"] in item
+               for item in result["document"]["open_items"])
+    assert all("추가 검증 절차" not in p["text"] for s in result["document"]["sections"] for p in s["paragraphs"])
 
 
 def test_docx_uses_existing_subsection_for_legacy_coverage():
@@ -558,6 +840,24 @@ def test_terms_review_accepts_only_matching_words_when_the_model_flattens_whites
               "paragraphs": [{"text": original}]}]
     issues = review_terms_body(context, model, changes="인편 전달을 삭제한다.", units=units, context_chars=10000)
     assert issues == [{"unit_key": "payment-1", "quote": original, "reason": "삭제 요청과 충돌"}]
+
+
+def test_terms_review_does_not_require_obsolete_delivery_method_in_the_current_clause():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    current = "제12조 지급 지연 안내\n지급이 늦어지면 이메일로 안내한다."
+    outdated = "제13조 청구 결과\n청구 결과는 인편으로 배달한다."
+    context = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": [
+        {"unit_key": "payment-1", "quote": current, "reason": "변경 전 방식이 본문에 없어 전후 대조가 어렵습니다.",
+         "kind": "before_value_missing", "previous_text": "우편", "replacement_text": "이메일"},
+        {"unit_key": "payment-1", "quote": outdated, "reason": "삭제 요청한 인편 배달을 본문에 유지했습니다."},
+    ]}))
+    unit = {"key": "payment-1", "section_title": "제3장 보험금의 지급", "title": "지급",
+            "paragraphs": [{"text": current}, {"text": outdated}]}
+    findings = review_terms_body(context, model, changes="우편 대신 이메일로 안내하고 인편 배달은 삭제한다.",
+                                 units=[unit], context_chars=10000)
+    assert [issue["quote"] for issue in findings] == [outdated]
 
 
 def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):

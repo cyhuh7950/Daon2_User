@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from daon2_user_api.authoring import session as S
-from daon2_user_api.authoring.rfp import MAX_WINDOWS, scan_requirements
+from daon2_user_api.authoring.rfp import MAX_WINDOWS, assign_requirements_to_plan, scan_requirements, schedule_prose
 from daon2_user_api.authoring.templates import AuthoringError
 from daon2_user_api.studio_source_reader import SourceSection, SourceText
 
@@ -39,6 +39,15 @@ def scan(sources, llm=None, **options):
 
 
 class ScanRequirementsTests(unittest.TestCase):
+    def test_schedule_prose_uses_only_interpretable_original_milestones_and_duration(self):
+        self.assertEqual(
+            schedule_prose("Delivery: inventory review, pilot, validation, and final handover in eight weeks."),
+            "납품 기한인 8주 이내에 기존 목록 검토, 시범 운영, 검증, 최종 인계 순으로 진행한다.",
+        )
+        self.assertIsNone(schedule_prose("Delivery: pilot, undisclosed approval, and final handover in eight weeks."))
+        self.assertIsNone(schedule_prose("Delivery: validation and final handover."))
+        self.assertIsNone(schedule_prose("Delivery: validation and final handover within ten business days."))
+
     def test_source_labels_preserve_requirements_missing_from_model(self):
         rfp = source("rfp", "library.pdf", "\n".join([
             "Goal: digitize 240 catalogue records for a fictional public library.",
@@ -61,6 +70,23 @@ class ScanRequirementsTests(unittest.TestCase):
         self.assertTrue(any("240" in text for text in texts))
         self.assertTrue(any("author" in text for text in texts))
         self.assertFalse(any("Synthetic" in text for text in texts))
+        originals, _ = scan([rfp], Llm({1: [
+            "Synthetic fixture only. No personal data or commercial commitments.",
+            "Delivery: inventory review.", "Delivery: pilot.", "Delivery: validation.", "Delivery: final handover.",
+        ]}))
+        self.assertEqual(len(originals), 16)
+        self.assertEqual([row["text"] for row in originals[1:8]], [
+            "search by title", "search by author", "export catalogue CSV",
+            "verify 30 samples", "show the library team how to export CSV",
+            "inventory review, pilot, validation, and final handover", "delivery in eight weeks",
+        ])
+        plan = [{"key": key, "requirement_ids": []} for key in ("understanding", "overview", "approach", "schedule", "team", "price")]
+        assign_requirements_to_plan(originals, plan)
+        routed = {row["key"]: row["requirement_ids"] for row in plan}
+        self.assertEqual(routed["schedule"], ["REQ-007", "REQ-008", "REQ-014"])
+        self.assertEqual(routed["team"], ["REQ-015"])
+        self.assertIn("REQ-006", routed["approach"])
+        self.assertEqual(sorted(r for ids in routed.values() for r in ids), [r["id"] for r in originals])
 
     def test_every_part_of_a_long_file_is_read(self):
         texts = [f"{'가' * 700}\n항목 {n} 내용을 반드시 제출해야 한다" for n in range(5)]
