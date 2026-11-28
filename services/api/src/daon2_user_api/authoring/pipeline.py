@@ -36,6 +36,12 @@ PLACEHOLDER = "[작성 필요]"
 UNIT_REQUIREMENT_CHARS = 8000  # 소목차 하나를 쓰는 요청이 모델 호출 제한을 넘지 않게 한다.
 _CURRENT_FACT = re.compile(r"(?<![가-힣])(?:현행|현재)\s|발주\s*배경")
 _PROPOSED_ACTION = re.compile(r"(?:제안한다|제안합니다|검토할\s*예정이다|개선할\s*계획이다)[.!?]?$")
+_PENDING_FIELD = r"(?:일정|가격|담당자|제안사 정보|실적|운영 현황)"
+_SCOPE_NOTE = re.compile(
+    rf"(?:(?:다만|또한)\s+)?(?:현재|현행)\s+(?:사업의\s+)?"
+    rf"{_PENDING_FIELD}(?:\s*[·,]\s*{_PENDING_FIELD})*(?:은|는|을|를)\s+"
+    r"(?:포함|기재|작성|확정)하지\s+않(?:는다|습니다|으며,\s*이\s*부분은\s*미결로\s*남긴다)[.。]?"
+)
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
     "key": {"type": "string"}, "purpose": {"type": "string"}, "knowledge_refs": {"type": "array", "items": {"type": "string"}},
@@ -62,7 +68,7 @@ def _check_current_facts(text: str, evidence: Sequence[str], warnings: Warnings,
     """현황 단정은 참조한 문장이나 사용자가 제공한 사실에서 확인할 수 있어야 한다."""
     sources = [normalize(source) for source in evidence]
     for sentence in split_sentences(text):
-        if not _CURRENT_FACT.search(sentence) or _PROPOSED_ACTION.search(sentence):
+        if not _CURRENT_FACT.search(sentence) or _PROPOSED_ACTION.search(sentence) or _SCOPE_NOTE.fullmatch(sentence):
             continue
         if not any(normalize(sentence) in source for source in sources):
             warnings.add("UNSUPPORTED_SOURCE_CLAIM", path)
@@ -348,7 +354,7 @@ class AuthoringPipeline:
                     generation = again
             except (StudioError, ValueError, KeyError, TypeError):
                 pass
-        paragraphs, warnings = self._checked_unit_paragraphs(generation.data, template, unit, pack, material, inputs)
+        paragraphs, warnings, pending = self._checked_unit_paragraphs(generation.data, template, unit, pack, material, inputs)
         if template.style == "proposal" and (warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)):
             repair = (
                 "[근거 검사 후 수정]\n"
@@ -375,28 +381,30 @@ class AuthoringPipeline:
                 ctx.cancel_check()
                 try:
                     corrected = self._llm.generate(ctx.context, correction_prompt, cancel_check=ctx.cancel_check)
-                    corrected_paragraphs, corrected_warnings = self._checked_unit_paragraphs(
+                    corrected_paragraphs, corrected_warnings, corrected_pending = self._checked_unit_paragraphs(
                         corrected.data, template, unit, pack, material, inputs)
                 except StudioError:
                     continue
                 if not corrected_warnings.items and not any(NO_MATERIAL in p["text"] for p in corrected_paragraphs):
-                    generation, paragraphs, warnings = corrected, corrected_paragraphs, corrected_warnings
+                    generation, paragraphs, warnings, pending = corrected, corrected_paragraphs, corrected_warnings, corrected_pending
                     break
         lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
         compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
+        open_items = [text_field(item, 300) for item in generation.data.get("open_items", []) if isinstance(item, str) and item.strip()]
         return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
                 "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
-                "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
+                "open_items": list(dict.fromkeys([*pending, *open_items]))[:10],
                 "warnings": list(warnings.items), "error_code": None, **({"reference_refs": compared} if reference_pack is not None else {}),
                 "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
 
     @staticmethod
     def _checked_unit_paragraphs(data: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any],
                                  pack: ContextPack, material: Sequence[Mapping[str, Any]],
-                                 inputs: Mapping[str, str]) -> tuple[list[dict[str, Any]], Warnings]:
+                                 inputs: Mapping[str, str]) -> tuple[list[dict[str, Any]], Warnings, list[str]]:
         known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
         warnings = Warnings()
         paragraphs: list[dict[str, Any]] = []
+        explicit_gaps = []
         for para in data.get("paragraphs", [])[:12]:
             text = text_field(para.get("text"), 2500) if isinstance(para, Mapping) else ""
             if not text:
@@ -408,6 +416,9 @@ class AuthoringPipeline:
                 text = strip_repeated_chapter_heading(text, unit["title"])
             refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
             if not text:
+                continue
+            if template.style == "proposal" and not refs and text.endswith((NO_MATERIAL, PLACEHOLDER)):
+                explicit_gaps.append({"text": text, "refs": [], "origin": "new"})
                 continue
             path = f"units.{unit['key']}.p{len(paragraphs)}"
             evidence_texts = list(inputs.values())
@@ -421,9 +432,17 @@ class AuthoringPipeline:
             if not refs and NO_MATERIAL not in text:
                 text = f"{text} {NO_MATERIAL}"  # 근거 없는 문단은 제품이 표시한다(4.4).
             paragraphs.append({"text": text, "refs": refs, "origin": "sourced" if refs else "new"})
+        pending: list[str] = []
+        if explicit_gaps:
+            if any(p["refs"] for p in paragraphs):
+                # 확인되지 않은 문장의 내용은 저장하지 않는다. 근거가 있는 본문과 확인할 항목만 보존한다.
+                pending.append(f"{unit['title']}: {PLACEHOLDER}")
+            else:
+                # 소목차 전체가 미결이면 완료 처리하지 않는다.
+                paragraphs.extend({**p, "text": p["text"] if NO_MATERIAL in p["text"] else f"{p['text']} {NO_MATERIAL}"} for p in explicit_gaps)
         if not paragraphs:
             raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-        return paragraphs, warnings
+        return paragraphs, warnings, pending
 
     @staticmethod
     def _written_chars(data: Mapping[str, Any]) -> int:

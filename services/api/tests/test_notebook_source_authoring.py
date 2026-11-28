@@ -330,6 +330,9 @@ def test_three_paths_through_routes_worker_reload_references_and_docx(writing, t
     ("현행 검색과 반출 과정에 일부 불편이 있다.", "UNSUPPORTED_SOURCE_CLAIM"),
     ("현행 검색 절차를 검토하고 개선안을 제안한다.", None),
     ("현행 검색과 반출은 별도 화면에서 처리한다.", None),
+    ("현재 운영 현황은 포함하지 않는다.", None),
+    ("다만 현재 사업의 일정·가격·담당자는 확정하지 않으며, 이 부분은 미결로 남긴다.", None),
+    ("현재 운영 현황은 불안정하지만 가격은 확정하지 않는다.", "UNSUPPORTED_SOURCE_CLAIM"),
 ])
 def test_proposal_grounding_requires_correction_before_resume(writing, monkeypatch, claim, warning):
     client, repo, model, worker = writing
@@ -433,6 +436,35 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
     assert _evidence_anchors("목록 240건, 표본 30건, 8주, 3단계").issubset(source)
     for wrong in ("목록 241건", "표본 31건", "8개월", "4단계"):
         assert not _evidence_anchors(wrong).issubset(source)
+
+
+def test_proposal_keeps_grounded_body_and_moves_unreferenced_unknowns_to_open_items(writing, monkeypatch):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def with_pending(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            result.data["paragraphs"].append({"text": "추가 검증 절차는 제공된 자료에 없다. [자료 없음]", "refs": []})
+        return result
+
+    monkeypatch.setattr(model, "generate", with_pending)
+    opened = client.post(PATH, json={"template_id": "rfp_response_proposal"}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    assert client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "rfp_document", "source_version_ids": ["rfp-v1"]},
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(output).json()["data"]
+    assert result["state"] == "completed"
+    assert any(item.endswith("[작성 필요]") and result["units"][0]["title"] in item
+               for item in result["document"]["open_items"])
+    assert all("추가 검증 절차" not in p["text"] for s in result["document"]["sections"] for p in s["paragraphs"])
 
 
 def test_docx_uses_existing_subsection_for_legacy_coverage():
