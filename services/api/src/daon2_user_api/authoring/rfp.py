@@ -49,6 +49,12 @@ def _similar(a: str, b: str) -> float:
     return len(ta & tb) / max(1, min(len(ta), len(tb)))
 
 
+def _model_requirement_text(item: Mapping[str, Any]) -> str:
+    text = str(item.get("text", "")).strip()
+    labelled = _LABELLED_REQUIREMENT.fullmatch(text)
+    return labelled["text"].strip() if labelled else text
+
+
 def _labelled_items(label: str, value: str) -> list[str]:
     clause = value.rstrip(".")
     if label in _LIST_LABELS:
@@ -144,7 +150,7 @@ def _assign_ids(result: list[dict[str, Any]]) -> None:
 def merge(rule: Sequence[Mapping[str, Any]], model: Sequence[Mapping[str, Any]], default_ref: str | None) -> list[dict[str, Any]]:
     result = [dict(r) for r in rule]
     for item in model:
-        text = str(item.get("text", "")).strip()
+        text = _model_requirement_text(item)
         if not text or len(text) > 1000 or _FIXTURE_NOTICE.fullmatch(text) or any(_similar(text, r["text"]) >= 0.7 for r in result):
             continue
         result.append({"id": None, "text": text, "mandatory": bool(item.get("mandatory", True)), "category": str(item.get("category", ""))[:60],
@@ -256,7 +262,7 @@ def scan_requirements(sources: Sequence[SourceText], llm, context, *, budget_cha
             known.append((tokens, source.filename))
             collected.append({**rule, "refs": [], "source_name": source.filename})
         for item in extra:
-            text = str(item.get("text", "")).strip()
+            text = _model_requirement_text(item)
             tokens = _tokens(text)
             if (not text or len(text) > 1000 or _FIXTURE_NOTICE.fullmatch(text)
                     or any(len(tokens & other) / max(1, min(len(tokens), len(other))) >= 0.7 for other, _ in known)):
