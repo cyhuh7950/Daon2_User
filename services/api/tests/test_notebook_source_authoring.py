@@ -148,6 +148,11 @@ class FixtureModel:
                 {"title": "지급 지연 통지", "purpose": "전자우편 통지"},
             ]}] if self.split_payment else []}
         elif name == "authoring_unit":
+            if "[선택 가능한 근거 발췌]\n" in prompt.user:
+                options = json.loads(prompt.user.split("[선택 가능한 근거 발췌]\n", 1)[1])
+                excerpt = next(item for item in options if item["text"] == PROPOSAL)
+                return SimpleNamespace(data={"excerpt_ids": [excerpt["id"]]}, provider_code="FIXTURE",
+                                       model_id="fixture", connection_short_code="FIXTURE")
             def ref(text):
                 return re.search(r'<source id="(S[0-9]+)"[^>]*>\n[^<]*' + re.escape(text), prompt.user).group(1)
 
@@ -345,7 +350,9 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
             calls.append(prompt.user)
-            if len(calls) == 2 or "[근거 검사 후 수정]" in prompt.user:
+            if "[선택 가능한 근거 발췌]" in prompt.user:
+                result.data["excerpt_ids"] = []
+            elif len(calls) == 2 or "[근거 검사 후 수정]" in prompt.user:
                 result.data["paragraphs"][0]["text"] = claim
         return result
 
@@ -447,8 +454,8 @@ def test_proposal_last_recovery_rejects_paragraph_that_is_not_an_exact_excerpt(w
     def non_excerpt(context, prompt, cancel_check=None):
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
-            if "[원문만 사용해 다시 작성]" in prompt.user:
-                result.data["paragraphs"][0]["text"] = "별도의 미확인 요건을 사업에 추가한다."
+            if "[선택 가능한 근거 발췌]" in prompt.user:
+                result.data["excerpt_ids"] = ["unknown-excerpt"]
             else:
                 result.data["paragraphs"][0]["text"] = "현재 사업은 999개 특수 장비를 사용한다."
         return result
@@ -468,6 +475,21 @@ def test_proposal_last_recovery_rejects_paragraph_that_is_not_an_exact_excerpt(w
     result = client.get(path).json()["data"]
     assert result["state"] == "paused"
     assert result["document"] is None
+
+
+def test_proposal_grounding_recognizes_model_written_inline_reference_spellings():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    template = TemplateRegistry().get("reference_proposal_draft")
+    pack = ContextPack((Passage("S1", "1", "1", "fixture", None, "page", "1", None, PROPOSAL),
+                        Passage("S2", "2", "2", "fixture", None, "page", "1", None, RFP)), False, 2)
+    data = {"paragraphs": [{"text": f"{PROPOSAL} ref:S1,ref:S2", "refs": []},
+                           {"text": f"{RFP} (S2)", "refs": []}]}
+    paragraphs, warnings, _ = AuthoringPipeline._checked_unit_paragraphs(
+        data, template, {"key": "background", "title": "사업 배경"}, pack, [], {})
+    assert not warnings.items
+    assert [(p["text"], p["refs"]) for p in paragraphs] == [(PROPOSAL, ["S1", "S2"]), (RFP, ["S2"])]
 
 
 def test_proposal_keeps_grounded_body_and_moves_unreferenced_unknowns_to_open_items(writing, monkeypatch):
