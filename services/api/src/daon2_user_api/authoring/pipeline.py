@@ -562,9 +562,17 @@ class AuthoringPipeline:
             refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
             if not text:
                 continue
-            if template.style == "proposal" and not refs and text.endswith((NO_MATERIAL, PLACEHOLDER)):
-                explicit_gaps.append({"text": text, "refs": [], "origin": "new"})
-                continue
+            if template.style == "proposal":
+                if not refs and any(marker in text for marker in (NO_MATERIAL, PLACEHOLDER)):
+                    explicit_gaps.append({"text": text, "refs": [], "origin": "new"})
+                    continue
+                if refs and NO_MATERIAL in text:
+                    sentences = split_sentences(text)
+                    explicit_gaps.extend({"text": sentence, "refs": [], "origin": "new"}
+                                         for sentence in sentences if NO_MATERIAL in sentence)
+                    text = " ".join(sentence for sentence in sentences if NO_MATERIAL not in sentence)
+                    if not text:
+                        continue
             path = f"units.{unit['key']}.p{len(paragraphs)}"
             evidence_texts = list(inputs.values())
             if refs:

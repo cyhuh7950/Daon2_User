@@ -577,6 +577,29 @@ def test_rfp_does_not_turn_reference_demonstrations_into_rfp_requirements(rfp_te
     assert any(w["code"] == "UNSUPPORTED_SOURCE_CLAIM" for w in warnings.items) is rejected
 
 
+def test_rfp_preserves_grounded_body_but_moves_explicit_missing_material_to_open_items():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    body = "수행 책임자는 납품을 맡고 검토 책임자는 결과를 확인한다."
+    gap = "실제 투입 인원은 [자료 없음]으로 두고 추후 확정한다."
+    pack = ContextPack((Passage("S1", "1", "1", "proposal", None, "page", "1", None, body),), False, 1)
+    template = TemplateRegistry().get("rfp_response_proposal")
+    unit = {"key": "team", "title": "수행 조직과 역할"}
+    for data in (
+        [{"text": body, "refs": ["S1"]}, {"text": gap, "refs": []}],
+        [{"text": f"{body} {gap}", "refs": ["S1"]}],
+    ):
+        paragraphs, warnings, pending = AuthoringPipeline._checked_unit_paragraphs(
+            {"paragraphs": data}, template, unit, pack, [], {})
+        assert not warnings.items
+        assert paragraphs == [{"text": body, "refs": ["S1"], "origin": "sourced"}]
+        assert pending == ["수행 조직과 역할: [작성 필요]"]
+    paragraphs, _, pending = AuthoringPipeline._checked_unit_paragraphs(
+        {"paragraphs": [{"text": gap, "refs": []}]}, template, unit, pack, [], {})
+    assert "[자료 없음]" in paragraphs[0]["text"] and not pending
+
+
 def test_skipped_proposal_price_remains_open_when_automatic_grounding_fails(writing, monkeypatch):
     client, repo, model, worker = writing
     generate = model.generate
