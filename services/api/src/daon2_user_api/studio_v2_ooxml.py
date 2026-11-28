@@ -49,10 +49,12 @@ def _run(text: str, *, bold: bool = False, sup: bool = False, color: str | None 
     return f'<w:r>{"<w:rPr>" + props + "</w:rPr>" if props else ""}<w:t xml:space="preserve">{_x(text)}</w:t></w:r>'
 
 
-def _para(text: str, style: str | None = None, refs: Sequence[str] = (), *, numbered: bool = False, bold: bool = False) -> str:
+def _para(text: str, style: str | None = None, refs: Sequence[str] = (), *, numbered: bool = False, bold: bool = False, new_page: bool = False) -> str:
     ppr = ""
     if style:
         ppr += f'<w:pStyle w:val="{style}"/>'
+    if new_page:
+        ppr += "<w:pageBreakBefore/>"
     if numbered:
         ppr += '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>'
     runs = _run(text, bold=bold)
@@ -69,7 +71,8 @@ def _table(rows: Sequence[Sequence[object]]) -> str:
     out = ['<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>', f"<w:tblGrid>{grid}</w:tblGrid>"]
     for index, row in enumerate(rows):
         cells = list(row) + [""] * (width - len(row))
-        out.append("<w:tr>" + "".join(
+        row_properties = "<w:trPr><w:cantSplit/>" + ("<w:tblHeader/>" if index == 0 else "") + "</w:trPr>"
+        out.append("<w:tr>" + row_properties + "".join(
             f'<w:tc><w:tcPr><w:tcW w:w="{9000 // width}" w:type="dxa"/></w:tcPr><w:p>{_run(str(c), bold=index == 0)}</w:p></w:tc>' for c in cells) + "</w:tr>")
     out.append("</w:tbl><w:p/>")
     return "".join(out)
@@ -90,22 +93,33 @@ NUMBERING = f"""{_XML}<w:numbering {_W}><w:abstractNum w:abstractNumId="0"><w:mu
 def build_docx(elements: Sequence[tuple], title: str, *, language: str = "ko") -> bytes:
     """elements: ('title',text) ('h1',text) ('h2',text) ('p',text,refs) ('bullets',items,refs) ('table',rows) ('pagebreak',)."""
     body: list[str] = []
+    new_page = False
     for element in elements:
         kind = element[0]
+        if kind == "pagebreak":
+            # 다음 내용에 페이지 구분을 붙여 빈 문단만 다음 쪽으로 밀리는 것을 막는다.
+            new_page = bool(body)
+            continue
         if kind == "title":
-            body.append(_para(element[1], "Title"))
+            body.append(_para(element[1], "Title", new_page=new_page))
         elif kind in {"h1", "h2"}:
-            body.append(_para(element[1], "Heading1" if kind == "h1" else "Heading2"))
+            body.append(_para(element[1], "Heading1" if kind == "h1" else "Heading2", new_page=new_page))
         elif kind == "p":
-            body.append(_para(element[1], None, element[2] if len(element) > 2 else ()))
+            body.append(_para(element[1], None, element[2] if len(element) > 2 else (), new_page=new_page))
         elif kind == "bullets":
             refs = element[2] if len(element) > 2 else ()
             for index, item in enumerate(element[1]):
-                body.append(_para(item, "ListBullet", refs if index == len(element[1]) - 1 else (), numbered=True))
-        elif kind == "table":
+                body.append(_para(item, "ListBullet", refs if index == len(element[1]) - 1 else (), numbered=True,
+                                  new_page=new_page and index == 0))
+            if not element[1]:
+                continue
+        elif kind == "table" and element[1]:
+            if new_page:
+                body.append('<w:p><w:r><w:br w:type="page"/></w:r></w:p>')
             body.append(_table(element[1]))
-        elif kind == "pagebreak":
-            body.append('<w:p><w:r><w:br w:type="page"/></w:r></w:p>')
+        else:
+            continue
+        new_page = False
     sect = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1304" w:bottom="1440" w:left="1304" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>'
     document = f'{_XML}<w:document {_W}><w:body>{"".join(body)}{sect}</w:body></w:document>'
     entries = {
