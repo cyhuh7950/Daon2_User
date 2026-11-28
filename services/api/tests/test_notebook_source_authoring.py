@@ -382,11 +382,12 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
     assert final["units"][0] == current["units"][0]
     assert final["units"][1]["paragraphs"] == [{"text": PROPOSAL, "refs": [], "origin": "user"}]
     assert not final["units"][1]["warnings"]
-    assert len(calls) == 3
+    assert len(calls) == 4
 
 
 @pytest.mark.parametrize("template", ["rfp_response_proposal", "reference_proposal_draft"])
-def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing, monkeypatch, template):
+@pytest.mark.parametrize("invalid_attempts", [1, 2])
+def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing, monkeypatch, template, invalid_attempts):
     client, repo, model, worker = writing
     generate = model.generate
     prompts = []
@@ -395,7 +396,7 @@ def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing,
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
             prompts.append(prompt.user)
-            if len(prompts) == 1:
+            if len(prompts) <= invalid_attempts:
                 result.data["paragraphs"][0]["text"] = "현재 장비 999대가 고장 상태이다."
         return result
 
@@ -419,6 +420,9 @@ def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing,
     assert "[근거 검사 후 수정]" in prompts[1]
     assert "ANCHOR_MISMATCH" in prompts[1]
     assert "UNSUPPORTED_SOURCE_CLAIM" in prompts[1]
+    if invalid_attempts == 2:
+        assert "[원문만 사용해 다시 작성]" in prompts[2]
+        assert "장비 999대" not in prompts[2]
     assert "999대" not in str(completed["document"])
 
 

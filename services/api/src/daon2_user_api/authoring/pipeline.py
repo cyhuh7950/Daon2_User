@@ -323,7 +323,7 @@ class AuthoringPipeline:
                        "원문에 목표만 있으면 '제안요청서는 …을 요구한다' 또는 '이 제안의 목표는 …이다'라고 씁니다. "
                        "새 실행 방법은 관찰 사실과 섞지 말고 별도 문장에 제안임을 밝힙니다. "
                        "수치와 단위는 참조한 구간에서 직접 확인되는 것만 쓰고, 자료별 사실을 한 문단에 섞으면 각 자료의 라벨을 모두 붙입니다. "
-                       "표나 목차의 순번을 사실 수치처럼 본문에 반복하지 말고, 미결 입력은 open_items에 남깁니다.")
+                       "소목차 번호·제목, 파일명·문서 코드, 검수용 식별자를 본문에 쓰지 말고, 미결 입력은 open_items에 남깁니다.")
         correction = ""
         if repair_issue is not None:
             correction = (
@@ -349,23 +349,39 @@ class AuthoringPipeline:
             except (StudioError, ValueError, KeyError, TypeError):
                 pass
         paragraphs, warnings = self._checked_unit_paragraphs(generation.data, template, unit, pack, material, inputs)
-        if template.style == "proposal" and warnings.items:
-            correction_prompt = replace(prompt, user=(
-                f"{prompt.user}\n\n[근거 검사 후 수정]\n"
+        if template.style == "proposal" and (warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)):
+            repair = (
+                "[근거 검사 후 수정]\n"
                 "아래 첫 응답은 검사 자료입니다. 경고가 걸린 문단만 고치고 확인된 문단과 미결 항목은 유지하세요. "
                 "근거에서 확인되지 않는 현황·수치·단위는 문장에서 빼세요. "
                 "목표와 요구사항은 출처를 주어로 삼고 확인되는 내용만 짧게 쓰세요. "
-                "필요한 근거 라벨이 다른 문단에만 있다면 해당 문단의 refs에도 붙이세요. 전체 JSON을 반환하세요.\n"
+                "필요한 근거 라벨이 다른 문단에만 있다면 해당 문단의 refs에도 붙이세요. 소목차 번호와 내부 식별자는 빼세요. "
+                "미결 항목은 open_items에 두고, 각 본문 문단에는 참조한 근거 라벨을 넣으세요. 전체 JSON을 반환하세요.\n"
                 + json.dumps({"warnings": warnings.items, "previous": generation.data}, ensure_ascii=False)
-            ))
-            try:
-                corrected = self._llm.generate(ctx.context, correction_prompt, cancel_check=ctx.cancel_check)
-                corrected_paragraphs, corrected_warnings = self._checked_unit_paragraphs(
-                    corrected.data, template, unit, pack, material, inputs)
+            )
+            source_only = (
+                "[근거 검사 후 수정] [원문만 사용해 다시 작성]\n"
+                f"'{unit['title']}' 소목차에 필요한 원문 구간의 사실만 짧은 한국어 문단으로 쓰세요. "
+                "문서 ID, 소목차 번호, 원문에 없는 기관명과 현행 상황은 쓰지 마세요. "
+                "필수 수치와 날짜는 인용 원문에서 직접 대조되는 표기만 사용하세요. 목표·작업·검수 방법을 "
+                "명시된 범위에서 전달하고, 각 문단에는 직접 참조한 구간 라벨을 넣으세요. "
+                "확인할 수 없는 세부 조건은 본문에 넣지 말고 open_items에 남기세요.\n\n"
+                f"[작성 목적] {unit['purpose']}\n[요구사항]\n{requirement_lines or '없음'}\n"
+                f"{pack.render()}\n{render_knowledge(material) if material else ''}"
+            )
+            corrections = (replace(prompt, user=f"{prompt.user}\n\n{repair}"),
+                           replace(prompt, user=source_only, max_output_tokens=min(800, prompt.max_output_tokens)))
+            for correction_prompt in corrections:
+                ctx.cancel_check()
+                try:
+                    corrected = self._llm.generate(ctx.context, correction_prompt, cancel_check=ctx.cancel_check)
+                    corrected_paragraphs, corrected_warnings = self._checked_unit_paragraphs(
+                        corrected.data, template, unit, pack, material, inputs)
+                except StudioError:
+                    continue
                 if not corrected_warnings.items and not any(NO_MATERIAL in p["text"] for p in corrected_paragraphs):
                     generation, paragraphs, warnings = corrected, corrected_paragraphs, corrected_warnings
-            except StudioError:
-                pass  # 검사에 걸린 첫 응답을 사용자 검토용으로 보존한다.
+                    break
         lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
         compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
         return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
