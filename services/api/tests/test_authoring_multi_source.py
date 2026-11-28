@@ -39,6 +39,29 @@ def scan(sources, llm=None, **options):
 
 
 class ScanRequirementsTests(unittest.TestCase):
+    def test_source_labels_preserve_requirements_missing_from_model(self):
+        rfp = source("rfp", "library.pdf", "\n".join([
+            "Goal: digitize 240 catalogue records for a fictional public library.",
+            "Mandatory scope: search by title and author, and export catalogue CSV.",
+            "Acceptance: verify 30 samples and show the library team how to export CSV.",
+            "Delivery: inventory review, pilot, validation, and final handover in eight weeks.",
+            "Delivery items: search guide, issue log, accessibility checklist, test report.",
+            "Proposal sections: approach, delivery plan, team assignments, and acceptance.",
+            "Synthetic fixture only.",
+        ]))
+        rows, warnings = scan([rfp], Llm({1: ["제목 검색", "CSV 내보내기", "표본 30건 확인", "CSV 교육 시연", "8주 이내 인수",
+                                             "검색 가이드", "접근 방식", "납품 계획", "수락 조건"]}))
+        self.assertEqual(warnings, [])
+        self.assertTrue(all(row["source_name"] == "library.pdf" for row in rows))
+        texts = [row["text"] for row in rows]
+        self.assertIn("issue log", texts)
+        self.assertIn("accessibility checklist", texts)
+        self.assertIn("test report", texts)
+        self.assertIn("team assignments", texts)
+        self.assertTrue(any("240" in text for text in texts))
+        self.assertTrue(any("author" in text for text in texts))
+        self.assertFalse(any("Synthetic" in text for text in texts))
+
     def test_every_part_of_a_long_file_is_read(self):
         texts = [f"{'가' * 700}\n항목 {n} 내용을 반드시 제출해야 한다" for n in range(5)]
         llm = Llm()

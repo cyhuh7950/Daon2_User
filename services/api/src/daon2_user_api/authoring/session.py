@@ -22,6 +22,7 @@ REFERENCE_INPUTS = {
     "reference_proposal_draft": "reference_proposals",
     "insurance_terms_draft": "base_terms",
 }
+GROUNDING_WARNINGS = {"ANCHOR_MISMATCH", "UNSUPPORTED_SOURCE_CLAIM"}
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _TRANSITIONS = {"collecting": {"analyzing", "cancelled"}, "analyzing": {"review", "failed", "cancelled"}, "review": {"generating", "analyzing", "cancelled"},
                 "generating": {"completed", "failed", "cancelled", "paused"}, "paused": {"generating", "cancelled"}, "failed": {"analyzing", "generating"}, "completed": set(), "cancelled": set()}
@@ -185,10 +186,16 @@ def _unit_index(session: Mapping[str, Any], key: str) -> int:
     raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
 
 
+def _grounding_warnings(unit: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [warning for warning in unit.get("warnings", []) if warning.get("code") in GROUNDING_WARNINGS]
+
+
 def resume(session: Mapping[str, Any]) -> dict[str, Any]:
-    """사람이 빠지면 다음 미완료 소목차부터 이어진다. 확인을 기다리던 소목차는 확인된 것으로, 실패한 소목차는 다시 쓴다."""
+    """검토한 초안에서 이어 쓰되 근거 불일치가 있는 본문은 먼저 수정해야 한다."""
     if session.get("terms_review"):
         raise AuthoringError("AUTHORING_TERMS_REVIEW_REQUIRED", 409)
+    if any(unit["status"] == "needs_review" and _grounding_warnings(unit) for unit in session["units"]):
+        raise AuthoringError("AUTHORING_STATE_INVALID", 409)
     updated = transition(session, "generating")
     updated.update({"pause_requested": False, "pause_reason": None})
     for unit in updated["units"]:
@@ -231,7 +238,7 @@ def redo_unit(session: Mapping[str, Any], key: str) -> dict[str, Any]:
     unit = updated["units"][_unit_index(updated, key)]
     if unit["locked"]:
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
-    unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
+    unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "warnings": [], "error_code": None})
     _allow_terms_recheck(updated, {key})
     return updated
 
@@ -245,10 +252,17 @@ def edit_unit(session: Mapping[str, Any], key: str, paragraphs: Sequence[str]) -
         raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
     updated = copy.deepcopy(dict(session))
     unit = updated["units"][_unit_index(updated, key)]
-    if texts != [paragraph["text"] for paragraph in unit["paragraphs"]]:
+    original = [paragraph["text"] for paragraph in unit["paragraphs"]]
+    for warning in _grounding_warnings(unit):
+        path = warning.get("path") or ""
+        match = re.search(r"\.p(\d+)$", path)
+        index = int(match[1]) if match else len(original)
+        if texts == original or (index < len(original) and original[index] in texts):
+            raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
+    if texts != original:
         _allow_terms_recheck(updated, {key})
     unit.update({"status": "done", "locked": True, "error_code": None, "paragraphs": [{"text": text, "refs": [], "origin": "user"} for text in texts],
-                 "summary": " ".join(texts)[:300]})
+                 "summary": " ".join(texts)[:300], "warnings": []})
     return updated
 
 
@@ -289,11 +303,15 @@ def apply_outline(session: Mapping[str, Any], change: Sequence[Mapping[str, Any]
             raise AuthoringError("AUTHORING_INPUT_INVALID", 422)
         unit.update({"title": title.strip(), "purpose": purpose, "target_chars": size})
         if unit["key"] in affected:
-            unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "error_code": None})
+            unit.update({"status": "pending", "paragraphs": [], "summary": "", "terms": [], "open_items": [], "warnings": [], "error_code": None})
         units.append(unit)
     updated["units"] = units
     _allow_terms_recheck(updated, affected | (set(known) - set(keys)))
     return updated
+
+
+def unresolved_inputs(assumptions: Sequence[Mapping[str, Any]]) -> list[str]:
+    return [f"{item['key']}: [작성 필요]" for item in assumptions if item.get("default") == "[작성 필요]"]
 
 
 def validate_review_edit(requirements: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

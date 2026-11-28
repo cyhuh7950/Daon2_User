@@ -21,8 +21,8 @@ from ..question_external_evidence import ExternalEvidenceError, build_plan_promp
 from .agent import next_knowledge_ref, NO_MATERIAL, OVERSIZE_RATIO, OUTLINE_SCHEMA, OUTLINE_SYSTEM, UNIT_PLAN_SCHEMA, UNIT_PLAN_SYSTEM, UNIT_SCHEMA, UNIT_SYSTEM, build_units, evidence_limit, knowledge_row, plan_sections
 from .checks import evidence_integrity, term_consistency
 from .diff import normalize, scoped_deletion_candidates, split_sentences, strip_repeated_chapter_heading, summarize, tag_section
-from .rfp import MAX_WINDOWS, extract_requirements, scan_requirements
-from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition
+from .rfp import MAX_WINDOWS, best_subsection, extract_requirements, matching_sections, overlap, scan_requirements
+from .session import SESSION_SCHEMA, generation_versions, reference_versions, source_versions, transition, unresolved_inputs
 from .terms_review import TERMS_BODY_RULES, review_terms_body
 from .templates import AuthoringError, AuthoringTemplate, TemplateRegistry
 
@@ -34,7 +34,8 @@ INLINE_REF = re.compile(rf"[ \t]*\[[ \t]*[SKL][0-9]+{_REF_LOC}(?:[ \t]*[,;][ \t]
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
 UNIT_REQUIREMENT_CHARS = 8000  # 소목차 하나를 쓰는 요청이 모델 호출 제한을 넘지 않게 한다.
-_TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
+_CURRENT_FACT = re.compile(r"(?<![가-힣])(?:현행|현재)\s|발주\s*배경")
+_PROPOSED_ACTION = re.compile(r"(?:제안한다|제안합니다|검토할\s*예정이다|개선할\s*계획이다)[.!?]?$")
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
     "key": {"type": "string"}, "purpose": {"type": "string"}, "knowledge_refs": {"type": "array", "items": {"type": "string"}},
@@ -57,14 +58,15 @@ STYLE_RULES = {"proposal": RULES, "terms": TERMS_RULES, "contract": CONTRACT_RUL
 NOTICES = {"proposal": "AI 작성 초안, 전문가 검토 필요", "terms": "AI 작성 초안, 전문가 검토 필요", "contract": "AI 작성 초안, 전문가 검토 필요 · 법률 자문이 아닌 근거 대조입니다"}
 
 
-def grams(text: str) -> set[str]:
-    clean = "".join(_TOKEN.findall(text.lower()))
-    return {clean[i:i + 2] for i in range(len(clean) - 1)}
-
-
-def overlap(a: str, b: str) -> float:
-    ga, gb = grams(a), grams(b)
-    return len(ga & gb) / max(1, len(ga))
+def _check_current_facts(text: str, evidence: Sequence[str], warnings: Warnings, path: str) -> None:
+    """현황 단정은 참조한 문장이나 사용자가 제공한 사실에서 확인할 수 있어야 한다."""
+    sources = [normalize(source) for source in evidence]
+    for sentence in split_sentences(text):
+        if not _CURRENT_FACT.search(sentence) or _PROPOSED_ACTION.search(sentence):
+            continue
+        if not any(normalize(sentence) in source for source in sources):
+            warnings.add("UNSUPPORTED_SOURCE_CLAIM", path)
+            return
 
 
 class KnowledgeCollector:
@@ -316,6 +318,9 @@ class AuthoringPipeline:
         earlier = "\n".join(f"- {other['title']}: {other.get('summary') or ' '.join(p['text'] for p in other['paragraphs'])[:200]}" for other in done[-6:]) or "없음"
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         system = f"{UNIT_SYSTEM}\n{TERMS_BODY_RULES}" if template.style == "terms" else UNIT_SYSTEM
+        if template.style == "proposal":
+            system += ("\n현행·현재 상황이나 발주 배경을 사실로 쓸 때는 인용 근거나 사용자 입력의 문장을 인용합니다. "
+                       "새 제안은 제안이나 계획임을 별도 문장에 밝힙니다.")
         correction = ""
         if repair_issue is not None:
             correction = (
@@ -343,7 +348,7 @@ class AuthoringPipeline:
         known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
         warnings = Warnings()
         paragraphs: list[dict[str, Any]] = []
-        for index, para in enumerate(generation.data.get("paragraphs", [])[:12]):
+        for para in generation.data.get("paragraphs", [])[:12]:
             text = text_field(para.get("text"), 2500) if isinstance(para, Mapping) else ""
             if not text:
                 continue
@@ -355,11 +360,16 @@ class AuthoringPipeline:
             refs = [r for r in dict.fromkeys([*para.get("refs", []), *inline]) if isinstance(r, str) and r in known_refs]
             if not text:
                 continue
+            path = f"units.{unit['key']}.p{len(paragraphs)}"
+            evidence_texts = list(inputs.values())
             if refs:
                 evidence_pack = ContextPack(tuple(p for p in pack.passages if p.ref in refs) + tuple(
                     Passage(row["ref"], "", "", "", None, "page", str(row["page"]), None, row["text"]) for row in material if row["ref"] in refs), False, 0)
-                check_anchors(text, refs, evidence_pack, warnings, f"units.{unit['key']}.p{index}")
-            elif NO_MATERIAL not in text:
+                check_anchors(text, refs, evidence_pack, warnings, path)
+                evidence_texts.extend(p.text for p in evidence_pack.passages)
+            if template.style == "proposal":
+                _check_current_facts(text, evidence_texts, warnings, path)
+            if not refs and NO_MATERIAL not in text:
                 text = f"{text} {NO_MATERIAL}"  # 근거 없는 문단은 제품이 표시한다(4.4).
             paragraphs.append({"text": text, "refs": refs, "origin": "sourced" if refs else "new"})
         if not paragraphs:
@@ -510,10 +520,7 @@ class AuthoringPipeline:
         ctx.progress(92, "점검")
         knowledge = session.get("knowledge") or []
         document_sections = [{"key": u["key"], "title": u["title"], "paragraphs": u["paragraphs"], "open_items": u["open_items"]} for u in session["units"]]
-        by_section: dict[str, dict[str, Any]] = {}
-        for unit in session["units"]:
-            by_section.setdefault(unit["section_key"], {"key": unit["section_key"], "paragraphs": []})["paragraphs"] += unit["paragraphs"]
-        coverage = self.coverage(session["requirements"], session["plan"], list(by_section.values())) if template.analysis == "rfp_requirements" else []
+        coverage = self.coverage(session["requirements"], session["plan"], document_sections) if template.analysis == "rfp_requirements" else []
         checks: list[dict[str, Any]] = []
         if references is not None:
             if template.style == "terms":
@@ -528,7 +535,10 @@ class AuthoringPipeline:
         if template.style == "contract":
             checks.append(self.law_crosscheck(ctx, template, document_sections, knowledge))
         warnings = [w for unit in session["units"] for w in unit.get("warnings", [])]
-        open_items = list(dict.fromkeys(item for unit in session["units"] for item in unit["open_items"]))
+        open_items = list(dict.fromkeys([
+            *(item for unit in session["units"] for item in unit["open_items"]),
+            *unresolved_inputs(session["assumptions"]),
+        ]))
         final = transition(session, "completed")
         final["document"] = {"template_id": template.template_id, "analysis": template.analysis, "title": template.draft_title,
                              "sections": document_sections, "requirements": session["requirements"], "coverage": coverage,
@@ -681,8 +691,7 @@ class AuthoringPipeline:
         checks.append(self.terms(ctx, template, sections_out))
         if template.style == "contract":
             checks.append(self.law_crosscheck(ctx, template, sections_out, knowledge))
-        for c in session["assumptions"]:
-            open_items.append(f"{c['key']}: {PLACEHOLDER}")
+        open_items.extend(unresolved_inputs(session["assumptions"]))
         document = {"template_id": template.template_id, "title": template.draft_title, "sections": sections_out, "requirements": session["requirements"],
                     "coverage": coverage, "checks": checks, "assumptions": session["assumptions"], "open_items": list(dict.fromkeys(open_items)),
                     "notice": NOTICES[template.style], "style": template.style}
@@ -697,18 +706,20 @@ class AuthoringPipeline:
 
     @staticmethod
     def coverage(requirements: Sequence[Mapping[str, Any]], plan: Mapping[str, Any], sections: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-        by_key = {s["key"]: s for s in sections}
+        by_key = {section["key"]: matching_sections(section["key"], sections) for section in plan["sections"]}
         rows = []
         for req in requirements:
             mapped = [s for s in plan["sections"] if req["id"] in s["requirement_ids"]]
             best, best_section = 0.0, None
             for section in mapped:
-                body = " ".join(p["text"] for p in by_key.get(section["key"], {}).get("paragraphs", []))
+                body = " ".join(p["text"] for subsection in by_key[section["key"]] for p in subsection["paragraphs"])
                 score = overlap(req["text"], body)
                 if score > best:
                     best, best_section = score, section
             status = "covered" if best >= 0.3 else "partial" if best >= 0.12 or mapped else "missing"
-            rows.append({"requirement_id": req["id"], "text": req["text"], "mandatory": req["mandatory"], "section_key": (best_section or (mapped[0] if mapped else {})).get("key"),
+            parent = best_section or (mapped[0] if mapped else None)
+            subsection = best_subsection(req["text"], by_key[parent["key"]]) if parent else None
+            rows.append({"requirement_id": req["id"], "text": req["text"], "mandatory": req["mandatory"], "section_key": subsection["key"] if subsection else None,
                          "status": status, "score": round(best, 3)})
         return rows
 

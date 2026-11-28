@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from .rfp import best_subsection, matching_sections
+from .session import unresolved_inputs
+
 NOTICE = "AI 작성 초안, 전문가 검토 필요"
 STATUS_LABEL = {"covered": "대응", "partial": "부분 대응", "missing": "누락"}
 DIFF_LABEL = {"unchanged": "유지", "modified": "수정", "new": "신규"}
@@ -47,7 +50,12 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
         els += [("pagebreak",), ("h1", "부록 A. 요구사항 대응표")]
         rows = [["ID", "요구사항", "대응 섹션", "상태"]]
         for row in doc.get("coverage", []):
-            rows.append([row["requirement_id"], row["text"], titles.get(row.get("section_key"), "-"), STATUS_LABEL.get(row["status"], row["status"])])
+            key = row.get("section_key")
+            title = titles.get(key)
+            if title is None and key:
+                subsection = best_subsection(row["text"], matching_sections(key, doc["sections"]))
+                title = subsection["title"] if subsection else None
+            rows.append([row["requirement_id"], row["text"], title or "-", STATUS_LABEL.get(row["status"], row["status"])])
         els.append(("table", rows))
     else:
         els.append(("pagebreak",))
@@ -82,7 +90,8 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
     els += [("pagebreak",), ("h1", "부록 C. 가정과 미결 항목")]
     if doc.get("assumptions"):
         els.append(("bullets", [f"{a['key']}: {a['reason']} → {a['default']}" for a in doc["assumptions"]], []))
-    els.append(("bullets", doc.get("open_items") or ["미결 항목 없음"], []))
+    pending = list(dict.fromkeys([*(doc.get("open_items") or []), *unresolved_inputs(doc.get("assumptions") or [])]))
+    els.append(("bullets", pending or ["미결 항목 없음"], []))
     return els
 
 

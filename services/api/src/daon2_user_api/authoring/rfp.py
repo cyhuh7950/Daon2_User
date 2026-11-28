@@ -17,6 +17,11 @@ _ID_LINE = re.compile(r"^\s*(?P<id>[A-Z]{2,6}-\d{2,4})[\s:.)\-]+(?P<text>.{6,})$
 _NUMBERED = re.compile(r"^\s*(?P<id>\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)[\s:.)]+(?P<text>.{6,})$")
 _MANDATORY = re.compile(r"해야\s*한다|하여야\s*한다|할\s*것|필수|반드시|이어야\s*한다|포함해야")
 _REQUIREMENT_HINT = re.compile(r"해야|하여야|할 것|필수|반드시|이어야|제출|실시|포함|제공|지원")
+_LABELLED_REQUIREMENT = re.compile(
+    r"^(?P<label>goal|mandatory scope|acceptance|delivery|delivery items|proposal sections"
+    r"|과업 목표|필수 범위|검수 기준|납품 일정|납품 산출물|제안서 목차)\s*[:：]\s*(?P<text>.+)$", re.IGNORECASE
+)
+_LIST_LABELS = {"delivery items", "proposal sections", "납품 산출물", "제안서 목차"}
 _TOKEN = re.compile(r"[0-9A-Za-z가-힣]{2,}")
 SCHEMA = {"type": "object", "properties": {"requirements": {"type": "array", "items": {"type": "object", "properties": {
     "text": {"type": "string"}, "mandatory": {"type": "boolean"}, "category": {"type": "string"}}, "required": ["text"]}}}, "required": ["requirements"]}
@@ -28,12 +33,23 @@ def _similar(a: str, b: str) -> float:
 
 
 def rule_candidates(texts: Sequence[tuple[str, str]]) -> list[dict[str, Any]]:
-    """texts: [(ref, 본문)]. 번호·ID가 붙은 줄과 요구 표현이 있는 줄을 후보로 뽑는다."""
+    """번호·ID, 명시된 항목명과 필수 요구 표현을 원문에서 보존한다."""
     found: list[dict[str, Any]] = []
     seen_text: set[str] = set()
     for ref, body in texts:
         for line in body.splitlines():
             line = line.strip()
+            labelled = _LABELLED_REQUIREMENT.fullmatch(line)
+            if labelled:
+                label = labelled["label"].lower()
+                value = labelled["text"].strip()
+                items = re.split(r"\s*[,;]\s*", value.rstrip(".")) if label in _LIST_LABELS else [value]
+                for item in items:
+                    item = re.sub(r"^and\s+", "", item, flags=re.IGNORECASE).strip()
+                    if item and item not in seen_text:
+                        seen_text.add(item)
+                        found.append({"id": None, "text": item, "mandatory": True, "category": label, "refs": [ref]})
+                continue
             match = _ID_LINE.match(line) or _NUMBERED.match(line)
             text = match.group("text").strip() if match else None
             if text is None and len(line) >= 12 and _REQUIREMENT_HINT.search(line):
@@ -116,6 +132,29 @@ def _windows(source: SourceText, budget_chars: int) -> list[tuple[SourceSection,
 
 def _tokens(text: str) -> set[str]:
     return set(_TOKEN.findall(text.lower()))
+
+
+def _grams(text: str) -> set[str]:
+    clean = "".join(_TOKEN.findall(text.lower()))
+    return {clean[i:i + 2] for i in range(len(clean) - 1)}
+
+
+def overlap(a: str, b: str) -> float:
+    ga, gb = _grams(a), _grams(b)
+    return len(ga & gb) / max(1, len(ga))
+
+
+def matching_sections(key: str, sections: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return [section for section in sections if section["key"] == key
+            or re.fullmatch(rf"{re.escape(key)}__u[0-9]+", section["key"])]
+
+
+def best_subsection(requirement: str, sections: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    def score(section: Mapping[str, Any]) -> float:
+        return overlap(requirement, " ".join(paragraph["text"] for paragraph in section["paragraphs"]))
+
+    best = max(sections, key=score, default=None)
+    return best if best is not None and (len(sections) == 1 or score(best) > 0) else None
 
 
 def _same_across_files(a: set[str], b: set[str]) -> bool:
