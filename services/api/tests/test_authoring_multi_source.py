@@ -61,6 +61,13 @@ class ScanRequirementsTests(unittest.TestCase):
         self.assertTrue(any("240" in text for text in texts))
         self.assertTrue(any("author" in text for text in texts))
         self.assertFalse(any("Synthetic" in text for text in texts))
+        originals, _ = scan([rfp])
+        self.assertEqual(len(originals), 16)
+        self.assertEqual([row["text"] for row in originals[1:8]], [
+            "search by title", "search by author", "export catalogue CSV",
+            "verify 30 samples", "show the library team how to export CSV",
+            "inventory review, pilot, validation, and final handover", "delivery in eight weeks",
+        ])
 
     def test_every_part_of_a_long_file_is_read(self):
         texts = [f"{'가' * 700}\n항목 {n} 내용을 반드시 제출해야 한다" for n in range(5)]

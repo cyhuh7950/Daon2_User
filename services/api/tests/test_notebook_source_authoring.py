@@ -104,6 +104,7 @@ def test_rfp_cannot_also_be_its_own_reference():
 
 
 PROPOSAL = "시범 운영에서는 단계별 인수 목록을 사용한다."
+GROUNDED_PROPOSAL = "시범 운영 기간에는 각 단계에서 인수할 항목을 목록으로 확인한다."
 RFP = "서비스 전환 계획을 제출해야 한다."
 TERMS = ("별빛 자동차보험 약관\n제1장 총칙\n계약자는 보험계약의 내용을 확인할 수 있다.\n"
          "제2장 보장내용\n보장 범위는 보험증권에 적는다.\n제3장 보험금의 지급\n"
@@ -148,6 +149,11 @@ class FixtureModel:
                 {"title": "지급 지연 통지", "purpose": "전자우편 통지"},
             ]}] if self.split_payment else []}
         elif name == "authoring_unit":
+            if "[선택된 원문 근거]\n" in prompt.user:
+                options = json.loads(prompt.user.split("[선택된 원문 근거]\n", 1)[1])
+                assert options[0]["text"] == PROPOSAL
+                return SimpleNamespace(data={"paragraphs": [{"text": GROUNDED_PROPOSAL, "refs": [options[0]["id"]]}]},
+                                       provider_code="FIXTURE", model_id="fixture", connection_short_code="FIXTURE")
             if "[선택 가능한 근거 발췌]\n" in prompt.user:
                 options = json.loads(prompt.user.split("[선택 가능한 근거 발췌]\n", 1)[1])
                 excerpt = next(item for item in options if item["text"] == PROPOSAL)
@@ -435,6 +441,9 @@ def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing,
     if invalid_attempts == 2:
         assert "[원문만 사용해 다시 작성]" in prompts[2]
         assert "장비 999대" not in prompts[2]
+        assert "[선택된 원문 근거]" in prompts[3]
+        assert GROUNDED_PROPOSAL in str(completed["document"])
+        assert "본문 보완" not in str(completed["document"])
     assert "999대" not in str(completed["document"])
 
 
@@ -447,14 +456,25 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
         assert not _evidence_anchors(wrong).issubset(source)
 
 
-def test_proposal_last_recovery_rejects_paragraph_that_is_not_an_exact_excerpt(writing, monkeypatch):
+@pytest.mark.parametrize("invalid", ["unknown_selection", "unknown_citation", "verbatim", "unsupported_number"])
+def test_proposal_last_recovery_rejects_unverified_prose(writing, monkeypatch, invalid):
     client, repo, model, worker = writing
     generate = model.generate
 
     def non_excerpt(context, prompt, cancel_check=None):
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
-            if "[선택 가능한 근거 발췌]" in prompt.user:
+            if "[선택된 원문 근거]" in prompt.user:
+                para = result.data["paragraphs"][0]
+                if invalid == "unknown_citation":
+                    para["refs"] = ["unknown-excerpt"]
+                elif invalid == "verbatim":
+                    para["text"] = PROPOSAL
+                else:
+                    para["text"] = "시범 운영에서는 인수 항목 999건을 확인한다."
+            elif "[선택 가능한 근거 발췌]" in prompt.user:
+                if invalid != "unknown_selection":
+                    return result
                 result.data["excerpt_ids"] = ["unknown-excerpt"]
             else:
                 result.data["paragraphs"][0]["text"] = "현재 사업은 999개 특수 장비를 사용한다."
