@@ -47,6 +47,12 @@ _SCOPE_NOTE = re.compile(
     rf"{_PENDING_FIELD}(?:\s*[·,]\s*{_PENDING_FIELD})*(?:은|는|을|를)\s+"
     r"(?:포함|기재|작성|확정)하지\s+않(?:는다|습니다|으며,\s*이\s*부분은\s*미결로\s*남긴다)[.。]?"
 )
+_SYNTHETIC_PROPOSAL_TITLE = re.compile(r"(?im)^\s*(?:[A-Z]{2,}\d+\s+)?synthetic\s+(?:reference\s+)?proposal\b[^\n]*")
+_REFERENCE_PARTY = re.compile(
+    r"(?im)\b(?P<role>delivery owner|review owner|client name|customer name|고객명|발주처명|납품 담당 조직|검토 담당 조직)"
+    r"\s*[:：]\s*[^\n.!?]+"
+)
+_REFERENCE_FIXTURE_NOTICE = re.compile(r"(?im)^\s*synthetic (?:fixture|test data|sample) only[^\n]*")
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
     "key": {"type": "string"}, "purpose": {"type": "string"}, "knowledge_refs": {"type": "array", "items": {"type": "string"}},
@@ -79,6 +85,14 @@ def _check_current_facts(text: str, evidence: Sequence[str], warnings: Warnings,
         if not any(normalize(sentence) in source for source in sources):
             warnings.add("UNSUPPORTED_SOURCE_CLAIM", path)
             return
+
+
+def _reference_proposal_passage(passage: Passage) -> Passage:
+    """작성 입력에는 이전 조직의 이름을 지우고 근거 조회용 원문은 유지한다."""
+    text = _SYNTHETIC_PROPOSAL_TITLE.sub("", passage.text)
+    text = _REFERENCE_FIXTURE_NOTICE.sub("", text)
+    text = _REFERENCE_PARTY.sub(lambda m: f"{m['role']}: 이전 이름 제외", text)
+    return replace(passage, filename="참고 제안서", heading=None, text=text.strip())
 
 
 class KnowledgeCollector:
@@ -247,6 +261,8 @@ class AuthoringPipeline:
         reference_outline = ""
         if reference_sources:
             sample = build_pack(reference_sources, budget_chars=self._context_chars // 2, focus=" ".join([*goal.values(), sections]))
+            if template.style == "proposal":
+                sample = replace(sample, passages=tuple(_reference_proposal_passage(p) for p in sample.passages))
             reference_outline = f"\n[참고 문서 또는 기준 약관]\n{sample.render()}\n"
         prompt = StudioPrompt(system=OUTLINE_SYSTEM, user=(
             f"[요청] {session.get('request_text') or ''}\n[입력] {goal or '없음'}\n[목표 분량] {str(pages) + '페이지' if pages else '지정 없음'}\n"
@@ -319,6 +335,8 @@ class AuthoringPipeline:
                 reference_role = "\n[기준 약관 구간] 사용자 변경 요청을 반영하고 새 조건이나 수치를 임의로 정하지 마세요. 근거 라벨: "
             else:
                 reference_role = "\n[기존 제안서 구간] 참고 자료입니다. 지난 고객명·가격·실적·일정을 이번 사업의 사실이나 RFP 요구로 옮기지 마세요. 근거 라벨: "
+                if template.style == "proposal":
+                    refs = tuple(_reference_proposal_passage(p) for p in refs)
             reference_role += ", ".join(reference_refs) or "없음"
             pack = ContextPack(pack.passages + refs, pack.truncated or reference_pack.truncated, pack.total_sections + reference_pack.total_sections)
         done = [other for other in session["units"] if other["status"] in ("done", "needs_review") and other["key"] != unit["key"]]
@@ -336,6 +354,7 @@ class AuthoringPipeline:
                        "새 실행 방법은 관찰 사실과 섞지 말고 별도 문장에 제안임을 밝힙니다. "
                        "수치와 단위는 참조한 구간에서 직접 확인되는 것만 쓰고, 자료별 사실을 한 문단에 섞으면 각 자료의 라벨을 모두 붙입니다. "
                        "소목차 번호·제목, 파일명·문서 코드, 검수용 식별자를 본문에 쓰지 마세요. "
+                       "이전 회사·기관·팀·고객 이름은 한글로 옮기는 경우도 쓰지 마세요. 현재 조직 정보가 없으면 수행팀과 검토팀처럼 역할로 표현하세요. "
                        "원문에 없는 세부 절차·양식 같은 공백은 문단을 추가하지 말고 open_items에만 적으세요.")
             if template.analysis != "rfp_requirements":
                 system += ("\n이 경로에는 제안요청서가 없습니다. 기존 제안서에서 순서만 확인되는 경우 예정된 순서를 설명하고, "
@@ -446,6 +465,7 @@ class AuthoringPipeline:
                     "주어진 발췌의 사실과 방법만 사용해 바로 제안서에 넣을 수 있는 한국어 본문을 작성하세요. "
                     "기존 제안서의 수행 방법은 이번 제안에서 채택할 방법으로 표현합니다. "
                     "기존 조직명이나 고객명, 가격, 구체적인 날짜, 별도의 검수 기준은 추가하지 마세요. "
+                    "이전 이름이 비워진 조직은 역할명으로 써야 합니다. "
                     "영문은 자연스러운 한국어로 옮기고, 한글 원문도 그대로 옮겨 적지 마세요. "
                     "명시된 수치, 단위 및 의무를 바꾸지 마세요. 소목차 제목이나 작성 과정, 자료 식별자는 본문에 쓰지 마세요."),
             user=(f"[소목차] {unit['title']}\n[작성 목적] {unit['purpose']}\n"

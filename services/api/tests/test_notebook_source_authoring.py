@@ -459,6 +459,24 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
     assert not _evidence_anchors("1주, 2주, 3주").issubset(phases)
 
 
+def test_reference_proposal_prompt_keeps_roles_and_work_without_prior_names():
+    from daon2_user_api.authoring.pipeline import _reference_proposal_passage
+    from daon2_user_api.studio_context_builder import Passage
+
+    original = Passage("S1", "version", "source", "QA123-fixture.pdf", "span", "page", "1", "old heading", (
+        "QA123 synthetic reference proposal - Previous Library catalogue\n"
+        "Phase one: review data; phase two: implement search.\n"
+        "Delivery owner: Old Delivery Team. Review owner: Old Review Team.\n"
+        "Synthetic fixture only. No commercial commitments."
+    ))
+    prompt = _reference_proposal_passage(original)
+    assert "Phase one: review data; phase two: implement search." in prompt.text
+    assert all(role in prompt.text for role in ("Delivery owner", "Review owner"))
+    assert not any(name in prompt.text for name in ("QA123", "Previous Library", "Old Delivery Team", "Old Review Team", "fixture"))
+    assert (prompt.ref, prompt.source_version_id, prompt.evidence_span_id) == (original.ref, original.source_version_id, original.evidence_span_id)
+    assert "Old Delivery Team" in original.text
+
+
 def test_cross_language_rfp_coverage_links_only_quotes_present_in_cited_body():
     from daon2_user_api.authoring.pipeline import AuthoringPipeline
 
