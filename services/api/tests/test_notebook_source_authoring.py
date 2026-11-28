@@ -485,11 +485,44 @@ def test_proposal_grounding_recognizes_model_written_inline_reference_spellings(
     pack = ContextPack((Passage("S1", "1", "1", "fixture", None, "page", "1", None, PROPOSAL),
                         Passage("S2", "2", "2", "fixture", None, "page", "1", None, RFP)), False, 2)
     data = {"paragraphs": [{"text": f"{PROPOSAL} ref:S1,ref:S2", "refs": []},
-                           {"text": f"{RFP} (S2)", "refs": []}]}
+                           {"text": f"{RFP} (S2)", "refs": []},
+                           {"text": f"{RFP} [근거 라벨: S2]", "refs": []}]}
     paragraphs, warnings, _ = AuthoringPipeline._checked_unit_paragraphs(
         data, template, {"key": "background", "title": "사업 배경"}, pack, [], {})
     assert not warnings.items
-    assert [(p["text"], p["refs"]) for p in paragraphs] == [(PROPOSAL, ["S1", "S2"]), (RFP, ["S2"])]
+    assert [(p["text"], p["refs"]) for p in paragraphs] == [(PROPOSAL, ["S1", "S2"]), (RFP, ["S2"]), (RFP, ["S2"])]
+
+
+def test_skipped_proposal_price_remains_open_when_automatic_grounding_fails(writing, monkeypatch):
+    client, repo, model, worker = writing
+    generate = model.generate
+
+    def unsupported_price(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            if "excerpt_ids" in result.data:
+                result.data["excerpt_ids"] = []
+            else:
+                result.data["paragraphs"][0]["text"] = "계약 가격은 999원으로 확정했다."
+        return result
+
+    monkeypatch.setattr(model, "generate", unsupported_price)
+    opened = client.post(PATH, json={"template_id": "reference_proposal_draft"}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    assert client.post(output + "/answers", json={"expected_revision": 1, "skip_remaining": True, "answers": [
+        {"key": "reference_proposals", "source_version_ids": ["proposal-v1"]},
+        {"key": "purpose", "value": "도서관 업무 절차 개선"},
+    ]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    price = next(section for section in review["plan"]["sections"] if section["key"] == "price")
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": [price]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    result = client.get(output).json()["data"]
+    assert result["state"] == "completed"
+    assert "price_schedule: [작성 필요]" in result["document"]["open_items"]
+    assert "999원" not in str(result["document"])
 
 
 def test_proposal_keeps_grounded_body_and_moves_unreferenced_unknowns_to_open_items(writing, monkeypatch):

@@ -31,7 +31,10 @@ MAX_KNOWLEDGE_PASSAGES = 40
 _REF_PAGE = r"(?:p\.?[ \t]*)?[0-9]+(?:[ \t]*[-~][ \t]*[0-9]+)?(?:[ \t]*(?:쪽|페이지|p))?"
 _REF_LOC = rf"(?:(?:[ \t]*[:：][ \t]*|[ \t]+(?=p\.?[ \t]*[0-9]))(?:{_REF_PAGE})(?:[ \t]*,[ \t]*{_REF_PAGE})*)?"
 INLINE_REF = re.compile(rf"[ \t]*\[[ \t]*[SKL][0-9]+{_REF_LOC}(?:[ \t]*[,;][ \t]*[SKL][0-9]+{_REF_LOC})*[ \t]*\]")
-_NAMED_INLINE_REFS = re.compile(r"(?i)\bref\s*:\s*[SKL]\d+(?:\s*[,;]\s*(?:ref\s*:\s*)?[SKL]\d+)*|\([SKL]\d+\)")
+_NAMED_INLINE_REFS = re.compile(
+    r"(?i)\bref\s*:\s*[SKL]\d+(?:\s*[,;]\s*(?:ref\s*:\s*)?[SKL]\d+)*"
+    r"|\([SKL]\d+\)|\[근거\s*(?:라벨\s*)?:\s*[SKL]\d+(?:\s*[,;]\s*[SKL]\d+)*\]"
+)
 PASSAGE_CHARS = 1200
 PLACEHOLDER = "[작성 필요]"
 UNIT_REQUIREMENT_CHARS = 8000  # 소목차 하나를 쓰는 요청이 모델 호출 제한을 넘지 않게 한다.
@@ -411,6 +414,16 @@ class AuthoringPipeline:
                     result_data = corrected_data
                     break
         lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
+        if (lacking and template.template_id in {"rfp_response_proposal", "reference_proposal_draft"}
+                and unit["section_key"] == "price" and not section_ids
+                and f"price_schedule: {PLACEHOLDER}" in unresolved_inputs(session["assumptions"])):
+            # 사용자가 가격 입력을 건너뛴 경우에만, 확인할 수 없는 금액이나 산정 근거를 본문에 남기지 않는다.
+            text = f"사업비와 세부 산정 조건: {PLACEHOLDER}"
+            paragraphs = [{"text": text, "refs": [], "origin": "new"}]
+            result_data = {"summary": text}
+            pending = []
+            warnings = Warnings()
+            lacking = False
         compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
         open_items = [text_field(item, 300) for item in result_data.get("open_items", []) if isinstance(item, str) and item.strip()]
         return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(result_data.get("summary"), 300) or "",
