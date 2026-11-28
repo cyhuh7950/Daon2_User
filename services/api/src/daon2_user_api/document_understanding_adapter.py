@@ -42,6 +42,7 @@ _WORD_NUMBERS = dict(zip("one two three four five six seven eight nine ten eleve
 _WORD_QUANTITY = re.compile(
     rf"(?<![a-z0-9_-])(?P<number>{'|'.join(_WORD_NUMBERS)})[ -]+(?P<unit>{_UNIT_PATTERN})(?![a-z])"
 )
+_PHASE_ORDINAL = re.compile(rf"\bphase\s+(?P<number>\d+|{'|'.join(_WORD_NUMBERS)})\b")
 _QUANTITY = re.compile(
     rf"(?<![a-z0-9])(?P<number>\d+(?:[.,]\d+)?)\s*(?P<unit>{_UNIT_PATTERN})(?![a-z])"
 )
@@ -76,6 +77,7 @@ def _evidence_anchors(value: str) -> frozenset[str]:
     remaining = _ISO_DATE.sub(date_anchor, remaining)
     remaining = _KOREAN_DATE.sub(date_anchor, remaining)
     remaining = _WORD_QUANTITY.sub(lambda match: f"{_WORD_NUMBERS[match['number']]} {match['unit']}", remaining)
+    remaining = _PHASE_ORDINAL.sub(lambda match: f"{_WORD_NUMBERS.get(match['number'], match['number'])} phase", remaining)
 
     def identifier_anchor(match: re.Match[str]) -> str:
         token = match.group(0)

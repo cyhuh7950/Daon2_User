@@ -22,6 +22,13 @@ _LABELLED_REQUIREMENT = re.compile(
     r"|과업 목표|필수 범위|검수 기준|납품 일정|납품 산출물|제안서 목차)\s*[:：]\s*(?P<text>.+)$", re.IGNORECASE
 )
 _LIST_LABELS = {"delivery items", "proposal sections", "납품 산출물", "제안서 목차"}
+_SECTION_BY_CATEGORY = {
+    "goal": "understanding", "과업 목표": "understanding", "mandatory scope": "approach", "필수 범위": "approach",
+    "acceptance": "approach", "검수 기준": "approach", "delivery": "schedule", "납품 일정": "schedule",
+    "delivery items": "approach", "납품 산출물": "approach",
+}
+_SECTION_BY_OUTLINE_ITEM = {"approach": "approach", "delivery plan": "schedule", "team assignments": "team", "acceptance": "approach",
+                            "수행 방안": "approach", "추진 일정": "schedule", "투입 조직": "team", "검수 기준": "approach"}
 _SEARCH_SCOPE = re.compile(r"(search by )([^,]+?) and ([^,]+),\s+and\s+(.+)", re.IGNORECASE)
 _ACCEPTANCE_ACTION = re.compile(r"\s+and\s+(?=(?:show|demonstrate|train|verify|test|submit|deliver)\s)", re.IGNORECASE)
 _DELIVERY_WINDOW = re.compile(r"(.+?)\s+((?:in|within)\s+(?:\d+|[a-z]+(?:-[a-z]+)?)\s+(?:business\s+)?(?:days?|weeks?|months?))", re.IGNORECASE)
@@ -48,6 +55,17 @@ def _labelled_items(label: str, value: str) -> list[str]:
         milestones, duration = window.groups()
         return [milestones, f"delivery {duration}"]
     return [value]
+
+
+def assign_requirements_to_plan(requirements: Sequence[Mapping[str, Any]], plan: Sequence[dict[str, Any]]) -> None:
+    if not plan:
+        return
+    sections = {section["key"]: section for section in plan}
+    for req in requirements:
+        label = req.get("category")
+        key = (_SECTION_BY_OUTLINE_ITEM.get(req["text"].strip().casefold()) if label in {"proposal sections", "제안서 목차"}
+               else _SECTION_BY_CATEGORY.get(label))
+        sections.get(key, plan[0])["requirement_ids"].append(req["id"])
 
 
 def rule_candidates(texts: Sequence[tuple[str, str]]) -> list[dict[str, Any]]:

@@ -454,6 +454,29 @@ def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
     assert _evidence_anchors("목록 240건, 표본 30개, 8주, 3단계").issubset(source)
     for wrong in ("목록 241건", "표본 31건", "8개월", "4단계"):
         assert not _evidence_anchors(wrong).issubset(source)
+    phases = _evidence_anchors("Phase one: review data. Phase two: build search. Phase three: train staff.")
+    assert _evidence_anchors("1단계, 2단계, 3단계").issubset(phases)
+    assert not _evidence_anchors("1주, 2주, 3주").issubset(phases)
+
+
+def test_cross_language_rfp_coverage_links_only_quotes_present_in_cited_body():
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+
+    body = "도서관 담당자가 목록을 CSV로 내보내도록 실습을 진행한다."
+    findings = [
+        {"id": "REQ-001", "status": "covered", "section_key": "approach__u1", "quote": body},
+        {"id": "REQ-002", "status": "covered", "section_key": "approach__u1", "quote": "본문에 없는 최종 검수 근거"},
+    ]
+    llm = SimpleNamespace(generate=lambda *_args, **_kwargs: SimpleNamespace(data={"rows": findings}))
+    pipeline = AuthoringPipeline(None, None, llm, None, lambda *_: {})
+    ctx = SimpleNamespace(context=None, cancel_check=lambda: None)
+    session = {"plan": {"sections": [{"key": "approach", "requirement_ids": ["REQ-001", "REQ-002"]}]}, "requirements": [
+        {"id": "REQ-001", "text": "show the library team how to export CSV", "mandatory": True},
+        {"id": "REQ-002", "text": "verify thirty samples", "mandatory": True},
+    ]}
+    rows = pipeline._check_rfp_coverage(ctx, session, [{"key": "approach__u1", "title": "수행 방법",
+                                                       "paragraphs": [{"text": body, "refs": ["S1"]}]}])
+    assert [(row["status"], row["section_key"]) for row in rows] == [("covered", "approach__u1"), ("partial", "approach__u1")]
 
 
 @pytest.mark.parametrize("invalid", ["unknown_selection", "unknown_citation", "verbatim", "unsupported_number"])
