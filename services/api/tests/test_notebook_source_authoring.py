@@ -340,7 +340,7 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
         result = generate(context, prompt, cancel_check)
         if prompt.schema_name == "authoring_unit":
             calls.append(prompt.user)
-            if len(calls) == 2:
+            if len(calls) == 2 or "[근거 검사 후 수정]" in prompt.user:
                 result.data["paragraphs"][0]["text"] = claim
         return result
 
@@ -382,7 +382,53 @@ def test_proposal_grounding_requires_correction_before_resume(writing, monkeypat
     assert final["units"][0] == current["units"][0]
     assert final["units"][1]["paragraphs"] == [{"text": PROPOSAL, "refs": [], "origin": "user"}]
     assert not final["units"][1]["warnings"]
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("template", ["rfp_response_proposal", "reference_proposal_draft"])
+def test_proposal_automatically_repairs_grounding_before_storing_a_unit(writing, monkeypatch, template):
+    client, repo, model, worker = writing
+    generate = model.generate
+    prompts = []
+
+    def generate_with_claim(context, prompt, cancel_check=None):
+        result = generate(context, prompt, cancel_check)
+        if prompt.schema_name == "authoring_unit":
+            prompts.append(prompt.user)
+            if len(prompts) == 1:
+                result.data["paragraphs"][0]["text"] = "현재 장비 999대가 고장 상태이다."
+        return result
+
+    monkeypatch.setattr(model, "generate", generate_with_claim)
+    opened = client.post(PATH, json={"template_id": template}).json()["data"]
+    output = PATH + "/" + opened["output_id"]
+    answers = [{"key": "reference_proposals", "source_version_ids": ["proposal-v1"]}]
+    if template == "rfp_response_proposal":
+        answers.insert(0, {"key": "rfp_document", "source_version_ids": ["rfp-v1"]})
+    else:
+        answers.append({"key": "purpose", "value": "도서관 업무 절차 개선"})
+    assert client.post(output + "/answers", json={"expected_revision": 1, "answers": answers,
+                                                 "skip_remaining": True}).status_code == 202
+    worker._process(repo.jobs.pop())
+    review = client.get(output).json()["data"]
+    assert client.put(output + "/review", json={"expected_revision": review["revision_no"], "confirm": True,
+                                                "plan_sections": review["plan"]["sections"][:1]}).status_code == 202
+    worker._process(repo.jobs.pop())
+    completed = client.get(output).json()["data"]
+    assert completed["state"] == "completed"
+    assert "[근거 검사 후 수정]" in prompts[1]
+    assert "ANCHOR_MISMATCH" in prompts[1]
+    assert "UNSUPPORTED_SOURCE_CLAIM" in prompts[1]
+    assert "999대" not in str(completed["document"])
+
+
+def test_rfp_quantity_anchors_keep_units_when_translating_english_evidence():
+    from daon2_user_api.document_understanding_adapter import _evidence_anchors
+
+    source = _evidence_anchors("Digitize 240 catalogue records. Verify 30 samples. Delivery in eight weeks. Retain the three-phase structure.")
+    assert _evidence_anchors("목록 240건, 표본 30건, 8주, 3단계").issubset(source)
+    for wrong in ("목록 241건", "표본 31건", "8개월", "4단계"):
+        assert not _evidence_anchors(wrong).issubset(source)
 
 
 def test_docx_uses_existing_subsection_for_legacy_coverage():
@@ -558,6 +604,24 @@ def test_terms_review_accepts_only_matching_words_when_the_model_flattens_whites
               "paragraphs": [{"text": original}]}]
     issues = review_terms_body(context, model, changes="인편 전달을 삭제한다.", units=units, context_chars=10000)
     assert issues == [{"unit_key": "payment-1", "quote": original, "reason": "삭제 요청과 충돌"}]
+
+
+def test_terms_review_does_not_require_obsolete_delivery_method_in_the_current_clause():
+    from daon2_user_api.authoring.terms_review import review_terms_body
+
+    current = "제12조 지급 지연 안내\n지급이 늦어지면 이메일로 안내한다."
+    outdated = "제13조 청구 결과\n청구 결과는 인편으로 배달한다."
+    context = SimpleNamespace(context=None, cancel_check=lambda: None)
+    model = SimpleNamespace(generate=lambda *args, **kwargs: SimpleNamespace(data={"issues": [
+        {"unit_key": "payment-1", "quote": current, "reason": "변경 전 방식이 본문에 없어 전후 대조가 어렵습니다.",
+         "kind": "before_value_missing", "previous_text": "우편", "replacement_text": "이메일"},
+        {"unit_key": "payment-1", "quote": outdated, "reason": "삭제 요청한 인편 배달을 본문에 유지했습니다."},
+    ]}))
+    unit = {"key": "payment-1", "section_title": "제3장 보험금의 지급", "title": "지급",
+            "paragraphs": [{"text": current}, {"text": outdated}]}
+    findings = review_terms_body(context, model, changes="우편 대신 이메일로 안내하고 인편 배달은 삭제한다.",
+                                 units=[unit], context_chars=10000)
+    assert [issue["quote"] for issue in findings] == [outdated]
 
 
 def test_terms_body_review_retries_saved_text_when_verifier_unavailable(writing):

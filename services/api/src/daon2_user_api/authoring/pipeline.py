@@ -319,8 +319,11 @@ class AuthoringPipeline:
         terms = ", ".join(dict.fromkeys(term for other in done for term in other.get("terms", []))) or "없음"
         system = f"{UNIT_SYSTEM}\n{TERMS_BODY_RULES}" if template.style == "terms" else UNIT_SYSTEM
         if template.style == "proposal":
-            system += ("\n현행·현재 상황이나 발주 배경을 사실로 쓸 때는 인용 근거나 사용자 입력의 문장을 인용합니다. "
-                       "새 제안은 제안이나 계획임을 별도 문장에 밝힙니다.")
+            system += ("\n현재 운영 상태, 문제점, 발주 동기는 원문에 명시돼 있을 때만 원문 그대로 인용합니다. "
+                       "원문에 목표만 있으면 '제안요청서는 …을 요구한다' 또는 '이 제안의 목표는 …이다'라고 씁니다. "
+                       "새 실행 방법은 관찰 사실과 섞지 말고 별도 문장에 제안임을 밝힙니다. "
+                       "수치와 단위는 참조한 구간에서 직접 확인되는 것만 쓰고, 자료별 사실을 한 문단에 섞으면 각 자료의 라벨을 모두 붙입니다. "
+                       "표나 목차의 순번을 사실 수치처럼 본문에 반복하지 말고, 미결 입력은 open_items에 남깁니다.")
         correction = ""
         if repair_issue is not None:
             correction = (
@@ -345,10 +348,40 @@ class AuthoringPipeline:
                     generation = again
             except (StudioError, ValueError, KeyError, TypeError):
                 pass
+        paragraphs, warnings = self._checked_unit_paragraphs(generation.data, template, unit, pack, material, inputs)
+        if template.style == "proposal" and warnings.items:
+            correction_prompt = replace(prompt, user=(
+                f"{prompt.user}\n\n[근거 검사 후 수정]\n"
+                "아래 첫 응답은 검사 자료입니다. 경고가 걸린 문단만 고치고 확인된 문단과 미결 항목은 유지하세요. "
+                "근거에서 확인되지 않는 현황·수치·단위는 문장에서 빼세요. "
+                "목표와 요구사항은 출처를 주어로 삼고 확인되는 내용만 짧게 쓰세요. "
+                "필요한 근거 라벨이 다른 문단에만 있다면 해당 문단의 refs에도 붙이세요. 전체 JSON을 반환하세요.\n"
+                + json.dumps({"warnings": warnings.items, "previous": generation.data}, ensure_ascii=False)
+            ))
+            try:
+                corrected = self._llm.generate(ctx.context, correction_prompt, cancel_check=ctx.cancel_check)
+                corrected_paragraphs, corrected_warnings = self._checked_unit_paragraphs(
+                    corrected.data, template, unit, pack, material, inputs)
+                if not corrected_warnings.items and not any(NO_MATERIAL in p["text"] for p in corrected_paragraphs):
+                    generation, paragraphs, warnings = corrected, corrected_paragraphs, corrected_warnings
+            except StudioError:
+                pass  # 검사에 걸린 첫 응답을 사용자 검토용으로 보존한다.
+        lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
+        compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
+        return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
+                "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
+                "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
+                "warnings": list(warnings.items), "error_code": None, **({"reference_refs": compared} if reference_pack is not None else {}),
+                "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
+
+    @staticmethod
+    def _checked_unit_paragraphs(data: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any],
+                                 pack: ContextPack, material: Sequence[Mapping[str, Any]],
+                                 inputs: Mapping[str, str]) -> tuple[list[dict[str, Any]], Warnings]:
         known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
         warnings = Warnings()
         paragraphs: list[dict[str, Any]] = []
-        for para in generation.data.get("paragraphs", [])[:12]:
+        for para in data.get("paragraphs", [])[:12]:
             text = text_field(para.get("text"), 2500) if isinstance(para, Mapping) else ""
             if not text:
                 continue
@@ -374,13 +407,7 @@ class AuthoringPipeline:
             paragraphs.append({"text": text, "refs": refs, "origin": "sourced" if refs else "new"})
         if not paragraphs:
             raise StudioError("STUDIO_VALIDATION_FAILED", 502)
-        lacking = warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)
-        compared = reference_refs if any(set(p["refs"]).intersection(reference_refs) for p in paragraphs) else []
-        return {"status": "needs_review" if lacking else "done", "paragraphs": paragraphs, "summary": text_field(generation.data.get("summary"), 300) or "",
-                "terms": [text_field(t, 60) for t in generation.data.get("terms", []) if isinstance(t, str) and t.strip()][:20],
-                "open_items": [text_field(i, 300) for i in generation.data.get("open_items", []) if isinstance(i, str) and i.strip()][:10],
-                "warnings": list(warnings.items), "error_code": None, **({"reference_refs": compared} if reference_pack is not None else {}),
-                "provider": (getattr(generation, "provider_code", ""), getattr(generation, "model_id", ""), getattr(generation, "connection_short_code", ""))}
+        return paragraphs, warnings
 
     @staticmethod
     def _written_chars(data: Mapping[str, Any]) -> int:

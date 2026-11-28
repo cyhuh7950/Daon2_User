@@ -25,15 +25,23 @@ _KOREAN_DATE = re.compile(r"(?<!\d)(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s
 _IDENTIFIER = re.compile(r"(?<![a-z0-9])[a-z0-9]+(?:[-_.:/][a-z0-9]+)*(?![a-z0-9])")
 _UNIT_KIND = {
     "day": "day", "days": "day", "일": "day",
+    "week": "week", "weeks": "week", "주": "week",
     "month": "month", "months": "month", "개월": "month",
     "year": "year", "years": "year", "년": "year",
     "hour": "hour", "hours": "hour", "시간": "hour",
     "minute": "minute", "minutes": "minute", "분": "minute",
     "second": "second", "seconds": "second", "초": "second",
     "item": "item", "items": "item", "건": "item",
+    "catalogue record": "item", "catalogue records": "item", "catalog record": "item", "catalog records": "item",
+    "sample": "item", "samples": "item",
+    "phase": "phase", "phases": "phase", "단계": "phase",
     "%": "percent", "percent": "percent", "퍼센트": "percent",
 }
 _UNIT_PATTERN = "|".join(sorted((re.escape(unit) for unit in _UNIT_KIND), key=len, reverse=True))
+_WORD_NUMBERS = dict(zip("one two three four five six seven eight nine ten eleven twelve".split(), range(1, 13)))
+_WORD_QUANTITY = re.compile(
+    rf"(?<![a-z0-9_-])(?P<number>{'|'.join(_WORD_NUMBERS)})[ -]+(?P<unit>{_UNIT_PATTERN})(?![a-z])"
+)
 _QUANTITY = re.compile(
     rf"(?<![a-z0-9])(?P<number>\d+(?:[.,]\d+)?)\s*(?P<unit>{_UNIT_PATTERN})(?![a-z])"
 )
@@ -67,6 +75,7 @@ def _evidence_anchors(value: str) -> frozenset[str]:
 
     remaining = _ISO_DATE.sub(date_anchor, remaining)
     remaining = _KOREAN_DATE.sub(date_anchor, remaining)
+    remaining = _WORD_QUANTITY.sub(lambda match: f"{_WORD_NUMBERS[match['number']]} {match['unit']}", remaining)
 
     def identifier_anchor(match: re.Match[str]) -> str:
         token = match.group(0)
