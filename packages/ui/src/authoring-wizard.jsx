@@ -199,7 +199,14 @@ function Result({ document, formats = ["docx", "pptx"], onDownload, onOpenEviden
     {tab === "law" && (lawCheck?.rows?.length ? <div><p role="note">{lawCheck.notice}</p><table className="studio-table"><thead><tr><th>{msg("authoring.law.col.clause")}</th><th>{msg("authoring.law.col.law")}</th><th>{msg("authoring.law.col.judgement")}</th><th>{msg("authoring.law.col.memo")}</th></tr></thead>
       <tbody>{lawCheck.rows.map((r, i) => <tr key={i}><td>{r.section_title}</td><td>{r.law}</td><td>{RELATION_LABEL[r.relation] ?? r.relation}</td><td>{r.note}</td></tr>)}</tbody></table></div>
       : <p>{msg("authoring.law.none", { reason: lawCheck?.reason ? `(${lawCheck.reason})` : "" })}</p>)}
-    {tab === "coverage" && <table className="studio-table"><thead><tr><th>ID</th><th>{msg("authoring.review.col.requirement")}</th><th>{msg("authoring.coverage.col.state")}</th></tr></thead><tbody>{document.coverage.map((c) => <tr key={c.requirement_id}><td>{c.requirement_id}</td><td>{c.text}</td><td>{STATUS_LABEL[c.status]}</td></tr>)}</tbody></table>}
+    {tab === "coverage" && <table className="studio-table">
+      <thead><tr><th>ID</th><th>{msg("authoring.review.col.requirement")}</th><th>{msg("authoring.coverage.col.section")}</th><th>{msg("authoring.coverage.col.state")}</th></tr></thead>
+      <tbody>{document.coverage.map((c) => <tr key={c.requirement_id}>
+        <td>{c.requirement_id}</td><td>{c.text}</td>
+        <td>{document.sections.find((section) => section.key === c.section_key)?.title || "-"}</td>
+        <td>{STATUS_LABEL[c.status]}</td>
+      </tr>)}</tbody>
+    </table>}
     {tab === "checks" && document.checks.map((c) => <section key={c.id}><h3>{c.title}</h3>{c.status === "skipped" ? <p>{msg("authoring.check.skipped", { reason: c.reason })}</p>
       : c.results ? <ul>{c.results.map((r) => <li key={r.rule_id}>{r.status === "pass" ? msg("authoring.rule.pass") : r.status === "fail" ? msg("authoring.rule.fail") : msg("authoring.rule.review")} — {r.message}</li>)}</ul>
         : c.id === "evidence_integrity" ? <><p>{msg("authoring.check.evidence", { verified: c.summary?.verified ?? 0, unverified: c.summary?.unverified ?? 0 })}</p>{(c.items ?? []).length > 0 && <ul>{c.items.map((item, i) => <li key={i}><span className="studio-badge">{msg("authoring.badge.unverified")}</span> {item.section_title} — {item.text}</li>)}</ul>}</>
@@ -207,7 +214,12 @@ function Result({ document, formats = ["docx", "pptx"], onDownload, onOpenEviden
         : c.id === "terms_change_summary" ? <p>{msg("authoring.check.change_summary", { unchanged: c.summary?.unchanged ?? 0, modified: c.summary?.modified ?? 0, new: c.summary?.new ?? 0, delete_suggested: c.summary?.delete_suggested ?? 0 })}</p>
         : c.id === "law_crosscheck" ? <p>{msg("authoring.check.law_summary", { related: c.summary?.related ?? 0, conflict: c.summary?.possible_conflict ?? 0 })} <small>{msg("authoring.check.law_hint")}</small></p>
         : <p>{msg("authoring.check.coverage_summary", { covered: c.summary?.covered ?? 0, partial: c.summary?.partial ?? 0, missing: c.summary?.missing ?? 0 })}</p>}</section>)}
-    {tab === "open" && <ul>{document.open_items.map((o, i) => <li key={i}>{o}</li>)}</ul>}
+    {tab === "open" && <ul>
+      {(document.assumptions ?? []).filter((item) => item.default !== "[작성 필요]").map((item) => <li key={item.key}>
+        {item.key}: {item.reason} → {item.default}
+      </li>)}
+      {document.open_items.length ? document.open_items.map((item) => <li key={item}>{item}</li>) : <li>{msg("authoring.open.empty")}</li>}
+    </ul>}
     <div className="studio-row">{[...formats.filter((f) => f !== "pdf"), "pdf"].map((f) => <button key={f} type="button" className="studio-btn" onClick={() => onDownload(f)}>{msg("authoring.download", { format: f.toUpperCase() })}</button>)}</div>
   </div>;
 }

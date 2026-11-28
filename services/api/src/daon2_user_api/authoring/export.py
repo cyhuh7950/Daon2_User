@@ -26,10 +26,26 @@ def document_of(output: Mapping[str, Any]) -> Mapping[str, Any]:
     return document
 
 
+def result_document(doc: Mapping[str, Any]) -> dict[str, Any]:
+    """이전 리비전을 다시 저장하지 않고 결과 화면과 내보내기에 같은 값을 제공한다."""
+    sections = doc.get("sections") or []
+    keys = {section["key"] for section in sections}
+    coverage = []
+    for row in doc.get("coverage") or []:
+        key = row.get("section_key")
+        if key and key not in keys:
+            subsection = best_subsection(row["text"], matching_sections(key, sections))
+            key = subsection["key"] if subsection else None
+        coverage.append({**row, "section_key": key})
+    pending = unresolved_inputs(doc.get("assumptions") or [])
+    return {**doc, "coverage": coverage, "open_items": list(dict.fromkeys([*(doc.get("open_items") or []), *pending]))}
+
+
 def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
     doc = document_of(output)
     if not doc:
         return [("title", str(output.get("title", ""))), ("p", "아직 작성이 끝나지 않은 문서입니다.", [])]
+    doc = result_document(doc)
     notice = str(doc.get("notice") or NOTICE)
     els: list[tuple] = [("title", str(doc["title"])), ("p", notice, []), ("pagebreak",), ("h1", "목차")]
     els += [("p", f"{section['title']}", []) for section in doc["sections"]]
@@ -49,13 +65,8 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
         # 부록 A: 요구사항 대응표
         els += [("pagebreak",), ("h1", "부록 A. 요구사항 대응표")]
         rows = [["ID", "요구사항", "대응 섹션", "상태"]]
-        for row in doc.get("coverage", []):
-            key = row.get("section_key")
-            title = titles.get(key)
-            if title is None and key:
-                subsection = best_subsection(row["text"], matching_sections(key, doc["sections"]))
-                title = subsection["title"] if subsection else None
-            rows.append([row["requirement_id"], row["text"], title or "-", STATUS_LABEL.get(row["status"], row["status"])])
+        for row in doc["coverage"]:
+            rows.append([row["requirement_id"], row["text"], titles.get(row["section_key"]) or "-", STATUS_LABEL.get(row["status"], row["status"])])
         els.append(("table", rows))
     else:
         els.append(("pagebreak",))
@@ -88,10 +99,10 @@ def authored_elements(output: Mapping[str, Any]) -> list[tuple]:
         els += [("pagebreak",), ("h1", "부록 B. 근거 목록"), ("table", [["번호", "출처", "위치"], *[[f"[{e['ref_id']}]", str(e.get("source_name") or e.get("origin") or ""), _where(e)] for e in output["evidence"]]])]
     # 부록 C: 가정·미결 항목
     els += [("pagebreak",), ("h1", "부록 C. 가정과 미결 항목")]
-    if doc.get("assumptions"):
-        els.append(("bullets", [f"{a['key']}: {a['reason']} → {a['default']}" for a in doc["assumptions"]], []))
-    pending = list(dict.fromkeys([*(doc.get("open_items") or []), *unresolved_inputs(doc.get("assumptions") or [])]))
-    els.append(("bullets", pending or ["미결 항목 없음"], []))
+    assumptions = [f"{a['key']}: {a['reason']} → {a['default']}" for a in doc.get("assumptions") or [] if a["default"] != "[작성 필요]"]
+    if assumptions:
+        els.append(("bullets", assumptions, []))
+    els.append(("bullets", doc["open_items"] or ["미결 항목 없음"], []))
     return els
 
 

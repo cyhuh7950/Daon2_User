@@ -16,7 +16,7 @@ from daon2_user_api import runtime
 from daon2_user_api.authoring import session
 from daon2_user_api.authoring.export import authored_elements
 from daon2_user_api.authoring.pipeline import AuthoringPipeline
-from daon2_user_api.authoring.service import AuthoringGenerator, AuthoringService
+from daon2_user_api.authoring.service import AuthoringGenerator, AuthoringService, _view
 from daon2_user_api.authoring.templates import AuthoringError, TemplateRegistry
 from daon2_user_api.studio_context_builder import build_pack
 from daon2_user_api.studio_source_reader import SourceSection, SourceText, StudioSourceReader
@@ -396,8 +396,16 @@ def test_docx_uses_existing_subsection_for_legacy_coverage():
     output = {"type_id": "authored_document", "output_id": "fixture", "title": doc["title"], "revision": {"content": {"document": doc}}}
     table = next(entry[1] for entry in authored_elements(output) if entry[0] == "table")
     assert table[1][2] == "검수 일정"
+    view = _view({"document": doc}, 37, "completed")["document"]
+    assert view["coverage"][0]["section_key"] == "schedule__u2"
+    assert doc["coverage"][0]["section_key"] == "schedule"
     with ZipFile(io.BytesIO(export_v2("docx", output).content)) as archive:
-        assert "검수 일정</w:t>" in archive.read("word/document.xml").decode()
+        body = archive.read("word/document.xml").decode()
+    assert "검수 일정</w:t>" in body
+    assert "<w:tblHeader/>" in body
+    assert "<w:cantSplit/>" in body
+    assert "<w:pageBreakBefore/>" in body
+    assert '<w:br w:type="page"/>' not in body
 
 
 @pytest.mark.parametrize(("analysis", "key"), [("rfp_requirements", "proposer_profile"), ("base_document", "price_schedule")])
@@ -408,7 +416,11 @@ def test_legacy_proposal_docx_keeps_skipped_inputs_open(analysis, key):
     with ZipFile(io.BytesIO(export_v2("docx", output).content)) as archive:
         body = archive.read("word/document.xml").decode()
     assert f"{key}: [작성 필요]" in body
+    assert body.count(f"{key}:") == 1
     assert "미결 항목 없음" not in body
+    view = _view({"document": doc}, 37, "completed")["document"]
+    assert view["open_items"] == [f"{key}: [작성 필요]"]
+    assert doc["open_items"] == []
 
 
 def _generate_payment_terms(writing):

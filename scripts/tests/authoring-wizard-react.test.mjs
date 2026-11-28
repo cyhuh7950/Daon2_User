@@ -21,7 +21,7 @@ const base = { output_id: OID, template_id: "rfp_response_proposal", request_tex
   error_code: null, document: null, knowledge_count: 0, job_status: "completed", revision_no: 1 };
 const REQUIRED = [{ key: "rfp_document", question: "제안요청서(RFP)로 사용할 소스를 선택해 주세요.", kind: "source_ref", required: true, choices: [] }];
 const DOCUMENT = { notice: "AI 작성 초안, 전문가 검토 필요", sections: [{ key: "a", title: "1. 사업의 이해", paragraphs: [{ text: "근거 있는 문장. 가격은 [작성 필요]", refs: ["S1"], origin: "sourced" }, { text: "새 문장", refs: [], origin: "new" }], open_items: [] }],
-  coverage: [{ requirement_id: "REQ-001", text: "다중 인증 지원", status: "covered" }, { requirement_id: "REQ-002", text: "암호화", status: "missing" }],
+  coverage: [{ requirement_id: "REQ-001", text: "다중 인증 지원", status: "covered", section_key: "a" }, { requirement_id: "REQ-002", text: "암호화", status: "missing" }],
   checks: [{ id: "rfp_requirement_coverage", title: "요구사항 대응표", status: "done", summary: { covered: 1, partial: 0, missing: 1 } },
     { id: "proposal_required_sections", title: "제안서 필수 섹션 점검", status: "done", results: [{ rule_id: "r1", status: "pass", message: "확인" }] }], open_items: ["price_schedule: [작성 필요]"] };
 
@@ -186,6 +186,8 @@ test("완료 화면은 고지 문구·탭·[작성 필요] 강조·다운로드�
     assert.ok(findElements(view.container, (n) => n.tagName === "MARK" && n.textContent === "[작성 필요]").length === 1);
     await view.click(buttonByText(view.container, "요구사항 대응표"));
     assert.ok(text(view).includes("누락"));
+    assert.ok(text(view).includes("대응 섹션"));
+    assert.ok(text(view).includes("1. 사업의 이해"));
     await view.click(buttonByText(view.container, "점검"));
     assert.ok(text(view).includes("통과 — 확인"));
     await view.click(buttonByText(view.container, "가정·미결"));
