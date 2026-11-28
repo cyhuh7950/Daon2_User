@@ -53,6 +53,9 @@ _REFERENCE_PARTY = re.compile(
     r"\s*[:：]\s*[^\n.!?]+"
 )
 _REFERENCE_FIXTURE_NOTICE = re.compile(r"(?im)^\s*synthetic (?:fixture|test data|sample) only[^\n]*")
+_RFP_SOURCE = re.compile(r"제안\s*요청서|(?<![a-z0-9])RFP(?![a-z0-9])|발주처", re.IGNORECASE)
+_RFP_OBLIGATION = re.compile(r"요구|필수|의무|명시|must|required|requires?", re.IGNORECASE)
+_WEEKLY_DEMO = re.compile(r"(?:주간|매주|주 단위|주별)\s*(?:기능\s*)?시연|weekly\s+(?:demos?|demonstrations?)", re.IGNORECASE)
 
 PLAN_SCHEMA = {"type": "object", "properties": {"sections": {"type": "array", "items": {"type": "object", "properties": {
     "key": {"type": "string"}, "purpose": {"type": "string"}, "knowledge_refs": {"type": "array", "items": {"type": "string"}},
@@ -326,6 +329,7 @@ class AuthoringPipeline:
             material = self._gather_unit(ctx, unit, knowledge)
         reference_role = ""
         reference_refs: list[str] = []
+        rfp_passages = pack.passages if template.analysis == "rfp_requirements" else ()
         if reference_pack is not None:
             refs = reference_pack.passages
             if unit.get("material_approved"):
@@ -359,6 +363,9 @@ class AuthoringPipeline:
             if template.analysis != "rfp_requirements":
                 system += ("\n이 경로에는 제안요청서가 없습니다. 기존 제안서에서 순서만 확인되는 경우 예정된 순서를 설명하고, "
                            "출처나 사용자 입력에 없는 전체 기간 및 착수일·완료일은 미결로 남기세요.")
+            elif reference_refs:
+                system += ("\nRFP 요구사항은 RFP 구간에서 확인된 내용으로만 표현하세요. 참고 제안서의 운영 방법을 채택할 때는 "
+                           "별도 문장에서 제안하는 방법임을 밝히고 참고 제안서 근거를 붙이세요.")
         correction = ""
         if repair_issue is not None:
             correction = (
@@ -384,14 +391,16 @@ class AuthoringPipeline:
             except (StudioError, ValueError, KeyError, TypeError):
                 pass
         result_data = generation.data
-        paragraphs, warnings, pending = self._checked_unit_paragraphs(result_data, template, unit, pack, material, inputs)
+        paragraphs, warnings, pending = self._checked_unit_paragraphs(
+            result_data, template, unit, pack, material, inputs, rfp_passages=rfp_passages)
         if template.style == "proposal" and (warnings.items or any(NO_MATERIAL in p["text"] for p in paragraphs)):
             repair = (
                 "[근거 검사 후 수정]\n"
                 "아래 첫 응답은 검사 자료입니다. 경고가 걸린 문단만 고치고 확인된 문단과 미결 항목은 유지하세요. "
                 "근거에서 확인되지 않는 현황·수치·단위는 문장에서 빼세요. "
                 "목표와 요구사항은 출처를 주어로 삼고 확인되는 내용만 짧게 쓰세요. "
-                "필요한 근거 라벨이 다른 문단에만 있다면 해당 문단의 refs에도 붙이세요. 소목차 번호와 내부 식별자는 빼세요. "
+                + ("RFP에 없는 주간 시연은 RFP의 의무가 아닙니다. 참고 자료에서 채택하는 방법으로 따로 적으세요. " if rfp_passages else "")
+                + "필요한 근거 라벨이 다른 문단에만 있다면 해당 문단의 refs에도 붙이세요. 소목차 번호와 내부 식별자는 빼세요. "
                 "미결 항목은 open_items에 두고, 각 본문 문단에는 참조한 근거 라벨을 넣으세요. 전체 JSON을 반환하세요.\n"
                 + json.dumps({"warnings": warnings.items, "previous": generation.data}, ensure_ascii=False)
             )
@@ -431,7 +440,7 @@ class AuthoringPipeline:
                                 raise
                             corrected, corrected_data = self._compose_proposal_from_excerpts(ctx, unit, selected, concise=True)
                     corrected_paragraphs, corrected_warnings, corrected_pending = self._checked_unit_paragraphs(
-                        corrected_data, template, unit, pack, material, inputs)
+                        corrected_data, template, unit, pack, material, inputs, rfp_passages=rfp_passages)
                 except StudioError:
                     continue
                 if not corrected_warnings.items and not any(NO_MATERIAL in p["text"] for p in corrected_paragraphs):
@@ -513,7 +522,8 @@ class AuthoringPipeline:
     @staticmethod
     def _checked_unit_paragraphs(data: Mapping[str, Any], template: AuthoringTemplate, unit: Mapping[str, Any],
                                  pack: ContextPack, material: Sequence[Mapping[str, Any]],
-                                 inputs: Mapping[str, str]) -> tuple[list[dict[str, Any]], Warnings, list[str]]:
+                                 inputs: Mapping[str, str], *,
+                                 rfp_passages: Sequence[Passage] = ()) -> tuple[list[dict[str, Any]], Warnings, list[str]]:
         known_refs = {p.ref for p in pack.passages} | {row["ref"] for row in material}
         warnings = Warnings()
         paragraphs: list[dict[str, Any]] = []
@@ -550,6 +560,10 @@ class AuthoringPipeline:
                 evidence_texts.extend(p.text for p in evidence_pack.passages)
             if template.style == "proposal":
                 _check_current_facts(text, evidence_texts, warnings, path)
+                if (rfp_passages and not any(_WEEKLY_DEMO.search(p.text) for p in rfp_passages if p.ref in refs)
+                        and any(_WEEKLY_DEMO.search(sentence) and _RFP_SOURCE.search(sentence) and _RFP_OBLIGATION.search(sentence)
+                                for sentence in split_sentences(text))):
+                    warnings.add("UNSUPPORTED_SOURCE_CLAIM", path)
             if not refs and NO_MATERIAL not in text:
                 text = f"{text} {NO_MATERIAL}"  # 근거 없는 문단은 제품이 표시한다(4.4).
             paragraphs.append({"text": text, "refs": refs, "origin": "sourced" if refs else "new"})

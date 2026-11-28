@@ -559,6 +559,24 @@ def test_proposal_grounding_recognizes_model_written_inline_reference_spellings(
     assert [(p["text"], p["refs"]) for p in paragraphs] == [(PROPOSAL, ["S1", "S2"]), (RFP, ["S2"]), (RFP, ["S2"])]
 
 
+@pytest.mark.parametrize(("rfp_text", "text", "refs", "rejected"), [
+    ("Delivery in eight weeks.", "RFP는 주간 시연을 포함한 8주 일정을 요구한다.", ["S1", "S2"], True),
+    ("Delivery in eight weeks.", "참고 제안서의 방법을 채택해 주간 시연을 진행한다.", ["S2"], False),
+    ("Delivery in eight weeks. Weekly demonstrations required.", "RFP는 8주 동안 주간 시연을 요구한다.", ["S1"], False),
+])
+def test_rfp_does_not_turn_reference_demonstrations_into_rfp_requirements(rfp_text, text, refs, rejected):
+    from daon2_user_api.authoring.pipeline import AuthoringPipeline
+    from daon2_user_api.studio_context_builder import ContextPack, Passage
+
+    rfp = Passage("S1", "1", "1", "rfp", None, "page", "1", None, rfp_text)
+    reference = Passage("S2", "2", "2", "proposal", None, "page", "1", None, "Example plan: weekly demonstrations.")
+    template = TemplateRegistry().get("rfp_response_proposal")
+    _, warnings, _ = AuthoringPipeline._checked_unit_paragraphs(
+        {"paragraphs": [{"text": text, "refs": refs}]}, template, {"key": "schedule", "title": "추진 일정"},
+        ContextPack((rfp, reference), False, 2), [], {}, rfp_passages=(rfp,))
+    assert any(w["code"] == "UNSUPPORTED_SOURCE_CLAIM" for w in warnings.items) is rejected
+
+
 def test_skipped_proposal_price_remains_open_when_automatic_grounding_fails(writing, monkeypatch):
     client, repo, model, worker = writing
     generate = model.generate
